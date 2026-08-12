@@ -1,11 +1,7 @@
-# glibc base (Debian) — NOT alpine/musl. headroom-ai is a maturin (Rust) package and
-# only ships glibc `manylinux` wheels on PyPI; on musl pip would fall back to building
-# from Rust source. node:20-bookworm-slim gives us prebuilt wheels for headroom-ai +
-# tiktoken with no toolchain, and Claude Code (the npm package) too.
 FROM node:20-bookworm-slim
 
-# Install automation dependencies and system utilities. github-cli and docker-cli live
-# in their own apt repos, added below; everything else is in Debian main.
+# Install automation dependencies and system utilities. Anything a single plugin owns is
+# installed by that plugin's install.sh instead (see the plugin build stage below).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
@@ -19,35 +15,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# GitHub CLI (gh) — used by the agent to authenticate git and drive GitHub workflows.
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-        | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-        > /etc/apt/sources.list.d/github-cli.list \
-    && apt-get update && apt-get install -y --no-install-recommends gh \
-    && rm -rf /var/lib/apt/lists/*
-
-# Docker CLI + compose plugin (client only — the daemon, if any, is the host's, reached via a
-# mounted socket). From Docker's official apt repo.
-RUN install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL https://download.docker.com/linux/debian/gpg \
-        -o /etc/apt/keyrings/docker.asc \
-    && chmod a+r /etc/apt/keyrings/docker.asc \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" \
-        > /etc/apt/sources.list.d/docker.list \
-    && apt-get update && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
-    && rm -rf /var/lib/apt/lists/*
-
-# Headroom compression proxy, driven by the `headroom` plugin (which wraps the Claude launch
-# command when enabled). Installed into an isolated venv so it can't perturb system Python;
-# [proxy] pulls the FastAPI/uvicorn server + core compressors (no torch/ML — too heavy for the
-# sandbox, and the JSON/AST compressors deliver most of the savings).
-RUN python3 -m venv /opt/headroom \
-    && /opt/headroom/bin/pip install --no-cache-dir --upgrade pip \
-    && /opt/headroom/bin/pip install --no-cache-dir "headroom-ai[proxy,mcp]"
-ENV PATH="/opt/headroom/bin:${PATH}"
-
 # Globally install Claude Code. The agent runs as the unprivileged 'node' user,
 # but the global npm prefix is root-owned, so the in-process auto-updater can't
 # write there ("no write permission to npm prefix"). Disable it — the version is
@@ -58,11 +25,23 @@ RUN npm install -g @anthropic-ai/claude-code
 # Set up the workspace directory
 WORKDIR /workspace
 
-# Plugins. Every plugin ships in the image; ENABLE_<NAME> flags decide at container start which
-# ones actually run (see run.sh), so changing the mix needs no rebuild. Permissions follow a
+# Plugins. Every plugin's files ship in the image; ENABLE_<NAME> flags decide which ones actually
+# run (see run.sh) and which ones get their dependencies installed below. Permissions follow a
 # convention: bin/ is world-executable (hooks run as the agent), root/ is root-only (secrets),
 # and everything lands root-owned outside /workspace so the agent cannot edit its own guardrails.
 COPY plugins /opt/plugins
+# Only the plugins listed in ENABLED_PLUGINS get their dependencies installed, so a disabled
+# plugin's binaries stay out of the image. Flipping ENABLE_<NAME> therefore needs a rebuild;
+# run.sh passes the resolved list as a build arg. Empty means "install everything".
+ARG ENABLED_PLUGINS=
+RUN set -eu; for f in /opt/plugins/*/install.sh; do \
+      [ -f "$f" ] || continue; \
+      name=$(basename "$(dirname "$f")"); \
+      if [ -n "$ENABLED_PLUGINS" ]; then \
+        case " $ENABLED_PLUGINS " in *" $name "*) ;; *) echo "⏭️  $name (disabled)"; continue ;; esac; \
+      fi; \
+      echo "📦 $f"; sh "$f"; \
+    done
 RUN chown -R root:root /opt/plugins \
     && find /opt/plugins -type d -exec chmod 555 {} + \
     && find /opt/plugins -type f -exec chmod 444 {} + \

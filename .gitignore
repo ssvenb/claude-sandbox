@@ -2,3 +2,4 @@
 *.pem
 __pycache__/
 *.pyc
+claude-agent.private-key.pem

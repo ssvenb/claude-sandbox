@@ -27,15 +27,16 @@ run.sh (host)
 
 ## Plugins
 
-All plugins ship in the image; `ENABLE_<NAME>` flags in `.env` decide at container start which run, so changing the mix needs no rebuild. Flag names uppercase the directory name (`github-auth` → `ENABLE_GITHUB_AUTH`); an unset flag falls back to the manifest's `defaultEnabled`.
+All plugins ship in the image; `ENABLE_<NAME>` flags in `.env` decide which run. `run.sh` passes the resolved set to `docker build` as the `ENABLED_PLUGINS` build arg, so only enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay out of the image — changing the mix means the next `./run.sh` rebuilds those layers. Flag names uppercase the directory name (`github-auth` → `ENABLE_GITHUB_AUTH`); an unset flag falls back to the manifest's `defaultEnabled`.
 
 | Plugin | Provides | Requires | Owns |
 |--------|----------|----------|------|
-| `github-auth` | `git-credentials` | — | App token minting + 40-min refresh loop, `gh auth login` |
+| `github-auth` | `git-credentials` | — | `gh` CLI install, App token minting + 40-min refresh loop, `gh auth login` |
 | `git-workspace` | `workspace` | `git-credentials` | clone into `/workspace`, per-run branch, resume briefing |
 | `branch-guard` | — | `workspace` | `guard-branch.py` PreToolUse hook |
 | `headroom` | `llm-proxy` | — | wraps the launch command in the headroom compression proxy (`headroom-ai[proxy,mcp]`, installed in `/opt/headroom`) |
 | `claude-home` | `claude-home` | — | mounts the host's `~/.claude` (or `$CLAUDE_HOME_DIR`) at `/home/node/.claude` |
+| `docker-cli` | `docker-cli` | — | Docker CLI + compose plugin install; mounts the host's `/var/run/docker.sock` |
 
 Disable them all and the agent starts plain `claude` in an empty `/workspace` with no GitHub access.
 
@@ -46,7 +47,8 @@ Disable them all and the agent starts plain `claude` in an empty `/workspace` wi
 | Path | Runs as | Purpose |
 |------|---------|---------|
 | `plugin.json` | — | manifest: `priority`, `defaultEnabled`, `provides`, `requires`, `requiredEnv`, `secrets` |
-| `host.sh` | you, on the host | validate config; call `pass_env VAR` / `pass_value NAME VALUE` / `pass_mount HOST_PATH CONTAINER_PATH [OPTS]` to add `docker run` args |
+| `install.sh` | root, at image build | install the plugin's dependencies (e.g. `gh`); runs only when the plugin is enabled |
+| `host.sh` | you, on the host | validate config; call `pass_env VAR` / `pass_value NAME VALUE` / `pass_mount HOST_PATH CONTAINER_PATH [OPTS]` to add `docker run` args; set `CLAUDE_AUTH_PROVIDED=1` if the plugin supplies Claude credentials itself |
 | `root-init.sh` | root, in container | anything needing secrets; exports survive the `su -m node` handoff |
 | `agent-init.sh` | `node`, in container | agent-visible setup; append to `$AGENT_PROMPT_FILE` to brief the agent |
 | `settings.json` | — | fragment merged into the managed policy (objects merge, lists concatenate) |
@@ -69,8 +71,8 @@ All env variables must have an example in `.env.example`. Configuration lives in
 
 | Variable | Owner | Purpose |
 |----------|-------|---------|
-| `CLAUDE_CODE_OAUTH_TOKEN` | core | Claude Code OAuth token for API auth |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_HEADROOM` / `ENABLE_CLAUDE_HOME` | core | plugin switches (default on) |
+| `CLAUDE_CODE_OAUTH_TOKEN` | core | Claude Code OAuth token for API auth (required unless a plugin sets `CLAUDE_AUTH_PROVIDED=1`, as `claude-home` does) |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_HEADROOM` / `ENABLE_CLAUDE_HOME` / `ENABLE_DOCKER_CLI` | core | plugin switches (default on) |
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Path to App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default: `github.com`) |

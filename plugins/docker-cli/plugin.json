@@ -1,0 +1,10 @@
+{
+  "name": "docker-cli",
+  "description": "Docker CLI + compose plugin, so the agent can drive a Docker daemon (the host's, via a socket mounted onto the container).",
+  "priority": 5,
+  "defaultEnabled": true,
+  "provides": ["docker-cli"],
+  "requires": [],
+  "requiredEnv": [],
+  "secrets": []
+}

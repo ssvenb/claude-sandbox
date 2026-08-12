@@ -3,7 +3,7 @@
 # credentials stay; the container only ever receives what the enabled plugins hand it.
 #
 # Configuration comes from .env next to this script. The core needs only:
-#   CLAUDE_CODE_OAUTH_TOKEN
+#   CLAUDE_CODE_OAUTH_TOKEN (unless the claude-home plugin mounts a ~/.claude that has creds)
 # Everything else belongs to a plugin — see plugins/*/plugin.json and .env.example. Plugins are
 # switched with ENABLE_<PLUGIN_NAME> flags, e.g. ENABLE_GITHUB_AUTH=0.
 set -euo pipefail
@@ -36,8 +36,6 @@ if [ "$RESUME" = 1 ]; then
   esac
 fi
 
-: "${CLAUDE_CODE_OAUTH_TOKEN:?CLAUDE_CODE_OAUTH_TOKEN must be set in .env}"
-
 # Work out which plugins run, fail fast on unmet config/capabilities, then let each one
 # contribute its own docker run arguments.
 plugins_discover
@@ -46,16 +44,21 @@ plugins_validate
 plugins_host_stage
 echo "🔌 Plugins: ${ENABLED_PLUGINS:-<none>}"
 
+# A plugin that supplies Claude credentials itself sets CLAUDE_AUTH_PROVIDED during its host stage.
+[ "${CLAUDE_AUTH_PROVIDED:-0}" = 1 ] \
+  || : "${CLAUDE_CODE_OAUTH_TOKEN:?CLAUDE_CODE_OAUTH_TOKEN must be set in .env}"
+
 # One id keys the run; a plugin may derive a branch name from it. Fresh run mints one;
 # --resume reuses it.
 [ "$RESUME" = 1 ] || RUN_ID=$(openssl rand -hex 3)   # 6 lowercase hex chars, DNS-safe
 
-docker build -t claude-agent .
+# The plugin mix is baked in: only enabled plugins' install.sh run, so toggling a flag rebuilds.
+docker build -t claude-agent --build-arg ENABLED_PLUGINS="$ENABLED_PLUGINS" .
 
 docker run -it --rm \
   -e RUN_ID="$RUN_ID" \
   -e RESUME="$RESUME" \
   -e ENABLED_PLUGINS="$ENABLED_PLUGINS" \
-  -e CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
+  ${CLAUDE_CODE_OAUTH_TOKEN:+-e CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN"} \
   ${DOCKER_ARGS[@]+"${DOCKER_ARGS[@]}"} \
   claude-agent

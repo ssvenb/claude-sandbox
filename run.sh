@@ -53,7 +53,6 @@ echo "🔌 Plugins: ${ENABLED_PLUGINS:-<none>}"
 docker build -t claude-agent .
 
 docker run -it --rm \
-  -v "/home/$USER/.claude:/home/node/.claude" \
   -e RUN_ID="$RUN_ID" \
   -e RESUME="$RESUME" \
   -e ENABLED_PLUGINS="$ENABLED_PLUGINS" \

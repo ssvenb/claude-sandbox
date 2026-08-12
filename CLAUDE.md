@@ -35,6 +35,7 @@ All plugins ship in the image; `ENABLE_<NAME>` flags in `.env` decide at contain
 | `git-workspace` | `workspace` | `git-credentials` | clone into `/workspace`, per-run branch, resume briefing |
 | `branch-guard` | — | `workspace` | `guard-branch.py` PreToolUse hook |
 | `headroom` | `llm-proxy` | — | wraps the launch command in the headroom compression proxy (`headroom-ai[proxy,mcp]`, installed in `/opt/headroom`) |
+| `claude-home` | `claude-home` | — | mounts the host's `~/.claude` (or `$CLAUDE_HOME_DIR`) at `/home/node/.claude` |
 
 Disable them all and the agent starts plain `claude` in an empty `/workspace` with no GitHub access.
 
@@ -45,7 +46,7 @@ Disable them all and the agent starts plain `claude` in an empty `/workspace` wi
 | Path | Runs as | Purpose |
 |------|---------|---------|
 | `plugin.json` | — | manifest: `priority`, `defaultEnabled`, `provides`, `requires`, `requiredEnv`, `secrets` |
-| `host.sh` | you, on the host | validate config; call `pass_env VAR` / `pass_value NAME VALUE` to add `docker run` args |
+| `host.sh` | you, on the host | validate config; call `pass_env VAR` / `pass_value NAME VALUE` / `pass_mount HOST_PATH CONTAINER_PATH [OPTS]` to add `docker run` args |
 | `root-init.sh` | root, in container | anything needing secrets; exports survive the `su -m node` handoff |
 | `agent-init.sh` | `node`, in container | agent-visible setup; append to `$AGENT_PROMPT_FILE` to brief the agent |
 | `settings.json` | — | fragment merged into the managed policy (objects merge, lists concatenate) |
@@ -69,14 +70,15 @@ All env variables must have an example in `.env.example`. Configuration lives in
 | Variable | Owner | Purpose |
 |----------|-------|---------|
 | `CLAUDE_CODE_OAUTH_TOKEN` | core | Claude Code OAuth token for API auth |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_HEADROOM` | core | plugin switches (default on) |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_HEADROOM` / `ENABLE_CLAUDE_HOME` | core | plugin switches (default on) |
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Path to App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default: `github.com`) |
 | `REPO_URL` | git-workspace | HTTPS clone URL of the target repo |
 | `BASE_BRANCH` | git-workspace | Branch to cut from (default: `main`) |
+| `CLAUDE_HOME_DIR` | claude-home | Host dir mounted as the agent's `~/.claude` (default: `$HOME/.claude`) |
 
-The volume mount in `run.sh` (`-v /home/$USER/.claude:/home/node/.claude`) ensures the container uses the host user's globally configured Claude credentials.
+Volume mounts are contributed by plugins via `pass_mount`; the core `docker run` command has none.
 
 ## Key Constraints
 

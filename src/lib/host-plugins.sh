@@ -92,7 +92,16 @@ plugins_resolve() {
 }
 
 plugins_validate() {
-  local name var cap provided=" " providers
+  local name var cap other provided=" " providers
+
+  for name in $ENABLED_PLUGINS; do
+    while read -r other; do
+      [ -n "$other" ] || continue
+      case " $ENABLED_PLUGINS " in
+        *" $other "*) die "Plugins '$name' and '$other' cannot be enabled together. Disable one of them in .env." ;;
+      esac
+    done < <(plugin_meta "$name" '.conflicts // [] | .[]')
+  done
 
   for name in $ENABLED_PLUGINS; do
     while read -r var; do

@@ -1,0 +1,11 @@
+{
+  "name": "cwd-workspace",
+  "description": "Bind-mounts the host directory run.sh was invoked from at /workspace, so the agent works directly on your local checkout.",
+  "priority": 20,
+  "defaultEnabled": false,
+  "provides": ["workspace"],
+  "requires": [],
+  "conflicts": ["git-workspace"],
+  "requiredEnv": [],
+  "secrets": []
+}

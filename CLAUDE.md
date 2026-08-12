@@ -33,6 +33,7 @@ All plugins ship in the image; `ENABLE_<NAME>` flags in `.env` decide which run.
 |--------|----------|----------|------|
 | `github-auth` | `git-credentials` | — | `gh` CLI install, App token minting + 40-min refresh loop, `gh auth login` |
 | `git-workspace` | `workspace` | `git-credentials` | clone into `/workspace`, per-run branch, resume briefing |
+| `cwd-workspace` | `workspace` | — | bind-mounts the host's cwd (or `$HOST_WORKSPACE_DIR`) at `/workspace`; conflicts with `git-workspace`, off by default |
 | `branch-guard` | — | `workspace` | `guard-branch.py` PreToolUse hook |
 | `headroom` | `llm-proxy` | — | wraps the launch command in the headroom compression proxy (`headroom-ai[proxy,mcp]`, installed in `/opt/headroom`) |
 | `claude-home` | `claude-home` | — | mounts the host's `~/.claude` (or `$CLAUDE_HOME_DIR`) at `/home/node/.claude` |
@@ -46,7 +47,7 @@ Disable them all and the agent starts plain `claude` in an empty `/workspace` wi
 
 | Path | Runs as | Purpose |
 |------|---------|---------|
-| `plugin.json` | — | manifest: `priority`, `defaultEnabled`, `provides`, `requires`, `requiredEnv`, `secrets` |
+| `plugin.json` | — | manifest: `priority`, `defaultEnabled`, `provides`, `requires`, `conflicts`, `requiredEnv`, `secrets` |
 | `install.sh` | root, at image build | install the plugin's dependencies (e.g. `gh`); runs only when the plugin is enabled |
 | `host.sh` | you, on the host | validate config; call `pass_env VAR` / `pass_value NAME VALUE` / `pass_mount HOST_PATH CONTAINER_PATH [OPTS]` to add `docker run` args; set `CLAUDE_AUTH_PROVIDED=1` if the plugin supplies Claude credentials itself |
 | `root-init.sh` | root, in container | anything needing secrets; exports survive the `su -m node` handoff |
@@ -55,7 +56,7 @@ Disable them all and the agent starts plain `claude` in an empty `/workspace` wi
 | `bin/` | `node` | world-executable helpers, e.g. hook scripts (chmod 555) |
 | `root/` | root | root-only helpers holding secrets (chmod 500) |
 
-Stage scripts are *sourced*, run in `priority` order, and are all optional. Vars listed in `secrets` are unset before the agent user takes over. Unmet `requires`/`requiredEnv` fail the run on the host, before the image is built.
+Stage scripts are *sourced*, run in `priority` order, and are all optional. Vars listed in `secrets` are unset before the agent user takes over. Unmet `requires`/`requiredEnv`, or two enabled plugins listing each other in `conflicts`, fail the run on the host, before the image is built.
 
 ## Build & Run
 
@@ -72,12 +73,13 @@ All env variables must have an example in `.env.example`. Configuration lives in
 | Variable | Owner | Purpose |
 |----------|-------|---------|
 | `CLAUDE_CODE_OAUTH_TOKEN` | core | Claude Code OAuth token for API auth (required unless a plugin sets `CLAUDE_AUTH_PROVIDED=1`, as `claude-home` does) |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_HEADROOM` / `ENABLE_CLAUDE_HOME` / `ENABLE_DOCKER_CLI` | core | plugin switches (default on) |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_HEADROOM` / `ENABLE_CLAUDE_HOME` / `ENABLE_DOCKER_CLI` | core | plugin switches (default on, except `cwd-workspace`) |
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Path to App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default: `github.com`) |
 | `REPO_URL` | git-workspace | HTTPS clone URL of the target repo |
 | `BASE_BRANCH` | git-workspace | Branch to cut from (default: `main`) |
+| `HOST_WORKSPACE_DIR` | cwd-workspace | Host dir mounted at `/workspace` (default: run.sh's cwd) |
 | `CLAUDE_HOME_DIR` | claude-home | Host dir mounted as the agent's `~/.claude` (default: `$HOME/.claude`) |
 
 Volume mounts are contributed by plugins via `pass_mount`; the core `docker run` command has none.

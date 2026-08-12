@@ -39,14 +39,10 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && apt-get update && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
-# Headroom compression proxy. Claude Code's LLM calls are routed THROUGH this proxy (see
-# agent-setup.sh: `headroom wrap claude`), which compresses tool outputs / context before
-# they reach the Anthropic API and transparently forwards Claude's own auth upstream.
-# Installed into an isolated venv so it can't perturb system Python; [proxy] pulls the
-# FastAPI/uvicorn server + core compressors (no torch/ML — too heavy for the sandbox, and
-# the JSON/AST compressors deliver most of the savings). Telemetry off: the agent's traffic
-# must not leave the box (data-residency).
-ENV HEADROOM_TELEMETRY=off
+# Headroom compression proxy, driven by the `headroom` plugin (which wraps the Claude launch
+# command when enabled). Installed into an isolated venv so it can't perturb system Python;
+# [proxy] pulls the FastAPI/uvicorn server + core compressors (no torch/ML — too heavy for the
+# sandbox, and the JSON/AST compressors deliver most of the savings).
 RUN python3 -m venv /opt/headroom \
     && /opt/headroom/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/headroom/bin/pip install --no-cache-dir "headroom-ai[proxy,mcp]"

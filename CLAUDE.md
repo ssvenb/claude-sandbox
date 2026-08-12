@@ -19,10 +19,10 @@ run.sh (host)
        └─ agent-setup.sh (node)
             ├─ plugin agent-init.sh scripts (auth, /workspace provisioning, guardrails)
             ├─ seeds ~/.claude.json for non-interactive boot
-            └─ headroom wrap claude --no-serena -- --dangerously-skip-permissions [briefing]
+            └─ $AGENT_LAUNCH_CMD --dangerously-skip-permissions [briefing]
 ```
 
-- **headroom** — compression proxy (`headroom-ai[proxy,mcp]`) that sits between Claude Code and the Anthropic API, compressing context. Installed in `/opt/headroom` venv.
+- **$AGENT_LAUNCH_CMD** — how Claude is started; defaults to `claude`, and a plugin's `agent-init.sh` may replace it with a wrapper (the `headroom` plugin sets `headroom wrap claude --no-serena --`).
 - **settings-base.json** — the empty policy base plugin fragments are merged into by `src/merge-settings.py`; the result is written root-owned and read-only to `/etc/claude-code/managed-settings.json`.
 
 ## Plugins
@@ -34,8 +34,9 @@ All plugins ship in the image; `ENABLE_<NAME>` flags in `.env` decide at contain
 | `github-auth` | `git-credentials` | — | App token minting + 40-min refresh loop, `gh auth login` |
 | `git-workspace` | `workspace` | `git-credentials` | clone into `/workspace`, per-run branch, resume briefing |
 | `branch-guard` | — | `workspace` | `guard-branch.py` PreToolUse hook |
+| `headroom` | `llm-proxy` | — | wraps the launch command in the headroom compression proxy (`headroom-ai[proxy,mcp]`, installed in `/opt/headroom`) |
 
-Disable all three and the agent starts in an empty `/workspace` with no GitHub access.
+Disable them all and the agent starts plain `claude` in an empty `/workspace` with no GitHub access.
 
 ### Writing a plugin
 
@@ -68,7 +69,7 @@ All env variables must have an example in `.env.example`. Configuration lives in
 | Variable | Owner | Purpose |
 |----------|-------|---------|
 | `CLAUDE_CODE_OAUTH_TOKEN` | core | Claude Code OAuth token for API auth |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_BRANCH_GUARD` | core | plugin switches (default on) |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_HEADROOM` | core | plugin switches (default on) |
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Path to App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default: `github.com`) |
@@ -82,4 +83,4 @@ The volume mount in `run.sh` (`-v /home/$USER/.claude:/home/node/.claude`) ensur
 - The agent user (`node`) never sees the GitHub App private key — only short-lived tokens.
 - `/opt/plugins` is root-owned and immutable from within the container, so the agent cannot edit or disable its own guardrails.
 - `DISABLE_AUTOUPDATER=1` — Claude Code version is pinned at image build time.
-- `HEADROOM_TELEMETRY=off` — no telemetry leaves the container.
+- `HEADROOM_TELEMETRY=off` (set by the `headroom` plugin) — no telemetry leaves the container.

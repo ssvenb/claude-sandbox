@@ -35,16 +35,13 @@ jq ".hasCompletedOnboarding = true
 AGENT_PROMPT=$(cat "$AGENT_PROMPT_FILE")
 rm -f "$AGENT_PROMPT_FILE"
 
-# Start Claude Code autonomously, routed THROUGH the headroom compression proxy. `headroom wrap
-# claude` boots a local proxy (127.0.0.1:8787), points ANTHROPIC_BASE_URL at it, and execs claude
-# with every flag after it passed straight through; all of Claude's LLM calls then flow through
-# headroom, which compresses context before it hits the Anthropic API and forwards Claude's own
-# auth (CLAUDE_CODE_OAUTH_TOKEN) upstream unchanged. --no-serena skips the external Serena MCP
-# (needs uvx/network the locked-down sandbox doesn't have); the headroom MCP retrieve tool stays
-# on so compressed-away content remains reversible.
+# Start Claude Code autonomously. A plugin may have replaced $AGENT_LAUNCH_CMD with a wrapper
+# (e.g. the headroom proxy), everything up to and including the point where Claude's own flags
+# begin; unquoted on purpose so it splits into words.
+# shellcheck disable=SC2086
 if [ -n "$AGENT_PROMPT" ]; then
-  headroom wrap claude --no-serena -- --dangerously-skip-permissions "$AGENT_PROMPT"
+  ${AGENT_LAUNCH_CMD:-claude} --dangerously-skip-permissions "$AGENT_PROMPT"
 else
-  headroom wrap claude --no-serena -- --dangerously-skip-permissions
+  ${AGENT_LAUNCH_CMD:-claude} --dangerously-skip-permissions
 fi
 

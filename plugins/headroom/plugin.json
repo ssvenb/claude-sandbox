@@ -1,0 +1,10 @@
+{
+  "name": "headroom",
+  "description": "Routes Claude Code's LLM calls through the local headroom compression proxy.",
+  "priority": 40,
+  "defaultEnabled": true,
+  "provides": ["llm-proxy"],
+  "requires": [],
+  "requiredEnv": [],
+  "secrets": []
+}

@@ -65,7 +65,7 @@ WORKDIR /workspace
 # Branch guard: PreToolUse hook + managed (enterprise) policy that enables it.
 # Both land as root-owned files outside /workspace, so the unprivileged 'node'
 # user the agent runs as cannot edit or disable them.
-COPY guard-branch.py /usr/local/bin/guard-branch.py
+COPY src/guard-branch.py /usr/local/bin/guard-branch.py
 COPY managed-settings.json /etc/claude-code/managed-settings.json
 RUN chmod 555 /usr/local/bin/guard-branch.py \
     && chmod 444 /etc/claude-code/managed-settings.json
@@ -73,14 +73,20 @@ RUN chmod 555 /usr/local/bin/guard-branch.py \
 # mint-gh-token.py mints GitHub App installation tokens and is run by root only.
 # chmod 500 (root-owned) keeps the unprivileged 'node' user from reading or
 # executing it — defense in depth; node never holds the App key env vars anyway.
-COPY mint-gh-token.py /usr/local/bin/mint-gh-token.py
+COPY src/mint-gh-token.py /usr/local/bin/mint-gh-token.py
 RUN chmod 500 /usr/local/bin/mint-gh-token.py
+
+# Pre-seed Claude Code's config for the 'node' user, so it boots non-interactively (onboarding
+# skipped, permissions warning accepted, /workspace pre-trusted). agent-setup.sh still merges
+# those fields in at runtime, so this just saves that step from starting off an empty "{}".
+COPY .claude.json /home/node/.claude.json
+RUN chown node:node /home/node/.claude.json
 
 # Create an entrypoint shell script to handle token generation and boot Claude.
 # agent-setup.sh holds the sequence the entrypoint runs as the 'node' user; it
 # lives in its own file so editors give it linting/highlighting.
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY agent-setup.sh /usr/local/bin/agent-setup.sh
+COPY src/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY src/agent-setup.sh /usr/local/bin/agent-setup.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/agent-setup.sh
 
 # The container will run under the unprivileged 'node' user by default

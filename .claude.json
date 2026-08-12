@@ -1,0 +1,9 @@
+{
+  "hasCompletedOnboarding": true,
+  "skipDangerousModePermissionPrompt": true,
+  "projects": {
+    "/workspace": {
+      "hasTrustDialogAccepted": true
+    }
+  }
+}

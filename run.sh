@@ -7,6 +7,7 @@
 #   GH_PRIVATE_KEY_FILE  path to the App's .pem private key
 #   REPO_URL             https clone URL of the repo the agent works on
 #   BASE_BRANCH          branch new agent branches are cut from (default: main)
+#   GH_HOST              GitHub host, e.g. github.mycorp.com for Enterprise Server (default: github.com)
 #   CLAUDE_CODE_OAUTH_TOKEN
 set -euo pipefail
 
@@ -40,6 +41,7 @@ fi
 : "${REPO_URL:?REPO_URL must be set in .env (https clone URL)}"
 : "${CLAUDE_CODE_OAUTH_TOKEN:?CLAUDE_CODE_OAUTH_TOKEN must be set in .env}"
 BASE_BRANCH="${BASE_BRANCH:-main}"
+GH_HOST="${GH_HOST:-github.com}"
 
 # One id keys the run's git branch. Fresh run mints one; --resume reuses it.
 [ "$RESUME" = 1 ] || RUN_ID=$(openssl rand -hex 3)   # 6 lowercase hex chars, DNS-safe
@@ -47,10 +49,12 @@ BASE_BRANCH="${BASE_BRANCH:-main}"
 docker build -t claude-agent .
 
 docker run -it --rm \
+  -v /home/$USER/.claude:/home/node/.claude \
   -e RUN_ID="$RUN_ID" \
   -e RESUME="$RESUME" \
   -e REPO_URL="$REPO_URL" \
   -e BASE_BRANCH="$BASE_BRANCH" \
+  -e GH_HOST="$GH_HOST" \
   -e CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
   -e GH_APP_ID="$GH_APP_ID" \
   -e GH_PRIVATE_KEY="$(cat "$GH_PRIVATE_KEY_FILE")" \

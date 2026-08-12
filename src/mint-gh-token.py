@@ -13,7 +13,9 @@ import tempfile
 import time
 import urllib.request
 
-API = "https://api.github.com"
+# GitHub Enterprise Server puts the REST API under /api/v3; github.com uses api.github.com.
+GH_HOST = os.environ.get("GH_HOST") or "github.com"
+API = "https://api.github.com" if GH_HOST == "github.com" else f"https://{GH_HOST}/api/v3"
 
 
 def b64url(data: bytes) -> str:

@@ -9,8 +9,10 @@ import base64
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import time
+import urllib.error
 import urllib.request
 
 # GitHub Enterprise Server puts the REST API under /api/v3; github.com uses api.github.com.
@@ -29,8 +31,17 @@ def api(path: str, jwt: str, method: str = "GET"):
         headers={"Authorization": f"Bearer {jwt}",
                  "Accept": "application/vnd.github+json"},
     )
-    with urllib.request.urlopen(req) as r:
-        return json.load(r)
+    try:
+        with urllib.request.urlopen(req) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace").strip()
+        hint = ""
+        if e.code == 401:
+            hint = ("\nGH_APP_ID must be the App ID (a number, from the App's settings page) "
+                    "— not the Client ID or the installation ID — and GH_PRIVATE_KEY_FILE must "
+                    "be a .pem generated for that same App. Also check the host clock.")
+        sys.exit(f"mint-gh-token: {method} {path} failed: HTTP {e.code} {detail}{hint}")
 
 
 # Build the RS256-signed JWT. openssl (already in the image) does the signing so we
@@ -42,13 +53,17 @@ payload = b64url(json.dumps(
 signing_input = f"{header}.{payload}".encode()
 
 with tempfile.NamedTemporaryFile("w", suffix=".pem") as pem:
-    pem.write(os.environ["GH_PRIVATE_KEY"])
+    pem.write(os.environ["GH_PRIVATE_KEY"].rstrip("\n") + "\n")
     pem.flush()
     sig = subprocess.run(
         ["openssl", "dgst", "-sha256", "-sign", pem.name],
         input=signing_input, capture_output=True, check=True).stdout
 jwt = f"{signing_input.decode()}.{b64url(sig)}"
 
-installation_id = api("/app/installations", jwt)[0]["id"]
+installations = api("/app/installations", jwt)
+if not installations:
+    sys.exit("mint-gh-token: the GitHub App has no installations; install it on the "
+             "account or org that owns REPO_URL.")
+installation_id = installations[0]["id"]
 token = api(f"/app/installations/{installation_id}/access_tokens", jwt, "POST")["token"]
 print(token)

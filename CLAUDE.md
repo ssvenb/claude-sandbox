@@ -74,6 +74,9 @@ its flag.
 | `headroom` | claude | `llm-proxy` | — | wraps the launch command in the headroom compression proxy (`headroom-ai[proxy,mcp]`, installed in `/opt/headroom`) |
 | `claude-home` | claude | `claude-home` | — | mounts the host's `~/.claude` (or `$CLAUDE_HOME_DIR`) at `/home/node/.claude` |
 | `docker-cli` | any | `docker-cli` | — | Docker CLI + compose plugin install; mounts the host's `/var/run/docker.sock` |
+| `netbird` | any | `mesh-network` | — | NetBird client install; enrols the container as its own peer (`sandbox-<RUN_ID>`) with a setup key, adding `NET_ADMIN` + `/dev/net/tun`; off by default |
+| `s3-auth` | any | `aws-credentials` | — | AWS CLI v2 install; mints a short-lived STS session on the host and passes only that in; off by default |
+| `ssh-credentials` | any | `ssh-credentials` | — | `openssh-client` install; writes the key + `~/.ssh/config` for the agent user; off by default |
 
 Disable them all and the agent starts plain in an empty `/workspace` with no GitHub access.
 
@@ -85,7 +88,7 @@ Disable them all and the agent starts plain in an empty `/workspace` with no Git
 |------|---------|---------|
 | `plugin.json` | — | manifest: `priority`, `defaultEnabled`, `requiredAgent`, `provides`, `requires`, `conflicts`, `requiredEnv`, `secrets` |
 | `install.sh` | root, at image build | install the plugin's dependencies (e.g. `gh`); runs only when the plugin is enabled |
-| `host.sh` | you, on the host | validate config; call `pass_env VAR` / `pass_value NAME VALUE` / `pass_mount HOST_PATH CONTAINER_PATH [OPTS]` to add `docker run` args; set `AGENT_AUTH_PROVIDED=1` if the plugin supplies the agent's credentials itself |
+| `host.sh` | you, on the host | validate config; call `pass_env VAR` / `pass_value NAME VALUE` / `pass_mount HOST_PATH CONTAINER_PATH [OPTS]` / `pass_arg FLAG...` to add `docker run` args; set `AGENT_AUTH_PROVIDED=1` if the plugin supplies the agent's credentials itself |
 | `root-init.sh` | root, in container | anything needing secrets; exports survive the `su -m node` handoff |
 | `agent-init.sh` | `node`, in container | agent-visible setup; append to `$AGENT_PROMPT_FILE` to brief the agent |
 | `settings.json` | — | fragment merged into the managed policy (objects merge, lists concatenate) |
@@ -116,7 +119,7 @@ only required while that one is in use.
 | `AGENT` | core | Which agent runs: a directory name under `agents/` (default `claude`) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | agents/claude | Claude Code OAuth token for API auth (required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does) |
 | `COPILOT_GITHUB_TOKEN` | agents/copilot | Fine-grained PAT with the "Copilot Requests" permission (or a Copilot/`gh` OAuth token) |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_HEADROOM` / `ENABLE_CLAUDE_HOME` / `ENABLE_DOCKER_CLI` | core | plugin switches (default on, except `cwd-workspace`) |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_HEADROOM` / `ENABLE_CLAUDE_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_NETBIRD` / `ENABLE_S3_AUTH` / `ENABLE_SSH_CREDENTIALS` | core | plugin switches (default on, except `cwd-workspace`, `netbird`, `s3-auth`, `ssh-credentials`) |
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Path to App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default: `github.com`) |
@@ -124,6 +127,16 @@ only required while that one is in use.
 | `BASE_BRANCH` | git-workspace | Branch to cut from (default: `main`) |
 | `HOST_WORKSPACE_DIR` | cwd-workspace | Host dir mounted at `/workspace` (default: run.sh's cwd) |
 | `CLAUDE_HOME_DIR` | claude-home | Host dir mounted as the agent's `~/.claude` (default: `$HOME/.claude`) |
+| `NB_SETUP_KEY` | netbird | NetBird setup key the peer enrols with (the PAT never enters the container) |
+| `NB_MANAGEMENT_URL` | netbird | Self-hosted management server (default: NetBird Cloud) |
+| `NB_HOSTNAME` | netbird | Peer name in the dashboard (default: `sandbox-<RUN_ID>`) |
+| `S3_ROLE_ARN` | s3-auth | Role assumed on the host for the sandbox session; unset falls back to the host profile's current credentials |
+| `S3_SESSION_DURATION` | s3-auth | Assumed-role session lifetime in seconds (default: 3600) |
+| `AWS_REGION` / `AWS_PROFILE` | s3-auth | Region handed to the container; host profile used for minting |
+| `S3_ENDPOINT_URL` / `S3_BUCKET` | s3-auth | Endpoint for S3-compatible providers; bucket named in the agent's briefing |
+| `SSH_PRIVATE_KEY_FILE` | ssh-credentials | Host path to the (passphrase-less) key installed for the agent |
+| `SSH_HOST_PATTERN` / `SSH_HOST_USER` / `SSH_HOST_SUFFIX` | ssh-credentials | `~/.ssh/config` stanza: hosts the key is offered for, login user, domain appended to bare names |
+| `SSH_KNOWN_HOSTS_FILE` | ssh-credentials | Host path to a known_hosts file to pin peers (default: `StrictHostKeyChecking=accept-new`) |
 
 Volume mounts are contributed by plugins via `pass_mount`; the core `docker run` command has none.
 

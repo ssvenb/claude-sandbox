@@ -6,3 +6,5 @@ build/
 *.egg-info/
 # Private keys stay on the host; the container only ever sees tokens minted from them.
 **/*.private-key.pem
+# Same for SSH keys: run.sh reads them on the host, so they must not be baked into /opt/plugins.
+plugins/ssh-credentials/sandbox-key*

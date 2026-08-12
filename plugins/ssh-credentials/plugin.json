@@ -1,0 +1,10 @@
+{
+  "name": "ssh-credentials",
+  "description": "Installs an SSH private key and matching client config for the agent, so it can reach the hosts that key is authorized on.",
+  "priority": 15,
+  "defaultEnabled": false,
+  "provides": ["ssh-credentials"],
+  "requires": [],
+  "requiredEnv": ["SSH_PRIVATE_KEY_FILE"],
+  "secrets": []
+}

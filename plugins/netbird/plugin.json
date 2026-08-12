@@ -1,0 +1,10 @@
+{
+  "name": "netbird",
+  "description": "Enrolls the container as its own NetBird peer, so the agent reaches a private mesh network without the host's peer or the NetBird PAT ever entering the sandbox.",
+  "priority": 5,
+  "defaultEnabled": false,
+  "provides": ["mesh-network"],
+  "requires": [],
+  "requiredEnv": ["NB_SETUP_KEY"],
+  "secrets": ["NB_SETUP_KEY"]
+}

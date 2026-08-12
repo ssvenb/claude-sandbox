@@ -51,6 +51,10 @@ pass_env() {
 # Forward a computed value the host has but the environment doesn't (e.g. a file's contents).
 pass_value() { DOCKER_ARGS+=(-e "$1=$2"); }
 
+# Add raw `docker run` flags for a plugin that needs more than an env var or a mount —
+# capabilities, devices, networking: pass_arg --cap-add=NET_ADMIN --device=/dev/net/tun
+pass_arg() { DOCKER_ARGS+=("$@"); }
+
 # Mount a host path into the container: pass_mount <host-path> <container-path> [options]
 pass_mount() {
   local host_path=$1 container_path=$2 options=${3:-}

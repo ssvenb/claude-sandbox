@@ -3,3 +3,5 @@
 __pycache__/
 *.pyc
 claude-agent.private-key.pem
+# SSH keys for the ssh-credentials plugin: host-only, like every other credential here.
+plugins/ssh-credentials/sandbox-key*

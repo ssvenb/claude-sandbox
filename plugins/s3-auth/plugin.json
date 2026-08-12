@@ -1,0 +1,10 @@
+{
+  "name": "s3-auth",
+  "description": "Mints short-lived AWS credentials on the host (STS assume-role, or the host's current session) and hands only those to the agent for S3 access.",
+  "priority": 10,
+  "defaultEnabled": false,
+  "provides": ["aws-credentials"],
+  "requires": [],
+  "requiredEnv": [],
+  "secrets": []
+}

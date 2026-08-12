@@ -1,0 +1,10 @@
+{
+  "name": "git-workspace",
+  "description": "Clones the target repo into /workspace and puts the agent on its own claude-code/<RUN_ID> branch, resuming an existing one when asked.",
+  "priority": 20,
+  "defaultEnabled": true,
+  "provides": ["workspace"],
+  "requires": ["git-credentials"],
+  "requiredEnv": ["REPO_URL"],
+  "secrets": []
+}

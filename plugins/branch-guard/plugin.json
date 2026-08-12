@@ -1,0 +1,10 @@
+{
+  "name": "branch-guard",
+  "description": "PreToolUse hook that keeps the agent on its own branch and restricts git push to it.",
+  "priority": 30,
+  "defaultEnabled": true,
+  "provides": [],
+  "requires": ["workspace"],
+  "requiredEnv": [],
+  "secrets": []
+}

@@ -4,26 +4,54 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-A Docker-based sandbox for running Claude Code agents autonomously against a GitHub repo. The host machine holds a GitHub App private key; the container only ever sees short-lived installation tokens minted from it. Each run gets an isolated feature branch (`claude-code/<RUN_ID>`) enforced by a managed PreToolUse hook.
+A Docker-based sandbox for running Claude Code agents autonomously. The core is repo-agnostic: everything opinionated (GitHub auth, cloning, branch enforcement) lives in **plugins** that can be switched off. With the default plugins on, the host holds a GitHub App private key, the container only ever sees short-lived installation tokens minted from it, and each run gets an isolated feature branch (`claude-code/<RUN_ID>`) enforced by a managed PreToolUse hook.
 
 ## Architecture
 
 ```
 run.sh (host)
-  ├─ sources .env, validates config, builds image
+  ├─ sources .env, resolves ENABLE_<PLUGIN> flags, validates config + capabilities
+  ├─ plugin host.sh scripts contribute `docker run` args (secrets stay on the host)
   └─ docker run → entrypoint.sh (root)
-       ├─ mint-gh-token.py → prints installation token (RS256 JWT → GitHub API)
-       ├─ background loop re-mints token every 40 min (tokens expire at 1h)
-       ├─ drops GH_PRIVATE_KEY, hands off to 'node' user
+       ├─ plugin root-init.sh scripts (only context holding secrets)
+       ├─ merges plugin settings.json fragments → /etc/claude-code/managed-settings.json
+       ├─ drops declared secrets, hands off to 'node' user
        └─ agent-setup.sh (node)
-            ├─ gh auth login, clone repo into /workspace
-            ├─ creates or resumes claude-code/<RUN_ID> branch
-            └─ headroom wrap claude --no-serena -- --dangerously-skip-permissions
+            ├─ plugin agent-init.sh scripts (auth, /workspace provisioning, guardrails)
+            ├─ seeds ~/.claude.json for non-interactive boot
+            └─ headroom wrap claude --no-serena -- --dangerously-skip-permissions [briefing]
 ```
 
-- **guard-branch.py** — PreToolUse hook (managed-settings.json) that blocks branch switching and restricts `git push` to the agent's own branch.
 - **headroom** — compression proxy (`headroom-ai[proxy,mcp]`) that sits between Claude Code and the Anthropic API, compressing context. Installed in `/opt/headroom` venv.
-- **managed-settings.json** — enterprise-style policy file at `/etc/claude-code/managed-settings.json`; root-owned, read-only to agent.
+- **settings-base.json** — the empty policy base plugin fragments are merged into by `src/merge-settings.py`; the result is written root-owned and read-only to `/etc/claude-code/managed-settings.json`.
+
+## Plugins
+
+All plugins ship in the image; `ENABLE_<NAME>` flags in `.env` decide at container start which run, so changing the mix needs no rebuild. Flag names uppercase the directory name (`github-auth` → `ENABLE_GITHUB_AUTH`); an unset flag falls back to the manifest's `defaultEnabled`.
+
+| Plugin | Provides | Requires | Owns |
+|--------|----------|----------|------|
+| `github-auth` | `git-credentials` | — | App token minting + 40-min refresh loop, `gh auth login` |
+| `git-workspace` | `workspace` | `git-credentials` | clone into `/workspace`, per-run branch, resume briefing |
+| `branch-guard` | — | `workspace` | `guard-branch.py` PreToolUse hook |
+
+Disable all three and the agent starts in an empty `/workspace` with no GitHub access.
+
+### Writing a plugin
+
+`plugins/<name>/` may contain:
+
+| Path | Runs as | Purpose |
+|------|---------|---------|
+| `plugin.json` | — | manifest: `priority`, `defaultEnabled`, `provides`, `requires`, `requiredEnv`, `secrets` |
+| `host.sh` | you, on the host | validate config; call `pass_env VAR` / `pass_value NAME VALUE` to add `docker run` args |
+| `root-init.sh` | root, in container | anything needing secrets; exports survive the `su -m node` handoff |
+| `agent-init.sh` | `node`, in container | agent-visible setup; append to `$AGENT_PROMPT_FILE` to brief the agent |
+| `settings.json` | — | fragment merged into the managed policy (objects merge, lists concatenate) |
+| `bin/` | `node` | world-executable helpers, e.g. hook scripts (chmod 555) |
+| `root/` | root | root-only helpers holding secrets (chmod 500) |
+
+Stage scripts are *sourced*, run in `priority` order, and are all optional. Vars listed in `secrets` are unset before the agent user takes over. Unmet `requires`/`requiredEnv` fail the run on the host, before the image is built.
 
 ## Build & Run
 
@@ -35,22 +63,23 @@ docker build -t claude-agent .        # build the image
 
 ## Environment Variables
 
-All env variables must have an example in `.env.example`. Configuration lives in `.env` (git-ignored).
+All env variables must have an example in `.env.example`. Configuration lives in `.env` (git-ignored). Only `CLAUDE_CODE_OAUTH_TOKEN` belongs to the core; the rest are owned by a plugin and only required while it is enabled.
 
-| Variable | Purpose |
-|----------|---------|
-| `GH_APP_ID` | GitHub App ID |
-| `GH_PRIVATE_KEY_FILE` | Path to App's `.pem` private key |
-| `REPO_URL` | HTTPS clone URL of the target repo |
-| `BASE_BRANCH` | Branch to cut from (default: `main`) |
-| `GH_HOST` | GitHub hostname for Enterprise Server (default: `github.com`) |
-| `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code OAuth token for API auth |
+| Variable | Owner | Purpose |
+|----------|-------|---------|
+| `CLAUDE_CODE_OAUTH_TOKEN` | core | Claude Code OAuth token for API auth |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_BRANCH_GUARD` | core | plugin switches (default on) |
+| `GH_APP_ID` | github-auth | GitHub App ID |
+| `GH_PRIVATE_KEY_FILE` | github-auth | Path to App's `.pem` private key |
+| `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default: `github.com`) |
+| `REPO_URL` | git-workspace | HTTPS clone URL of the target repo |
+| `BASE_BRANCH` | git-workspace | Branch to cut from (default: `main`) |
 
 The volume mount in `run.sh` (`-v /home/$USER/.claude:/home/node/.claude`) ensures the container uses the host user's globally configured Claude credentials.
 
 ## Key Constraints
 
 - The agent user (`node`) never sees the GitHub App private key — only short-lived tokens.
-- Branch guard is root-owned and immutable from within the container; the agent cannot bypass it.
+- `/opt/plugins` is root-owned and immutable from within the container, so the agent cannot edit or disable its own guardrails.
 - `DISABLE_AUTOUPDATER=1` — Claude Code version is pinned at image build time.
 - `HEADROOM_TELEMETRY=off` — no telemetry leaves the container.

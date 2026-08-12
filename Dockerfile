@@ -62,19 +62,24 @@ RUN npm install -g @anthropic-ai/claude-code
 # Set up the workspace directory
 WORKDIR /workspace
 
-# Branch guard: PreToolUse hook + managed (enterprise) policy that enables it.
-# Both land as root-owned files outside /workspace, so the unprivileged 'node'
-# user the agent runs as cannot edit or disable them.
-COPY src/guard-branch.py /usr/local/bin/guard-branch.py
-COPY managed-settings.json /etc/claude-code/managed-settings.json
-RUN chmod 555 /usr/local/bin/guard-branch.py \
-    && chmod 444 /etc/claude-code/managed-settings.json
+# Plugins. Every plugin ships in the image; ENABLE_<NAME> flags decide at container start which
+# ones actually run (see run.sh), so changing the mix needs no rebuild. Permissions follow a
+# convention: bin/ is world-executable (hooks run as the agent), root/ is root-only (secrets),
+# and everything lands root-owned outside /workspace so the agent cannot edit its own guardrails.
+COPY plugins /opt/plugins
+RUN chown -R root:root /opt/plugins \
+    && find /opt/plugins -type d -exec chmod 555 {} + \
+    && find /opt/plugins -type f -exec chmod 444 {} + \
+    && find /opt/plugins -type f -path '*/bin/*' -exec chmod 555 {} + \
+    && find /opt/plugins -type f -path '*/root/*' -exec chmod 500 {} +
 
-# mint-gh-token.py mints GitHub App installation tokens and is run by root only.
-# chmod 500 (root-owned) keeps the unprivileged 'node' user from reading or
-# executing it — defense in depth; node never holds the App key env vars anyway.
-COPY src/mint-gh-token.py /usr/local/bin/mint-gh-token.py
-RUN chmod 500 /usr/local/bin/mint-gh-token.py
+# Plugin framework: the shell library the boot scripts source, the settings merger, and the base
+# policy that plugin settings.json fragments are merged into at runtime.
+COPY src/lib/plugins.sh /usr/local/lib/sandbox/plugins.sh
+COPY src/merge-settings.py /usr/local/bin/merge-settings.py
+COPY settings-base.json /usr/local/share/sandbox/settings-base.json
+RUN chmod 555 /usr/local/bin/merge-settings.py \
+    && chmod 444 /usr/local/lib/sandbox/plugins.sh /usr/local/share/sandbox/settings-base.json
 
 # Pre-seed Claude Code's config for the 'node' user, so it boots non-interactively (onboarding
 # skipped, permissions warning accepted, /workspace pre-trusted). agent-setup.sh still merges

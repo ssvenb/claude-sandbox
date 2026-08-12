@@ -1,0 +1,10 @@
+{
+  "name": "github-auth",
+  "description": "Turns a GitHub App private key held on the host into short-lived installation tokens, and authenticates gh/git inside the container with them.",
+  "priority": 10,
+  "defaultEnabled": true,
+  "provides": ["git-credentials"],
+  "requires": [],
+  "requiredEnv": ["GH_APP_ID", "GH_PRIVATE_KEY_FILE"],
+  "secrets": ["GH_PRIVATE_KEY", "GH_APP_ID"]
+}

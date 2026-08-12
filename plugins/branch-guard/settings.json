@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/local/bin/guard-branch.py"
+            "command": "/opt/plugins/branch-guard/bin/guard-branch.py"
           }
         ]
       }

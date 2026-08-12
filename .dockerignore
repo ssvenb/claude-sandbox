@@ -4,4 +4,5 @@ __pycache__/
 build/
 .venv/
 *.egg-info/
-claude-agent.private-key.pem
+# Private keys stay on the host; the container only ever sees tokens minted from them.
+**/*.private-key.pem

@@ -8,40 +8,28 @@ export HOME=/home/node
 
 # shellcheck source=lib/plugins.sh
 . /usr/local/lib/sandbox/plugins.sh
+# shellcheck source=lib/agents.sh
+. /usr/local/lib/sandbox/agents.sh
 
 # Plugins append briefing lines here (e.g. "you are resuming branch X"); the joined text becomes
-# Claude's initial prompt. This script's stdout is NOT visible to the agent, so context that
+# the agent's initial prompt. This script's stdout is NOT visible to the agent, so context that
 # must reach it has to travel through the prompt.
 AGENT_PROMPT_FILE=$(mktemp)
 export AGENT_PROMPT_FILE
 
-# Agent stage: authenticate, provision /workspace, set up guardrails. With every plugin off,
-# /workspace is simply an empty directory the agent starts from scratch in.
+# Agent stage: first the selected agent seeds its own config, then the plugins authenticate,
+# provision /workspace and set up guardrails. With every plugin off, /workspace is simply an
+# empty directory the agent starts from scratch in.
+agent_run_stage agent-init
 plugin_run_stage agent-init
 
 cd /workspace
 
-# Pre-seed Claude config so the agent boots non-interactively: skip onboarding, accept the
-# --dangerously-skip-permissions warning, and trust /workspace.
-CONFIG="$HOME/.claude.json"
-[ -f "$CONFIG" ] || echo "{}" > "$CONFIG"
-tmp=$(mktemp)
-jq ".hasCompletedOnboarding = true
-    | .theme = (.theme // \"dark\")
-    | .bypassPermissionsModeAccepted = true
-    | .projects[\"/workspace\"].hasTrustDialogAccepted = true" \
-   "$CONFIG" > "$tmp" && mv "$tmp" "$CONFIG"
-
 AGENT_PROMPT=$(cat "$AGENT_PROMPT_FILE")
+export AGENT_PROMPT
 rm -f "$AGENT_PROMPT_FILE"
 
-# Start Claude Code autonomously. A plugin may have replaced $AGENT_LAUNCH_CMD with a wrapper
-# (e.g. the headroom proxy), everything up to and including the point where Claude's own flags
-# begin; unquoted on purpose so it splits into words.
-# shellcheck disable=SC2086
-if [ -n "$AGENT_PROMPT" ]; then
-  ${AGENT_LAUNCH_CMD:-claude} --dangerously-skip-permissions "$AGENT_PROMPT"
-else
-  ${AGENT_LAUNCH_CMD:-claude} --dangerously-skip-permissions
-fi
+# Hand over to the agent. Its launch.sh turns $AGENT_PROMPT into the right flags and honours
+# $AGENT_LAUNCH_CMD, which a plugin may have replaced with a wrapper (e.g. the headroom proxy).
+agent_run_stage launch
 

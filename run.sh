@@ -1,11 +1,13 @@
 #!/bin/bash
-# Build and launch a Claude sandbox container. Runs on YOUR machine, where any long-lived
-# credentials stay; the container only ever receives what the enabled plugins hand it.
+# Build and launch a coding-agent sandbox container. Runs on YOUR machine, where any long-lived
+# credentials stay; the container only ever receives what the agent and the enabled plugins
+# hand it.
 #
 # Configuration comes from .env next to this script. The core needs only:
-#   CLAUDE_CODE_OAUTH_TOKEN (unless the claude-home plugin mounts a ~/.claude that has creds)
-# Everything else belongs to a plugin — see plugins/*/plugin.json and .env.example. Plugins are
-# switched with ENABLE_<PLUGIN_NAME> flags, e.g. ENABLE_GITHUB_AUTH=0.
+#   AGENT                   which CLI agent runs (agents/*, default: claude)
+# plus whatever credentials that agent asks for — see agents/*/host.sh. Everything else belongs
+# to a plugin — see plugins/*/plugin.json and .env.example. Plugins are switched with
+# ENABLE_<PLUGIN_NAME> flags, e.g. ENABLE_GITHUB_AUTH=0.
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -17,6 +19,8 @@ set +a
 
 # shellcheck source=src/lib/host-plugins.sh
 . src/lib/host-plugins.sh
+# shellcheck source=src/lib/host-agents.sh
+. src/lib/host-agents.sh
 
 # --resume <RUN_ID>: re-attach to that run. No arg → fresh run.
 usage() { echo "Usage: $0 [--resume <RUN_ID>]   (RUN_ID is 6 hex chars)" >&2; exit "${1:-1}"; }
@@ -36,29 +40,35 @@ if [ "$RESUME" = 1 ]; then
   esac
 fi
 
+# Pick the agent first: plugins that declare a different requiredAgent are dropped from the run.
+agent_resolve
+
 # Work out which plugins run, fail fast on unmet config/capabilities, then let each one
-# contribute its own docker run arguments.
+# contribute its own docker run arguments. The agent's host stage comes last, so a plugin that
+# brings credentials of its own (AGENT_AUTH_PROVIDED=1) is already accounted for.
 plugins_discover
 plugins_resolve
 plugins_validate
 plugins_host_stage
+agent_host_stage
+echo "🤖 Agent: $AGENT"
 echo "🔌 Plugins: ${ENABLED_PLUGINS:-<none>}"
-
-# A plugin that supplies Claude credentials itself sets CLAUDE_AUTH_PROVIDED during its host stage.
-[ "${CLAUDE_AUTH_PROVIDED:-0}" = 1 ] \
-  || : "${CLAUDE_CODE_OAUTH_TOKEN:?CLAUDE_CODE_OAUTH_TOKEN must be set in .env}"
 
 # One id keys the run; a plugin may derive a branch name from it. Fresh run mints one;
 # --resume reuses it.
 [ "$RESUME" = 1 ] || RUN_ID=$(openssl rand -hex 3)   # 6 lowercase hex chars, DNS-safe
 
-# The plugin mix is baked in: only enabled plugins' install.sh run, so toggling a flag rebuilds.
-docker build -t claude-agent --build-arg ENABLED_PLUGINS="$ENABLED_PLUGINS" .
+# Agent and plugin mix are baked in: only the selected agent's and the enabled plugins'
+# install.sh run, so changing either rebuilds. Each agent gets its own image tag.
+IMAGE="claude-agent:$AGENT"
+docker build -t "$IMAGE" \
+  --build-arg AGENT="$AGENT" \
+  --build-arg ENABLED_PLUGINS="$ENABLED_PLUGINS" .
 
 docker run -it --rm \
   -e RUN_ID="$RUN_ID" \
   -e RESUME="$RESUME" \
+  -e AGENT="$AGENT" \
   -e ENABLED_PLUGINS="$ENABLED_PLUGINS" \
-  ${CLAUDE_CODE_OAUTH_TOKEN:+-e CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN"} \
   ${DOCKER_ARGS[@]+"${DOCKER_ARGS[@]}"} \
-  claude-agent
+  "$IMAGE"

@@ -77,17 +77,25 @@ plugins_discover() {
 }
 
 plugins_resolve() {
-  local name flag value
+  local name flag value wanted
   ENABLED_PLUGINS=""
   for name in "${PLUGIN_LIST[@]}"; do
     flag=$(plugin_flag_name "$name")
     # Unset flag falls back to the manifest default, so existing .env files keep working.
     value="${!flag:-$(plugin_meta "$name" '.defaultEnabled // false')}"
     case "$value" in
-      1|true|yes|on)   ENABLED_PLUGINS="${ENABLED_PLUGINS:+$ENABLED_PLUGINS }$name" ;;
-      0|false|no|off)  ;;
+      1|true|yes|on)   ;;
+      0|false|no|off)  continue ;;
       *) die "$flag must be 0 or 1 (got: $value)" ;;
     esac
+    # A plugin tied to one agent (Claude-shaped hooks, a wrapper around `claude`, …) is silently
+    # dropped when another agent runs, instead of failing the run.
+    wanted=$(plugin_meta "$name" '.requiredAgent // empty')
+    if [ -n "$wanted" ] && [ "$wanted" != "${AGENT:-claude}" ]; then
+      echo "⏭️  Plugin '$name' skipped: it requires agent '$wanted', this run uses '${AGENT:-claude}'."
+      continue
+    fi
+    ENABLED_PLUGINS="${ENABLED_PLUGINS:+$ENABLED_PLUGINS }$name"
   done
 }
 

@@ -3,6 +3,7 @@
   "description": "Mounts the host user's ~/.claude directory into the agent's home so the container reuses the globally configured Claude credentials and settings.",
   "priority": 5,
   "defaultEnabled": true,
+  "requiredAgent": "claude",
   "provides": ["claude-home"],
   "requires": [],
   "requiredEnv": [],

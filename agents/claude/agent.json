@@ -1,0 +1,5 @@
+{
+  "name": "claude",
+  "description": "Anthropic's Claude Code CLI, started with --dangerously-skip-permissions.",
+  "managedSettings": "/etc/claude-code/managed-settings.json"
+}

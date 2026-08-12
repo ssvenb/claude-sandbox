@@ -1,0 +1,5 @@
+{
+  "name": "copilot",
+  "description": "GitHub Copilot CLI, started with --allow-all (every tool, path and URL pre-approved).",
+  "managedSettings": "/etc/github-copilot/managed-settings.json"
+}

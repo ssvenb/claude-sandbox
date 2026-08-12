@@ -3,6 +3,7 @@
   "description": "Routes Claude Code's LLM calls through the local headroom compression proxy.",
   "priority": 40,
   "defaultEnabled": true,
+  "requiredAgent": "claude",
   "provides": ["llm-proxy"],
   "requires": [],
   "requiredEnv": [],

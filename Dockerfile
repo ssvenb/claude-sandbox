@@ -15,12 +15,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# Globally install Claude Code. The agent runs as the unprivileged 'node' user,
-# but the global npm prefix is root-owned, so the in-process auto-updater can't
-# write there ("no write permission to npm prefix"). Disable it — the version is
-# fixed at build time and updates happen by rebuilding the image.
-ENV DISABLE_AUTOUPDATER=1
-RUN npm install -g @anthropic-ai/claude-code
+# Agents. Every agent's files ship in the image, but only the one named by the AGENT build arg
+# gets its CLI installed, so an unused agent's binaries stay out of the image. run.sh passes the
+# resolved name and tags the image per agent, so switching agents rebuilds this layer only.
+COPY agents /opt/agents
+ARG AGENT=claude
+RUN set -eu; \
+    [ -d "/opt/agents/$AGENT" ] || { echo "Unknown agent: $AGENT" >&2; exit 1; }; \
+    if [ -f "/opt/agents/$AGENT/install.sh" ]; then \
+      echo "🤖 $AGENT"; sh "/opt/agents/$AGENT/install.sh"; \
+    fi
+RUN chown -R root:root /opt/agents \
+    && find /opt/agents -type d -exec chmod 555 {} + \
+    && find /opt/agents -type f -exec chmod 444 {} +
 
 # Set up the workspace directory
 WORKDIR /workspace
@@ -48,21 +55,17 @@ RUN chown -R root:root /opt/plugins \
     && find /opt/plugins -type f -path '*/bin/*' -exec chmod 555 {} + \
     && find /opt/plugins -type f -path '*/root/*' -exec chmod 500 {} +
 
-# Plugin framework: the shell library the boot scripts source, the settings merger, and the base
-# policy that plugin settings.json fragments are merged into at runtime.
+# Plugin and agent frameworks: the shell libraries the boot scripts source, the settings merger,
+# and the base policy that plugin settings.json fragments are merged into at runtime.
 COPY src/lib/plugins.sh /usr/local/lib/sandbox/plugins.sh
+COPY src/lib/agents.sh /usr/local/lib/sandbox/agents.sh
 COPY src/merge-settings.py /usr/local/bin/merge-settings.py
 COPY settings-base.json /usr/local/share/sandbox/settings-base.json
 RUN chmod 555 /usr/local/bin/merge-settings.py \
-    && chmod 444 /usr/local/lib/sandbox/plugins.sh /usr/local/share/sandbox/settings-base.json
+    && chmod 444 /usr/local/lib/sandbox/plugins.sh /usr/local/lib/sandbox/agents.sh \
+                 /usr/local/share/sandbox/settings-base.json
 
-# Pre-seed Claude Code's config for the 'node' user, so it boots non-interactively (onboarding
-# skipped, permissions warning accepted, /workspace pre-trusted). agent-setup.sh still merges
-# those fields in at runtime, so this just saves that step from starting off an empty "{}".
-COPY .claude.json /home/node/.claude.json
-RUN chown node:node /home/node/.claude.json
-
-# Create an entrypoint shell script to handle token generation and boot Claude.
+# Create an entrypoint shell script to handle token generation and boot the agent.
 # agent-setup.sh holds the sequence the entrypoint runs as the 'node' user; it
 # lives in its own file so editors give it linting/highlighting.
 COPY src/entrypoint.sh /usr/local/bin/entrypoint.sh

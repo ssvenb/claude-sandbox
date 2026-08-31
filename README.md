@@ -8,7 +8,7 @@ selected agent with every permission prompt disabled. Which agent that is comes 
 the agent to a branch, mounting your `~/.claude` — lives in **plugins** that can be switched off
 individually. With the defaults, the GitHub App private key never leaves your machine (the
 container only sees short-lived installation tokens), and each run works on its own
-`claude-code/<RUN_ID>` branch enforced by a managed hook the agent cannot edit.
+`<agent-prefix>/<RUN_ID>` branch enforced by a managed hook the agent cannot edit.
 
 ## Quick start
 
@@ -73,9 +73,18 @@ An agent is a directory under `agents/<name>/`. Only `agent.json` is required; t
 | `agent-init.sh` | `node` | in the container, before the plugins' agent stage |
 | `launch.sh` | `node` | last: turns `$AGENT_PROMPT` into flags and starts the agent |
 
-`agent.json` carries `name`, `description`, and `managedSettings` — the path the agent reads its
+`agent.json` carries `name`, `description`, `managedSettings` — the path the agent reads its
 managed (enterprise) policy from, which is where plugin `settings.json` fragments are merged.
-Omit it and no policy file is written.
+Omit it and no policy file is written. An optional `git` block names the agent in the repo, and
+`git-workspace` reads it:
+
+```json
+"git": { "branchPrefix": "claude-code", "userName": "Claude Code", "userEmail": "claude-code@anthropic.com" }
+```
+
+The branch becomes `<branchPrefix>/<RUN_ID>` and commits are authored under that name and email;
+an agent that omits the block falls back to its own directory name (`copilot/1a2b3c`,
+`copilot@sandbox.local`).
 
 Because `host.sh` runs after the plugin host stage, it can see `AGENT_AUTH_PROVIDED=1` from a
 plugin that supplies credentials itself and skip its own token check:
@@ -107,7 +116,7 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | `github-auth` | 10 | on | any | `git-credentials` | — | `gh` CLI install, App token minting + 40-min refresh loop, `gh auth login` |
 | `s3-auth` | 10 | off | any | `aws-credentials` | — | AWS CLI v2 install; mints a short-lived STS session on the host, passes only that in |
 | `ssh-credentials` | 15 | off | any | `ssh-credentials` | — | `openssh-client` install; writes `~/.ssh/sandbox_key` + `~/.ssh/config` for the agent user |
-| `git-workspace` | 20 | on | any | `workspace` | `git-credentials` | clone into `/workspace`, per-run branch, resume briefing |
+| `git-workspace` | 20 | on | any | `workspace` | `git-credentials` | clone into `/workspace`, per-run branch named after the agent, its commit identity, resume briefing |
 | `cwd-workspace` | 20 | off | any | `workspace` | — | bind-mounts the host's cwd (or `$HOST_WORKSPACE_DIR`) at `/workspace`; conflicts with `git-workspace` |
 | `branch-guard` | 30 | on | claude | — | `workspace` | `guard-branch.py` PreToolUse hook |
 | `headroom` | 40 | on | claude | `llm-proxy` | — | wraps the launch command in the headroom compression proxy (`headroom-ai[proxy,mcp]` in `/opt/headroom`) |
@@ -267,7 +276,7 @@ Recognised output:
 # shellcheck shell=sh
 git clone "$REPO_URL" /workspace
 cd /workspace
-AGENT_BRANCH="claude-code/$RUN_ID"
+AGENT_BRANCH="$AGENT_BRANCH_PREFIX/$RUN_ID"
 export AGENT_BRANCH
 git checkout -b "$AGENT_BRANCH" "origin/${BASE_BRANCH:-main}"
 

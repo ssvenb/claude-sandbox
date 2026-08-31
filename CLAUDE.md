@@ -9,7 +9,7 @@ agent-agnostic: which agent runs comes from **`AGENT`** (a directory under `agen
 everything opinionated (GitHub auth, cloning, branch enforcement) lives in **plugins** that can be
 switched off. With the default plugins on, the host holds a GitHub App private key, the container
 only ever sees short-lived installation tokens minted from it, and each run gets an isolated
-feature branch (`claude-code/<RUN_ID>`) enforced by a managed PreToolUse hook.
+feature branch (`<agent-prefix>/<RUN_ID>`, e.g. `claude-code/1a2b3c`) enforced by a managed PreToolUse hook.
 
 ## Architecture
 
@@ -49,7 +49,7 @@ the image, but only the selected one's `install.sh` runs at build time, and the 
 
 | Path | Runs as | Purpose |
 |------|---------|---------|
-| `agent.json` | — | manifest: `name`, `description`, `managedSettings` (where plugin policy fragments are written; omit for none) |
+| `agent.json` | — | manifest: `name`, `description`, `managedSettings` (where plugin policy fragments are written; omit for none), optional `git` block (`branchPrefix`, `userName`, `userEmail`) used by `git-workspace` |
 | `install.sh` | root, at image build | install the CLI; runs only for the selected agent |
 | `host.sh` | you, on the host | validate credentials, `pass_env` them; runs **after** every plugin's `host.sh`, so it can honour `AGENT_AUTH_PROVIDED=1` |
 | `agent-init.sh` | `node` | seed the agent's own config for a non-interactive boot |
@@ -68,7 +68,7 @@ its flag.
 | Plugin | Agent | Provides | Requires | Owns |
 |--------|-------|----------|----------|------|
 | `github-auth` | any | `git-credentials` | — | `gh` CLI install, App token minting + 40-min refresh loop, `gh auth login` |
-| `git-workspace` | any | `workspace` | `git-credentials` | clone into `/workspace`, per-run branch, resume briefing |
+| `git-workspace` | any | `workspace` | `git-credentials` | clone into `/workspace`, per-run branch named after the agent, its git identity, resume briefing |
 | `cwd-workspace` | any | `workspace` | — | bind-mounts the host's cwd (or `$HOST_WORKSPACE_DIR`) at `/workspace`; conflicts with `git-workspace`, off by default |
 | `branch-guard` | claude | — | `workspace` | `guard-branch.py` PreToolUse hook |
 | `headroom` | claude | `llm-proxy` | — | wraps the launch command in the headroom compression proxy (`headroom-ai[proxy,mcp]`, installed in `/opt/headroom`) |

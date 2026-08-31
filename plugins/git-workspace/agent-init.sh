@@ -12,10 +12,17 @@ cd /workspace
 # agent starts, so the branch guard applies to its work. RUN_ID comes from run.sh; fall back to
 # generating one if absent.
 RUN_ID="${RUN_ID:-$(openssl rand -hex 3)}"   # 6 lowercase hex chars, DNS-safe
-AGENT_BRANCH="claude-code/$RUN_ID"
-export RUN_ID AGENT_BRANCH
-git config user.email "claude-code@anthropic.com"
-git config user.name "Claude Code"
+# Branch prefix and commit identity come from the running agent's manifest ("git" block in
+# agents/<name>/agent.json), so a copilot run is not signed as Claude Code. An agent that omits
+# the block falls back to its own directory name.
+AGENT_BRANCH_PREFIX=$(agent_meta '.git.branchPrefix // empty')
+AGENT_BRANCH_PREFIX="${AGENT_BRANCH_PREFIX:-$AGENT}"
+AGENT_BRANCH="$AGENT_BRANCH_PREFIX/$RUN_ID"
+export RUN_ID AGENT_BRANCH AGENT_BRANCH_PREFIX
+agent_git_name=$(agent_meta '.git.userName // empty')
+agent_git_email=$(agent_meta '.git.userEmail // empty')
+git config user.name "${agent_git_name:-$AGENT}"
+git config user.email "${agent_git_email:-$AGENT@sandbox.local}"
 
 if [ "${RESUME:-0}" = 1 ]; then
   # Resume: re-attach to this run's existing branch. The clone fetched all remote branches, so

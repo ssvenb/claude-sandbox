@@ -1,5 +1,10 @@
 {
   "name": "copilot",
   "description": "GitHub Copilot CLI, started with --allow-all (every tool, path and URL pre-approved).",
-  "managedSettings": "/etc/github-copilot/managed-settings.json"
+  "managedSettings": "/etc/github-copilot/managed-settings.json",
+  "git": {
+    "branchPrefix": "copilot",
+    "userName": "GitHub Copilot CLI",
+    "userEmail": "copilot@github.com"
+  }
 }

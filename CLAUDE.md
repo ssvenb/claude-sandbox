@@ -43,7 +43,7 @@ the image, but only the selected one's `install.sh` runs at build time, and the 
 | Agent | CLI | Credentials | Launched as |
 |-------|-----|-------------|-------------|
 | `claude` | Claude Code (npm) | `CLAUDE_CODE_OAUTH_TOKEN`, or the `claude-home` plugin | `claude --dangerously-skip-permissions [prompt]` |
-| `copilot` | GitHub Copilot CLI (standalone installer) | `COPILOT_GITHUB_TOKEN` | `copilot --allow-all [-i prompt]` |
+| `copilot` | GitHub Copilot CLI (standalone installer) | `COPILOT_GITHUB_TOKEN`, or the `copilot-home` plugin | `copilot --allow-all [-i prompt]` |
 
 `agents/<name>/` may contain:
 
@@ -73,6 +73,7 @@ its flag.
 | `branch-guard` | claude | — | `workspace` | `guard-branch.py` PreToolUse hook |
 | `headroom` | claude | `llm-proxy` | — | wraps the launch command in the headroom compression proxy (`headroom-ai[proxy,mcp]`, installed in `/opt/headroom`) |
 | `claude-home` | claude | `claude-home` | — | mounts the host's `~/.claude` (or `$CLAUDE_HOME_DIR`) at `/home/node/.claude` |
+| `copilot-home` | copilot | `copilot-home` | — | mounts the host's `~/.copilot` (or `$COPILOT_HOME_DIR`) at `/home/node/.copilot` |
 | `docker-cli` | any | `docker-cli` | — | Docker CLI + compose plugin install; mounts the host's `/var/run/docker.sock` |
 | `netbird` | any | `mesh-network` | — | NetBird client install; enrols the container as its own peer (`sandbox-<RUN_ID>`) with a setup key, adding `NET_ADMIN` + `/dev/net/tun`; off by default |
 | `s3-auth` | any | `aws-credentials` | — | AWS CLI v2 install; mints a short-lived STS session on the host and passes only that in; off by default |
@@ -118,8 +119,8 @@ only required while that one is in use.
 |----------|-------|---------|
 | `AGENT` | core | Which agent runs: a directory name under `agents/` (default `claude`) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | agents/claude | Claude Code OAuth token for API auth (required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does) |
-| `COPILOT_GITHUB_TOKEN` | agents/copilot | Fine-grained PAT with the "Copilot Requests" permission (or a Copilot/`gh` OAuth token) |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_HEADROOM` / `ENABLE_CLAUDE_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_NETBIRD` / `ENABLE_S3_AUTH` / `ENABLE_SSH_CREDENTIALS` | core | plugin switches (default on, except `cwd-workspace`, `netbird`, `s3-auth`, `ssh-credentials`) |
+| `COPILOT_GITHUB_TOKEN` | agents/copilot | Fine-grained PAT with the "Copilot Requests" permission (or a Copilot/`gh` OAuth token); required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_HEADROOM` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_NETBIRD` / `ENABLE_S3_AUTH` / `ENABLE_SSH_CREDENTIALS` | core | plugin switches (default on, except `cwd-workspace`, `netbird`, `s3-auth`, `ssh-credentials`) |
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Path to App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default: `github.com`) |
@@ -127,6 +128,7 @@ only required while that one is in use.
 | `BASE_BRANCH` | git-workspace | Branch to cut from (default: `main`) |
 | `HOST_WORKSPACE_DIR` | cwd-workspace | Host dir mounted at `/workspace` (default: run.sh's cwd) |
 | `CLAUDE_HOME_DIR` | claude-home | Host dir mounted as the agent's `~/.claude` (default: `$HOME/.claude`) |
+| `COPILOT_HOME_DIR` | copilot-home | Host dir mounted as the agent's `~/.copilot` (default: `$HOME/.copilot`) |
 | `NB_SETUP_KEY` | netbird | NetBird setup key the peer enrols with (the PAT never enters the container) |
 | `NB_MANAGEMENT_URL` | netbird | Self-hosted management server (default: NetBird Cloud) |
 | `NB_HOSTNAME` | netbird | Peer name in the dashboard (default: `sandbox-<RUN_ID>`) |

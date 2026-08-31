@@ -58,7 +58,7 @@ stay out of it; the image is tagged per agent, so switching back and forth doesn
 | Agent | CLI | Credentials | Launched as |
 |-------|-----|-------------|-------------|
 | `claude` | Claude Code (`@anthropic-ai/claude-code`, npm) | `CLAUDE_CODE_OAUTH_TOKEN`, or the `claude-home` plugin | `claude --dangerously-skip-permissions [prompt]` |
-| `copilot` | GitHub Copilot CLI (standalone build from `gh.io/copilot-install`) | `COPILOT_GITHUB_TOKEN` | `copilot --allow-all [-i prompt]` |
+| `copilot` | GitHub Copilot CLI (standalone build from `gh.io/copilot-install`) | `COPILOT_GITHUB_TOKEN`, or the `copilot-home` plugin | `copilot --allow-all [-i prompt]` |
 
 ### Anatomy of an agent
 
@@ -101,6 +101,7 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | Plugin | Priority | Default | Agent | Provides | Requires | Owns |
 |--------|---------:|---------|-------|----------|----------|------|
 | `claude-home` | 5 | on | claude | `claude-home` | — | mounts the host's `~/.claude` (or `$CLAUDE_HOME_DIR`) at `/home/node/.claude`; sets `AGENT_AUTH_PROVIDED=1` |
+| `copilot-home` | 5 | on | copilot | `copilot-home` | — | mounts the host's `~/.copilot` (or `$COPILOT_HOME_DIR`) at `/home/node/.copilot`; sets `AGENT_AUTH_PROVIDED=1` |
 | `docker-cli` | 5 | on | any | `docker-cli` | — | Docker CLI + compose plugin install; mounts the host's `/var/run/docker.sock` |
 | `netbird` | 5 | off | any | `mesh-network` | — | NetBird client install; enrols the container as its own peer (`sandbox-<RUN_ID>`) from `$NB_SETUP_KEY`, adding `NET_ADMIN` + `/dev/net/tun` |
 | `github-auth` | 10 | on | any | `git-credentials` | — | `gh` CLI install, App token minting + 40-min refresh loop, `gh auth login` |
@@ -322,8 +323,8 @@ only required while that agent or plugin is in use.
 |----------|-------|---------|
 | `AGENT` | core | Which agent runs: a directory name under `agents/` (default `claude`) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | agents/claude | Claude Code OAuth token (`claude setup-token`). Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does |
-| `COPILOT_GITHUB_TOKEN` | agents/copilot | Fine-grained PAT with the "Copilot Requests" permission (or a Copilot/`gh` OAuth token) |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_HEADROOM` / `ENABLE_CLAUDE_HOME` / `ENABLE_DOCKER_CLI` | core | plugin switches (default on, except `cwd-workspace`) |
+| `COPILOT_GITHUB_TOKEN` | agents/copilot | Fine-grained PAT with the "Copilot Requests" permission (or a Copilot/`gh` OAuth token). Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_HEADROOM` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` | core | plugin switches (default on, except `cwd-workspace`) |
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Host path to the App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default `github.com`) |
@@ -331,6 +332,7 @@ only required while that agent or plugin is in use.
 | `BASE_BRANCH` | git-workspace | Branch to cut from (default `main`) |
 | `HOST_WORKSPACE_DIR` | cwd-workspace | Host dir mounted at `/workspace` (default: `run.sh`'s cwd) |
 | `CLAUDE_HOME_DIR` | claude-home | Host dir mounted as the agent's `~/.claude` (default `$HOME/.claude`) |
+| `COPILOT_HOME_DIR` | copilot-home | Host dir mounted as the agent's `~/.copilot` (default `$HOME/.copilot`) |
 
 Volume mounts are contributed by plugins via `pass_mount`; the core `docker run` has none.
 

@@ -1,0 +1,11 @@
+{
+  "name": "copilot-home",
+  "description": "Mounts the host user's ~/.copilot directory into the agent's home so the container reuses the globally configured Copilot CLI credentials and settings.",
+  "priority": 5,
+  "defaultEnabled": true,
+  "requiredAgent": "copilot",
+  "provides": ["copilot-home"],
+  "requires": [],
+  "requiredEnv": [],
+  "secrets": []
+}

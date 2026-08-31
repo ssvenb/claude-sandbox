@@ -5,6 +5,5 @@
   "defaultEnabled": true,
   "provides": ["workspace"],
   "requires": ["git-credentials"],
-  "requiredEnv": ["REPO_URL"],
   "secrets": []
 }

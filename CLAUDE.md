@@ -68,7 +68,7 @@ its flag.
 | Plugin | Agent | Provides | Requires | Owns |
 |--------|-------|----------|----------|------|
 | `github-auth` | any | `git-credentials` | — | `gh` CLI install, App token minting + 40-min refresh loop, `gh auth login` |
-| `git-workspace` | any | `workspace` | `git-credentials` | clone into `/workspace`, per-run branch named after the agent, its git identity, resume briefing |
+| `git-workspace` | any | `workspace` | `git-credentials` | clone the `origin` remote of `run.sh`'s cwd into `/workspace`, per-run branch named after the agent, its git identity, resume briefing |
 | `cwd-workspace` | any | `workspace` | — | bind-mounts the host's cwd (or `$HOST_WORKSPACE_DIR`) at `/workspace`; conflicts with `git-workspace`, off by default |
 | `branch-guard` | claude | — | `workspace` | `guard-branch.py` PreToolUse hook |
 | `headroom` | claude | `llm-proxy` | — | wraps the launch command in the headroom compression proxy (`headroom-ai[proxy,mcp]`, installed in `/opt/headroom`) |
@@ -125,7 +125,6 @@ only required while that one is in use.
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Path to App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default: `github.com`) |
-| `REPO_URL` | git-workspace | HTTPS clone URL of the target repo |
 | `BASE_BRANCH` | git-workspace | Branch to cut from (default: `main`) |
 | `HOST_WORKSPACE_DIR` | cwd-workspace | Host dir mounted at `/workspace` (default: run.sh's cwd) |
 | `CA_CERTS_DIR` | ca-certs | Host dir holding extra root certificates, PEM or DER (default: `/usr/local/share/ca-certificates`) |

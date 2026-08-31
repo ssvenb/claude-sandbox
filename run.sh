@@ -10,6 +10,9 @@
 # ENABLE_<PLUGIN_NAME> flags, e.g. ENABLE_GITHUB_AUTH=0.
 set -euo pipefail
 
+# The directory you launched from is the repo/folder the agent works on, so remember it before
+# hopping to the script's own directory — plugins read it as $HOST_CWD, never as $PWD.
+export HOST_CWD="$PWD"
 cd "$(dirname "$0")"
 # Export everything sourced so plugins and the container inherit it.
 set -a

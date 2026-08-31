@@ -43,7 +43,7 @@ the image, but only the selected one's `install.sh` runs at build time, and the 
 | Agent | CLI | Credentials | Launched as |
 |-------|-----|-------------|-------------|
 | `claude` | Claude Code (npm) | `CLAUDE_CODE_OAUTH_TOKEN`, or the `claude-home` plugin | `claude --dangerously-skip-permissions [prompt]` |
-| `copilot` | GitHub Copilot CLI (standalone installer) | `COPILOT_GITHUB_TOKEN`, or the `copilot-home` plugin | `copilot --allow-all [-i prompt]` |
+| `copilot` | GitHub Copilot CLI (npm) | `COPILOT_GITHUB_TOKEN`, or the `copilot-home` plugin | `copilot --allow-all [-i prompt]` |
 
 `agents/<name>/` may contain:
 

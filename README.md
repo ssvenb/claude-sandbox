@@ -58,7 +58,7 @@ stay out of it; the image is tagged per agent, so switching back and forth doesn
 | Agent | CLI | Credentials | Launched as |
 |-------|-----|-------------|-------------|
 | `claude` | Claude Code (`@anthropic-ai/claude-code`, npm) | `CLAUDE_CODE_OAUTH_TOKEN`, or the `claude-home` plugin | `claude --dangerously-skip-permissions [prompt]` |
-| `copilot` | GitHub Copilot CLI (standalone build from `gh.io/copilot-install`) | `COPILOT_GITHUB_TOKEN`, or the `copilot-home` plugin | `copilot --allow-all [-i prompt]` |
+| `copilot` | GitHub Copilot CLI (`@github/copilot`, npm) | `COPILOT_GITHUB_TOKEN`, or the `copilot-home` plugin | `copilot --allow-all [-i prompt]` |
 
 ### Anatomy of an agent
 

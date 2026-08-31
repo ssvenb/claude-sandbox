@@ -75,7 +75,7 @@ its flag.
 | `claude-home` | claude | `claude-home` | — | mounts the host's `~/.claude` (or `$CLAUDE_HOME_DIR`) at `/home/node/.claude` |
 | `copilot-home` | copilot | `copilot-home` | — | mounts the host's `~/.copilot` (or `$COPILOT_HOME_DIR`) at `/home/node/.copilot` |
 | `ca-certs` | any | `ca-certs` | — | installs the host's extra root CAs (or `$CA_CERTS_DIR`) into the container trust store, for networks behind a TLS-intercepting proxy; off by default |
-| `docker-cli` | any | `docker-cli` | — | Docker CLI + compose plugin install; mounts the host's `/var/run/docker.sock` |
+| `docker-cli` | any | `docker-cli` | — | Docker CLI + compose plugin install; mounts the host's `/var/run/docker.sock` and joins `node` to a group with the socket's gid |
 | `netbird` | any | `mesh-network` | — | NetBird client install; enrols the container as its own peer (`sandbox-<RUN_ID>`) with a setup key, adding `NET_ADMIN` + `/dev/net/tun`; off by default |
 | `s3-auth` | any | `aws-credentials` | — | AWS CLI v2 install; mints a short-lived STS session on the host and passes only that in; off by default |
 | `ssh-credentials` | any | `ssh-credentials` | — | `openssh-client` install; writes the key + `~/.ssh/config` for the agent user; off by default |

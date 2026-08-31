@@ -1,0 +1,11 @@
+{
+  "name": "host-network",
+  "description": "Runs the container in the host's network namespace, so services the agent starts are reachable from the host on the port it bound, and services already listening on the host's localhost are reachable from the agent.",
+  "priority": 5,
+  "defaultEnabled": true,
+  "provides": ["host-network"],
+  "requires": [],
+  "conflicts": ["netbird"],
+  "requiredEnv": [],
+  "secrets": []
+}

@@ -96,7 +96,6 @@ plugins_resolve() {
     # dropped when another agent runs, instead of failing the run.
     wanted=$(plugin_meta "$name" '.requiredAgent // empty')
     if [ -n "$wanted" ] && [ "$wanted" != "${AGENT:-claude}" ]; then
-      echo "⏭️  Plugin '$name' skipped: it requires agent '$wanted', this run uses '${AGENT:-claude}'."
       continue
     fi
     ENABLED_PLUGINS="${ENABLED_PLUGINS:+$ENABLED_PLUGINS }$name"

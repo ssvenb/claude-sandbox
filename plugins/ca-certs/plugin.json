@@ -1,0 +1,10 @@
+{
+  "name": "ca-certs",
+  "description": "Installs extra CA certificates (e.g. a corporate TLS-intercepting proxy's root) into the container's trust store, so HTTPS from inside the sandbox verifies like it does on the host.",
+  "priority": 1,
+  "defaultEnabled": true,
+  "provides": ["ca-certs"],
+  "requires": [],
+  "requiredEnv": [],
+  "secrets": []
+}

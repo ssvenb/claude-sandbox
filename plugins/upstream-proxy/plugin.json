@@ -1,0 +1,10 @@
+{
+  "name": "upstream-proxy",
+  "description": "Runs credential-injecting reverse proxies on the HOST and exposes them to the agent over bind-mounted unix sockets. The agent talks plain HTTP to 127.0.0.1 and never sees the API keys, which stay in the host process.",
+  "priority": 15,
+  "defaultEnabled": true,
+  "provides": ["upstream-proxy"],
+  "requires": [],
+  "requiredEnv": [],
+  "secrets": []
+}

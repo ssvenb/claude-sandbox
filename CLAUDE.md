@@ -15,7 +15,8 @@ feature branch (`<agent-prefix>/<RUN_ID>`, e.g. `claude-code/1a2b3c`) enforced b
 
 ```
 run.sh (host)
-  ├─ sources .env, resolves AGENT and the ENABLE_<PLUGIN> flags, validates config + capabilities
+  ├─ sources .env and the project config, resolves AGENT and the ENABLE_<PLUGIN> flags, validates
+  │  config + capabilities
   ├─ plugin host.sh scripts, then the agent's host.sh, contribute `docker run` args (secrets stay on the host)
   └─ docker run → entrypoint.sh (root)
        ├─ plugin root-init.sh scripts (only context holding secrets)
@@ -74,12 +75,13 @@ its flag.
 | `headroom` | claude | `llm-proxy` | — | wraps the launch command in the headroom compression proxy (`headroom-ai[proxy,mcp]`, installed in `/opt/headroom`) |
 | `claude-home` | claude | `claude-home` | — | mounts the host's `~/.claude` (or `$CLAUDE_HOME_DIR`) at `/home/node/.claude` |
 | `copilot-home` | copilot | `copilot-home` | — | mounts the host's `~/.copilot` (or `$COPILOT_HOME_DIR`) at `/home/node/.copilot` |
-| `ca-certs` | any | `ca-certs` | — | installs the host's extra root CAs (or `$CA_CERTS_DIR`) into the container trust store, for networks behind a TLS-intercepting proxy; off by default |
-| `host-network` | any | `host-network` | — | runs the container in the host's network namespace (`--network host`), so ports the agent binds are reachable from the host and the host's localhost services are reachable from the agent; conflicts with `netbird`, off by default |
+| `ca-certs` | any | `ca-certs` | — | installs the host's extra root CAs (or `$CA_CERTS_DIR`) into the container trust store, for networks behind a TLS-intercepting proxy |
+| `host-network` | any | `host-network` | — | runs the container in the host's network namespace (`--network host`), so ports the agent binds are reachable from the host and the host's localhost services are reachable from the agent; conflicts with `netbird` |
 | `docker-cli` | any | `docker-cli` | — | Docker CLI + compose plugin install; mounts the host's `/var/run/docker.sock` and joins `node` to a group with the socket's gid |
 | `netbird` | any | `mesh-network` | — | NetBird client install; enrols the container as its own peer (`sandbox-<RUN_ID>`) with a setup key, adding `NET_ADMIN` + `/dev/net/tun`; off by default |
 | `s3-auth` | any | `aws-credentials` | — | AWS CLI v2 install; mints a short-lived STS session on the host and passes only that in; off by default |
 | `ssh-credentials` | any | `ssh-credentials` | — | `openssh-client` install; writes the key + `~/.ssh/config` for the agent user; off by default |
+| `upstream-proxy` | any | `upstream-proxy` | — | runs credential-injecting reverse proxies on the HOST, one per route from the project config, and bind-mounts their unix sockets; `socat` bridges each to a loopback port, so the agent talks plain HTTP and never sees the API keys. No routes configured → does nothing |
 
 Disable them all and the agent starts plain in an empty `/workspace` with no GitHub access.
 
@@ -91,7 +93,7 @@ Disable them all and the agent starts plain in an empty `/workspace` with no Git
 |------|---------|---------|
 | `plugin.json` | — | manifest: `priority`, `defaultEnabled`, `requiredAgent`, `provides`, `requires`, `conflicts`, `requiredEnv`, `secrets` |
 | `install.sh` | root, at image build | install the plugin's dependencies (e.g. `gh`); runs only when the plugin is enabled |
-| `host.sh` | you, on the host | validate config; call `pass_env VAR` / `pass_value NAME VALUE` / `pass_mount HOST_PATH CONTAINER_PATH [OPTS]` / `pass_arg FLAG...` to add `docker run` args; set `AGENT_AUTH_PROVIDED=1` if the plugin supplies the agent's credentials itself |
+| `host.sh` | you, on the host | validate config; call `pass_env VAR` / `pass_value NAME VALUE` / `pass_mount HOST_PATH CONTAINER_PATH [OPTS]` / `pass_arg FLAG...` to add `docker run` args; read per-project settings with `plugin_config FILTER [DEFAULT]` / `plugin_config_json FILTER [DEFAULT]`; set `AGENT_AUTH_PROVIDED=1` if the plugin supplies the agent's credentials itself |
 | `root-init.sh` | root, in container | anything needing secrets; exports survive the `su -m node` handoff |
 | `agent-init.sh` | `node`, in container | agent-visible setup; append to `$AGENT_PROMPT_FILE` to brief the agent |
 | `settings.json` | — | fragment merged into the managed policy (objects merge, lists concatenate) |
@@ -102,6 +104,23 @@ Stage scripts are *sourced*, run in `priority` order, and are all optional. Vars
 `secrets` are unset before the agent user takes over. Unmet `requires`/`requiredEnv`, or two
 enabled plugins listing each other in `conflicts`, fail the run on the host, before the image is
 built.
+
+### Project configuration
+
+`.env` configures the sandbox; settings that belong to the *repo being worked on* live in an
+optional `.claude-sandbox.json` in `$HOST_CWD` (override: `PROJECT_CONFIG_FILE`), loaded by
+`src/lib/host-project-config.sh` before plugin resolution:
+
+```json
+{ "plugins": { "upstream-proxy": { "envFile": ".env", "routes": [ ... ] } } }
+```
+
+A `host.sh` reads its own section — `.plugins["<plugin>"]`, keyed by `$PLUGIN_NAME`, no need to
+name itself — with `plugin_config` (scalars) and `plugin_config_json` (objects/arrays); both take
+a jq filter relative to that section plus a fallback for when the file, section or key is missing.
+The file and every key in it are optional, so a plugin reading config must still work without one,
+and nothing in it reaches the container except through the plugin's own `pass_*` calls. See
+`.claude-sandbox.example.json`.
 
 ## Build & Run
 
@@ -120,9 +139,10 @@ only required while that one is in use.
 | Variable | Owner | Purpose |
 |----------|-------|---------|
 | `AGENT` | core | Which agent runs: a directory name under `agents/` (default `claude`) |
+| `PROJECT_CONFIG_FILE` | core | Per-project plugin configuration (default `$HOST_CWD/.claude-sandbox.json`; optional) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | agents/claude | Claude Code OAuth token for API auth (required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does) |
 | `COPILOT_GITHUB_TOKEN` | agents/copilot | Fine-grained PAT with the "Copilot Requests" permission (or a Copilot/`gh` OAuth token); required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_HEADROOM` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_NETBIRD` / `ENABLE_S3_AUTH` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_CA_CERTS` / `ENABLE_HOST_NETWORK` | core | plugin switches (default on, except `cwd-workspace`, `netbird`, `s3-auth`, `ssh-credentials`, `ca-certs`, `host-network`) |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_HEADROOM` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_NETBIRD` / `ENABLE_S3_AUTH` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_CA_CERTS` / `ENABLE_HOST_NETWORK` / `ENABLE_UPSTREAM_PROXY` | core | plugin switches (default on, except `cwd-workspace`, `netbird`, `s3-auth`, `ssh-credentials`) |
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Path to App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default: `github.com`) |

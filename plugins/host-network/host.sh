@@ -10,6 +10,6 @@
 # The trade is symmetric, and worth stating: everything bound to the host's loopback is now in
 # reach of an unattended agent, including anything that treats "came from localhost" as
 # authentication. Bind ports it should not reach to a specific interface rather than 0.0.0.0, and
-# keep this plugin off (it is off by default) on machines where that is not true.
+# keep this plugin off (ENABLE_HOST_NETWORK=0) on machines where that is not true.
 
 pass_arg --network host

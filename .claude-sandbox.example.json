@@ -1,0 +1,43 @@
+{
+  "plugins": {
+    "upstream-proxy": {
+      "envFile": ".env",
+      "routes": [
+        {
+          "name": "cribl",
+          "port": 8081,
+          "upstream": "${CRIBL_SERVER_URL}",
+          "allowMethods": ["GET"],
+          "allowPaths": ["/api/v1/"],
+          "auth": {
+            "type": "oauth2_client_credentials",
+            "tokenUrl": "https://login.cribl.cloud/oauth/token",
+            "audience": "https://api.cribl.cloud",
+            "clientIdEnv": "CRIBL_CLIENT_ID",
+            "clientSecretEnv": "CRIBL_CLIENT_SECRET"
+          },
+          "containerEnv": {
+            "CRIBL_SERVER_URL": "http://127.0.0.1:8081",
+            "CRIBL_BEARER_TOKEN": "proxied-on-the-host"
+          }
+        },
+        {
+          "name": "azure-openai",
+          "port": 8082,
+          "upstream": "${AZURE_OPENAI_ENDPOINT}",
+          "allowMethods": ["POST"],
+          "allowPaths": ["/openai/"],
+          "auth": {
+            "type": "header",
+            "header": "api-key",
+            "valueEnv": "AZURE_OPENAI_API_KEY"
+          },
+          "containerEnv": {
+            "AZURE_OPENAI_ENDPOINT": "http://127.0.0.1:8082",
+            "AZURE_OPENAI_API_KEY": "proxied-on-the-host"
+          }
+        }
+      ]
+    }
+  }
+}

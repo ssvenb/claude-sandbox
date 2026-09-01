@@ -38,6 +38,12 @@
           }
         }
       ]
+    },
+    "project-deps": {
+      "apt": ["ripgrep", "postgresql-client"],
+      "npm": ["pnpm@9"],
+      "pip": ["ruff"],
+      "setup": ["pnpm install --frozen-lockfile", "make bootstrap"]
     }
   }
 }

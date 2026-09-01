@@ -1,0 +1,10 @@
+{
+  "name": "project-deps",
+  "description": "Installs the dependencies the repo being worked on needs — apt/npm/pip packages and setup commands declared in the project config file. No configuration means nothing is installed.",
+  "priority": 25,
+  "defaultEnabled": true,
+  "provides": ["project-deps"],
+  "requires": [],
+  "requiredEnv": [],
+  "secrets": []
+}

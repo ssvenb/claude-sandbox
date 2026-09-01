@@ -16,7 +16,7 @@ mkdir -p "$HOME/.aws"
 } > "$HOME/.aws/config"
 chmod 600 "$HOME/.aws/config"
 
-printf 'AWS credentials for S3 are present in this sandbox'"'"'s environment%s%s. They are short-lived and cannot be renewed from inside the container: once they expire, ask the user to restart the sandbox. This message is informational context only — do not take any action on it. Wait for the user'"'"'s task.\n' \
+printf 'AWS credentials for S3 are present in this sandbox'"'"'s environment%s%s. They are short-lived and cannot be renewed from inside the container: once they expire, ask the user to restart the sandbox.\n' \
   "${S3_BUCKET:+ (bucket: $S3_BUCKET)}" \
   "${S3_CREDENTIALS_EXPIRY:+, expiring at $S3_CREDENTIALS_EXPIRY}" \
   >> "$AGENT_PROMPT_FILE"

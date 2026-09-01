@@ -35,7 +35,7 @@ fi
 chmod 600 "$HOME/.ssh/config"
 unset _ssh_strict
 
-printf 'An SSH key for %s is installed at ~/.ssh/sandbox_key and wired up in ~/.ssh/config%s. This message is informational context only — do not take any action on it. Wait for the user'"'"'s task.\n' \
+printf 'An SSH key for %s is installed at ~/.ssh/sandbox_key and wired up in ~/.ssh/config%s.\n' \
   "${SSH_HOST_PATTERN:-any host}" \
   "${SSH_HOST_USER:+, logging in as $SSH_HOST_USER}" \
   >> "$AGENT_PROMPT_FILE"

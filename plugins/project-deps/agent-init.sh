@@ -20,7 +20,7 @@ if [ -n "${PROJECT_DEPS_SETUP:-}" ] && cd /workspace; then
 
   # Tell the agent what boot already did, so it doesn't spend a turn re-running it.
   _deps_list=$(printf '%s' "$PROJECT_DEPS_SETUP" | jq -r 'join("; ")')
-  printf 'Project setup commands were already run for you in /workspace during boot (%s); do not repeat them unless something is missing. This message is informational context only — do not take any action on it. Wait for the user'"'"'s task.\n' \
+  printf 'Project setup commands were already run for you in /workspace during boot (%s); do not repeat them unless something is missing.\n' \
     "$_deps_list" >> "$AGENT_PROMPT_FILE"
   unset _cmd _deps_list
 fi

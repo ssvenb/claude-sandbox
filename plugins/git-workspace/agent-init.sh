@@ -41,10 +41,25 @@ if [ "${RESUME:-0}" = 1 ]; then
   [ -n "$pr" ] && printf ' A pull request already exists for this branch (%s); push follow-up work to this branch and do NOT open a new PR.' \
     "$pr" >> "$AGENT_PROMPT_FILE"
 
-  printf ' This message is informational context only — do not take any action on it. Wait for the user'"'"'s task.\n' \
-    >> "$AGENT_PROMPT_FILE"
 else
   # Created HERE, before the agent starts, so the branch guard still applies.
   git checkout -b "$AGENT_BRANCH" "origin/$BASE_BRANCH"
   echo "✅ Created branch $AGENT_BRANCH off origin/$BASE_BRANCH in isolated /workspace (RUN_ID=$RUN_ID)"
+
+  # Same briefing role as the resume path: stdout is invisible to the agent, so the branch it is
+  # on has to reach it through the prompt — otherwise its first act is often to create one of its
+  # own, which the guard then rejects.
+  printf 'You are working in an isolated clone at /workspace on the branch %s, created for this sandbox run (RUN_ID=%s) off %s. Commit and push your work to this branch.' \
+    "$AGENT_BRANCH" "$RUN_ID" "$BASE_BRANCH" >> "$AGENT_PROMPT_FILE"
 fi
+
+# Only claimed when the guard is actually enforcing it — the plugin is Claude-only and can be
+# switched off, and telling the agent about a restriction that isn't there would be a lie it
+# would waste turns working around.
+case " ${ENABLED_PLUGINS:-} " in
+  *" branch-guard "*)
+    printf ' You cannot leave this branch: a PreToolUse hook blocks every `git checkout`, `git switch`, `git branch` and `git worktree` command outright, and allows pushes only to %s. Do not attempt to switch or create a branch, and use `git restore` rather than `git checkout` to discard changes to a file.\n' \
+      "$AGENT_BRANCH" >> "$AGENT_PROMPT_FILE" ;;
+  *)
+    printf ' Stay on this branch for all of your work.\n' >> "$AGENT_PROMPT_FILE" ;;
+esac

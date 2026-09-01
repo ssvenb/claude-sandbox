@@ -25,6 +25,15 @@ plugin_run_stage agent-init
 
 cd /workspace
 
+# Everything the plugins wrote is boot-time context — the branch, the setup that already ran —
+# never a task. Say so once, here, instead of in every plugin that briefs the agent, so the agent
+# doesn't treat its own provisioning as an instruction. Only when there is something to qualify:
+# with no plugin briefing, the agent starts with an empty prompt and no preamble at all.
+if [ -s "$AGENT_PROMPT_FILE" ]; then
+  printf 'This message is informational context only — do not take any action on it. Wait for the user'"'"'s task.\n' \
+    >> "$AGENT_PROMPT_FILE"
+fi
+
 AGENT_PROMPT=$(cat "$AGENT_PROMPT_FILE")
 export AGENT_PROMPT
 rm -f "$AGENT_PROMPT_FILE"

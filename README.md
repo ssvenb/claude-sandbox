@@ -57,7 +57,7 @@ stay out of it; the image is tagged per agent, so switching back and forth doesn
 
 | Agent | CLI | Credentials | Launched as |
 |-------|-----|-------------|-------------|
-| `claude` | Claude Code (`@anthropic-ai/claude-code`, npm) | `CLAUDE_CODE_OAUTH_TOKEN`, or the `claude-home` plugin | `claude --dangerously-skip-permissions [prompt]` |
+| `claude` | Claude Code (`@anthropic-ai/claude-code`, npm) | `CLAUDE_CODE_OAUTH_TOKEN`, or the `claude-home` plugin | `claude --dangerously-skip-permissions --effort ${CLAUDE_EFFORT:-low} [prompt]` |
 | `copilot` | GitHub Copilot CLI (`@github/copilot`, npm) | `COPILOT_GITHUB_TOKEN`, or the `copilot-home` plugin | `copilot --allow-all [-i prompt]` |
 
 ### Anatomy of an agent
@@ -377,6 +377,7 @@ only required while that agent or plugin is in use.
 | `AGENT` | core | Which agent runs: a directory name under `agents/` (default `claude`) |
 | `PROJECT_CONFIG_FILE` | core | Per-project plugin configuration (default `$HOST_CWD/.claude-sandbox.json`; optional) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | agents/claude | Claude Code OAuth token (`claude setup-token`). Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does |
+| `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low` (the sandbox default), `medium`, `high`, `xhigh`, `max` |
 | `COPILOT_GITHUB_TOKEN` | agents/copilot | Fine-grained PAT with the "Copilot Requests" permission (or a Copilot/`gh` OAuth token). Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
 | `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_HEADROOM` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_CA_CERTS` / `ENABLE_HOST_NETWORK` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_NETBIRD` / `ENABLE_S3_AUTH` / `ENABLE_SSH_CREDENTIALS` | core | plugin switches (default on, except `cwd-workspace`, `netbird`, `s3-auth` and `ssh-credentials`) |
 | `GH_APP_ID` | github-auth | GitHub App ID |

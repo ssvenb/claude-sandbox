@@ -1,5 +1,8 @@
 {
   "plugins": {
+    "git-workspace": {
+      "branchPrefix": "sandbox"
+    },
     "upstream-proxy": {
       "envFile": ".env",
       "routes": [

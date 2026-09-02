@@ -26,6 +26,8 @@ set +a
 . src/lib/host-agents.sh
 # shellcheck source=src/lib/host-project-config.sh
 . src/lib/host-project-config.sh
+# shellcheck source=src/lib/host-project-env.sh
+. src/lib/host-project-env.sh
 
 # --resume <RUN_ID>: re-attach to that run. No arg → fresh run.
 usage() { echo "Usage: $0 [--resume <RUN_ID>]   (RUN_ID is 6 hex chars)" >&2; exit "${1:-1}"; }
@@ -52,6 +54,7 @@ agent_resolve
 # contribute its own docker run arguments. The agent's host stage comes last, so a plugin that
 # brings credentials of its own (AGENT_AUTH_PROVIDED=1) is already accounted for.
 project_config_load
+project_env_load
 plugins_discover
 plugins_resolve
 plugins_validate

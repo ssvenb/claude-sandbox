@@ -8,7 +8,7 @@ selected agent with every permission prompt disabled. Which agent that is comes 
 the agent to a branch, mounting your `~/.claude` — lives in **plugins** that can be switched off
 individually. With the defaults, the GitHub App private key never leaves your machine (the
 container only sees short-lived installation tokens), and each run works on its own
-`<agent-prefix>/<RUN_ID>` branch enforced by a managed hook the agent cannot edit.
+`<prefix>/<yyyymmdd>-<RUN_ID>` branch enforced by a managed hook the agent cannot edit.
 
 ## Quick start
 
@@ -82,9 +82,11 @@ Omit it and no policy file is written. An optional `git` block names the agent i
 "git": { "branchPrefix": "claude-code", "userName": "Claude Code", "userEmail": "claude-code@anthropic.com" }
 ```
 
-The branch becomes `<branchPrefix>/<RUN_ID>` and commits are authored under that name and email;
-an agent that omits the block falls back to its own directory name (`copilot/1a2b3c`,
-`copilot@sandbox.local`).
+The branch becomes `<branchPrefix>/<yyyymmdd>-<RUN_ID>` and commits are authored under that name
+and email; an agent that omits the block falls back to its own directory name
+(`copilot/20260902-1a2b3c`, `copilot@sandbox.local`). The worked-on repo overrides the prefix, either with
+`BRANCH_PREFIX` in its `.env` or — winning over that — `.plugins["git-workspace"].branchPrefix`
+in its `.claude-sandbox.json`.
 
 Because `host.sh` runs after the plugin host stage, it can see `AGENT_AUTH_PROVIDED=1` from a
 plugin that supplies credentials itself and skip its own token check:
@@ -119,7 +121,7 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | `s3-auth` | 10 | off | any | `aws-credentials` | — | AWS CLI v2 install; mints a short-lived STS session on the host, passes only that in |
 | `ssh-credentials` | 15 | off | any | `ssh-credentials` | — | `openssh-client` install; writes `~/.ssh/sandbox_key` + `~/.ssh/config` for the agent user |
 | `upstream-proxy` | 15 | on | any | `upstream-proxy` | — | credential-injecting reverse proxies on the HOST, one per route from the project config, bind-mounted as unix sockets and bridged to loopback ports with `socat`; no routes configured → does nothing |
-| `git-workspace` | 20 | on | any | `workspace` | `git-credentials` | clone the `origin` remote of `run.sh`'s cwd into `/workspace`, per-run branch named after the agent, its commit identity, resume briefing |
+| `git-workspace` | 20 | on | any | `workspace` | `git-credentials` | clone the `origin` remote of `run.sh`'s cwd into `/workspace`, per-run branch named after the agent (or `$BRANCH_PREFIX`) and the date, its commit identity, resume briefing |
 | `cwd-workspace` | 20 | off | any | `workspace` | — | bind-mounts the host's cwd (or `$HOST_WORKSPACE_DIR`) at `/workspace`; conflicts with `git-workspace` |
 | `agent-workspace` | 15 | on | any | `workspace-mirror` | — | bind-mounts `$AGENT_WORKSPACE_DIR/<RUN_ID>` (default `~/.agent-workspace/<RUN_ID>`, created if missing) at `/workspace`, so the agent's checkout is visible on the host; complements `git-workspace`, conflicts with `cwd-workspace` |
 | `project-deps` | 25 | on | any | `project-deps` | — | installs the dependencies the target repo declares in the project config: apt/npm/pip packages (as root, at boot) and `setup` shell commands (as the agent user, in the provisioned `/workspace`); nothing configured → does nothing |
@@ -280,6 +282,21 @@ Both the file and every key in it are optional, so a plugin that reads config mu
 without one. Nothing in the file reaches the container by itself — the plugin decides what
 crosses over, via `pass_*`. See [.claude-sandbox.example.json](.claude-sandbox.example.json).
 
+### The worked-on repo's `.env`
+
+Some of those per-project settings conventionally live in the repo's own `.env` instead
+(`BRANCH_PREFIX`, say). `run.sh` loads `$HOST_CWD/.env` centrally — `PROJECT_ENV_FILE` points
+somewhere else, `/dev/null` loads nothing — and any `host.sh` reads a single key from it:
+
+```sh
+# shellcheck shell=bash
+PREFIX=$(project_env BRANCH_PREFIX "${BRANCH_PREFIX:-}")
+```
+
+The file is *scanned*, not sourced: it is the target repo's, full of its own secrets and possibly
+its own commands, so nothing in it lands in `run.sh`'s environment and nothing reaches the
+container except through the plugin's own `pass_*` calls.
+
 ### `root-init.sh` — root stage (in the container)
 
 Sourced by `entrypoint.sh` as root, in POSIX `sh`. This is the **only** context that still holds
@@ -321,7 +338,7 @@ Recognised output:
 # shellcheck shell=sh
 git clone "$REPO_URL" /workspace
 cd /workspace
-AGENT_BRANCH="$AGENT_BRANCH_PREFIX/$RUN_ID"
+AGENT_BRANCH="$AGENT_BRANCH_PREFIX/$(date -u +%Y%m%d)-$RUN_ID"
 export AGENT_BRANCH
 git checkout -b "$AGENT_BRANCH" "origin/${BASE_BRANCH:-main}"
 
@@ -377,6 +394,7 @@ only required while that agent or plugin is in use.
 |----------|-------|---------|
 | `AGENT` | core | Which agent runs: a directory name under `agents/` (default `claude`) |
 | `PROJECT_CONFIG_FILE` | core | Per-project plugin configuration (default `$HOST_CWD/.claude-sandbox.json`; optional) |
+| `PROJECT_ENV_FILE` | core | The worked-on repo's `.env`, scanned for plugin settings it keeps there (default `$HOST_CWD/.env`; `/dev/null` loads nothing) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | agents/claude | Claude Code OAuth token (`claude setup-token`). Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does |
 | `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low` (the sandbox default), `medium`, `high`, `xhigh`, `max` |
 | `COPILOT_GITHUB_TOKEN` | agents/copilot | Fine-grained PAT with the "Copilot Requests" permission (or a Copilot/`gh` OAuth token). Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
@@ -384,8 +402,9 @@ only required while that agent or plugin is in use.
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Host path to the App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default `github.com`) |
-| `BASE_BRANCH` | git-workspace | Branch to cut from (default `main`) |
+| `BASE_BRANCH` | git-workspace | Branch to cut from (default: the repo's own default branch, via `origin/HEAD`) |
 | `HOST_WORKSPACE_DIR` | cwd-workspace | Host dir mounted at `/workspace` (default: `run.sh`'s cwd) |
+| `BRANCH_PREFIX` | git-workspace | Leading segment of the per-run branch name, read from the **worked-on repo's** `$HOST_CWD/.env` (not the sandbox's); `.plugins["git-workspace"].branchPrefix` in its `.claude-sandbox.json` wins over it, and with neither it defaults to the agent manifest's `branchPrefix`, else the agent's directory name |
 | `AGENT_WORKSPACE_DIR` | agent-workspace | Host dir holding the per-run mirrors of `/workspace`, created if missing (default: `$HOME/.agent-workspace`; each run uses `<dir>/<RUN_ID>`) |
 | `CA_CERTS_DIR` | ca-certs | Host dir holding extra root certificates, PEM or DER (default `/usr/local/share/ca-certificates`) |
 | `CLAUDE_HOME_DIR` | claude-home | Host dir mounted as the agent's `~/.claude` (default `$HOME/.claude`) |

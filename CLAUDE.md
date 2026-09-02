@@ -9,7 +9,7 @@ agent-agnostic: which agent runs comes from **`AGENT`** (a directory under `agen
 everything opinionated (GitHub auth, cloning, branch enforcement) lives in **plugins** that can be
 switched off. With the default plugins on, the host holds a GitHub App private key, the container
 only ever sees short-lived installation tokens minted from it, and each run gets an isolated
-feature branch (`<agent-prefix>/<RUN_ID>`, e.g. `claude-code/1a2b3c`) enforced by a managed PreToolUse hook.
+feature branch (`<prefix>/<yyyymmdd>-<RUN_ID>`, e.g. `claude-code/20260902-1a2b3c`) enforced by a managed PreToolUse hook.
 
 ## Architecture
 
@@ -69,7 +69,7 @@ its flag.
 | Plugin | Agent | Provides | Requires | Owns |
 |--------|-------|----------|----------|------|
 | `github-auth` | any | `git-credentials` | — | `gh` CLI install, App token minting + 40-min refresh loop, `gh auth login` |
-| `git-workspace` | any | `workspace` | `git-credentials` | clone the `origin` remote of `run.sh`'s cwd into `/workspace`, per-run branch named after the agent, its git identity, resume briefing |
+| `git-workspace` | any | `workspace` | `git-credentials` | clone the `origin` remote of `run.sh`'s cwd into `/workspace`, per-run branch named after the agent (or `$BRANCH_PREFIX`) and the date, its git identity, resume briefing |
 | `cwd-workspace` | any | `workspace` | — | bind-mounts the host's cwd (or `$HOST_WORKSPACE_DIR`) at `/workspace`; conflicts with `git-workspace`, off by default |
 | `agent-workspace` | any | `workspace-mirror` | — | bind-mounts `$AGENT_WORKSPACE_DIR/<RUN_ID>` (default `~/.agent-workspace/<RUN_ID>`, created if missing) at `/workspace`, so the agent's checkout is visible on the host; complements `git-workspace`, conflicts with `cwd-workspace` |
 | `branch-guard` | claude | — | `workspace` | `guard-branch.py` PreToolUse hook |
@@ -95,7 +95,7 @@ Disable them all and the agent starts plain in an empty `/workspace` with no Git
 |------|---------|---------|
 | `plugin.json` | — | manifest: `priority`, `defaultEnabled`, `requiredAgent`, `provides`, `requires`, `conflicts`, `requiredEnv`, `secrets` |
 | `install.sh` | root, at image build | install the plugin's dependencies (e.g. `gh`); runs only when the plugin is enabled |
-| `host.sh` | you, on the host | validate config; call `pass_env VAR` / `pass_value NAME VALUE` / `pass_mount HOST_PATH CONTAINER_PATH [OPTS]` / `pass_arg FLAG...` to add `docker run` args; read per-project settings with `plugin_config FILTER [DEFAULT]` / `plugin_config_json FILTER [DEFAULT]`; set `AGENT_AUTH_PROVIDED=1` if the plugin supplies the agent's credentials itself |
+| `host.sh` | you, on the host | validate config; call `pass_env VAR` / `pass_value NAME VALUE` / `pass_mount HOST_PATH CONTAINER_PATH [OPTS]` / `pass_arg FLAG...` to add `docker run` args; read per-project settings with `plugin_config FILTER [DEFAULT]` / `plugin_config_json FILTER [DEFAULT]` / `project_env NAME [DEFAULT]`; set `AGENT_AUTH_PROVIDED=1` if the plugin supplies the agent's credentials itself |
 | `root-init.sh` | root, in container | anything needing secrets; exports survive the `su -m node` handoff |
 | `agent-init.sh` | `node`, in container | agent-visible setup; append to `$AGENT_PROMPT_FILE` to brief the agent |
 | `settings.json` | — | fragment merged into the managed policy (objects merge, lists concatenate) |
@@ -124,6 +124,12 @@ The file and every key in it are optional, so a plugin reading config must still
 and nothing in it reaches the container except through the plugin's own `pass_*` calls. See
 `.claude-sandbox.example.json`.
 
+The worked-on repo's own `.env` is loaded centrally too, by `src/lib/host-project-env.sh`
+(`$HOST_CWD/.env`, override `PROJECT_ENV_FILE`, `/dev/null` to load nothing): a `host.sh` reads one
+key from it with `project_env NAME [default]` (`git-workspace` takes `BRANCH_PREFIX` this way). The
+file is scanned, never sourced — it is the target repo's, so its secrets and commands stay out of
+`run.sh`'s shell.
+
 ## Build & Run
 
 ```bash
@@ -143,6 +149,7 @@ only required while that one is in use.
 | `AGENT` | core | Which agent runs: a directory name under `agents/` (default `claude`) |
 | `AGENT_VERSION` | core | Version of the agent's CLI baked into the image; empty (default) resolves the registry's latest on every run |
 | `PROJECT_CONFIG_FILE` | core | Per-project plugin configuration (default `$HOST_CWD/.claude-sandbox.json`; optional) |
+| `PROJECT_ENV_FILE` | core | The worked-on repo's `.env`, scanned for plugin settings it keeps there (default `$HOST_CWD/.env`; `/dev/null` loads nothing) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | agents/claude | Claude Code OAuth token for API auth (required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does) |
 | `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low` (default), `medium`, `high`, `xhigh`, `max` |
 | `COPILOT_GITHUB_TOKEN` | agents/copilot | Fine-grained PAT with the "Copilot Requests" permission (or a Copilot/`gh` OAuth token); required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
@@ -150,7 +157,8 @@ only required while that one is in use.
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Path to App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default: `github.com`) |
-| `BASE_BRANCH` | git-workspace | Branch to cut from (default: `main`) |
+| `BRANCH_PREFIX` | git-workspace | Leading segment of the per-run branch name, read from the **worked-on repo's** `$HOST_CWD/.env` (not the sandbox's); `.plugins["git-workspace"].branchPrefix` in its `.claude-sandbox.json` wins over it, and with neither it defaults to the agent manifest's `branchPrefix`, else the agent's directory name |
+| `BASE_BRANCH` | git-workspace | Branch to cut from (default: the repo's own default branch, via `origin/HEAD`) |
 | `HOST_WORKSPACE_DIR` | cwd-workspace | Host dir mounted at `/workspace` (default: run.sh's cwd) |
 | `AGENT_WORKSPACE_DIR` | agent-workspace | Host dir holding the per-run mirrors of `/workspace`, created if missing (default: `$HOME/.agent-workspace`; each run uses `<dir>/<RUN_ID>`) |
 | `CA_CERTS_DIR` | ca-certs | Host dir holding extra root certificates, PEM or DER (default: `/usr/local/share/ca-certificates`) |

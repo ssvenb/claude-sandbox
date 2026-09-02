@@ -8,4 +8,5 @@
 # by the pipe, leaving an image with no copilot binary).
 set -eu
 
-npm install -g @github/copilot
+# $AGENT_VERSION is resolved on the host (see agent_version_resolve); empty means latest.
+npm install -g "@github/copilot${AGENT_VERSION:+@$AGENT_VERSION}"

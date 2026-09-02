@@ -2,6 +2,7 @@
   "name": "claude",
   "description": "Anthropic's Claude Code CLI, started with --dangerously-skip-permissions.",
   "managedSettings": "/etc/claude-code/managed-settings.json",
+  "npmPackage": "@anthropic-ai/claude-code",
   "git": {
     "branchPrefix": "claude-code",
     "userName": "Claude Code",

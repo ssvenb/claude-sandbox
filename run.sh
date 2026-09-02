@@ -66,9 +66,13 @@ echo "🔌 Plugins: ${ENABLED_PLUGINS:-<none>}"
 
 # Agent and plugin mix are baked in: only the selected agent's and the enabled plugins'
 # install.sh run, so changing either rebuilds. Each agent gets its own image tag.
+# The CLI version joins them, so a new upstream release rebuilds the install layer and nothing
+# else; an unchanged version leaves the whole build cached.
 IMAGE="claude-agent:$AGENT"
+agent_version_resolve
 docker build -t "$IMAGE" \
   --build-arg AGENT="$AGENT" \
+  --build-arg AGENT_VERSION="${AGENT_VERSION:-}" \
   --build-arg ENABLED_PLUGINS="$ENABLED_PLUGINS" .
 
 docker run -it --rm \

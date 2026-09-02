@@ -26,6 +26,32 @@ agent_resolve() {
   jq -e . "$AGENT_DIR/agent.json" >/dev/null 2>&1 || die "Malformed manifest: $AGENT_DIR/agent.json"
 }
 
+# Work out which version of the CLI the image should hold, and export it as $AGENT_VERSION for
+# run.sh to pass to `docker build`. The version is part of the build-arg set, so it is also the
+# cache key of the install layer: unchanged version → Docker reuses the layer and the build is a
+# no-op; a new release upstream → that one layer rebuilds. Without this the layer would be reused
+# forever (the in-container auto-updater is off), quietly freezing the agent on an old release.
+#
+# $AGENT_VERSION set in .env pins explicitly and skips the lookup. Otherwise the version comes
+# from the registry, and if that query fails (offline, registry down) we leave it empty rather
+# than fail the run: an empty arg is still unchanged, so the existing image is reused as-is.
+agent_version_resolve() {
+  local pkg
+  pkg=$(agent_meta '.npmPackage // empty')
+  [ -n "$pkg" ] || return 0
+  if [ -n "${AGENT_VERSION:-}" ]; then
+    echo "📌 $pkg@$AGENT_VERSION (pinned)"
+    return 0
+  fi
+  AGENT_VERSION=$(npm view "$pkg" version 2>/dev/null | tr -d '[:space:]') || true
+  if [ -n "$AGENT_VERSION" ]; then
+    echo "📌 $pkg@$AGENT_VERSION (latest)"
+  else
+    echo "⚠️  Could not reach the npm registry for $pkg — keeping the version already in the image."
+  fi
+  export AGENT_VERSION
+}
+
 # Source the agent's host.sh so it can validate its credentials and contribute docker run args.
 agent_host_stage() {
   if [ -f "$AGENT_DIR/host.sh" ]; then

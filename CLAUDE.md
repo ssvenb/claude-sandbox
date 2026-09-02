@@ -50,7 +50,7 @@ the image, but only the selected one's `install.sh` runs at build time, and the 
 
 | Path | Runs as | Purpose |
 |------|---------|---------|
-| `agent.json` | — | manifest: `name`, `description`, `managedSettings` (where plugin policy fragments are written; omit for none), optional `git` block (`branchPrefix`, `userName`, `userEmail`) used by `git-workspace` |
+| `agent.json` | — | manifest: `name`, `description`, `managedSettings` (where plugin policy fragments are written; omit for none), optional `npmPackage` (the CLI's package, so `run.sh` can resolve its latest version into the `AGENT_VERSION` build arg), optional `git` block (`branchPrefix`, `userName`, `userEmail`) used by `git-workspace` |
 | `install.sh` | root, at image build | install the CLI; runs only for the selected agent |
 | `host.sh` | you, on the host | validate credentials, `pass_env` them; runs **after** every plugin's `host.sh`, so it can honour `AGENT_AUTH_PROVIDED=1` |
 | `agent-init.sh` | `node` | seed the agent's own config for a non-interactive boot |
@@ -141,6 +141,7 @@ only required while that one is in use.
 | Variable | Owner | Purpose |
 |----------|-------|---------|
 | `AGENT` | core | Which agent runs: a directory name under `agents/` (default `claude`) |
+| `AGENT_VERSION` | core | Version of the agent's CLI baked into the image; empty (default) resolves the registry's latest on every run |
 | `PROJECT_CONFIG_FILE` | core | Per-project plugin configuration (default `$HOST_CWD/.claude-sandbox.json`; optional) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | agents/claude | Claude Code OAuth token for API auth (required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does) |
 | `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low` (default), `medium`, `high`, `xhigh`, `max` |
@@ -172,5 +173,5 @@ Volume mounts are contributed by plugins via `pass_mount`; the core `docker run`
 
 - The agent user (`node`) never sees the GitHub App private key — only short-lived tokens.
 - `/opt/plugins` and `/opt/agents` are root-owned and immutable from within the container, so the agent cannot edit or disable its own guardrails.
-- `DISABLE_AUTOUPDATER=1` / `COPILOT_AUTO_UPDATE=false` — the agent version is pinned at image build time.
+- `DISABLE_AUTOUPDATER=1` / `COPILOT_AUTO_UPDATE=false` — the agent version is pinned at image build time; `run.sh` resolves the latest release on the host and passes it as the `AGENT_VERSION` build arg, so the install layer rebuilds when (and only when) a new version is out.
 - `HEADROOM_TELEMETRY=off` (set by the `headroom` plugin) — no telemetry leaves the container.

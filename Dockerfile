@@ -18,12 +18,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Agents. Every agent's files ship in the image, but only the one named by the AGENT build arg
 # gets its CLI installed, so an unused agent's binaries stay out of the image. run.sh passes the
 # resolved name and tags the image per agent, so switching agents rebuilds this layer only.
+#
+# AGENT_VERSION is the version of the agent's CLI to install; empty means the registry's latest.
+# run.sh resolves it on the host, which is what makes the cache do the right thing: the arg is
+# part of this layer's cache key, so the layer rebuilds exactly when a new version is out and is
+# reused otherwise. It is referenced in the RUN below so the value cannot be optimised away.
 COPY agents /opt/agents
 ARG AGENT=claude
+ARG AGENT_VERSION=
 RUN set -eu; \
     [ -d "/opt/agents/$AGENT" ] || { echo "Unknown agent: $AGENT" >&2; exit 1; }; \
     if [ -f "/opt/agents/$AGENT/install.sh" ]; then \
-      echo "🤖 $AGENT"; sh "/opt/agents/$AGENT/install.sh"; \
+      echo "🤖 $AGENT ${AGENT_VERSION:-latest}"; \
+      AGENT_VERSION="$AGENT_VERSION" sh "/opt/agents/$AGENT/install.sh"; \
     fi
 RUN chown -R root:root /opt/agents \
     && find /opt/agents -type d -exec chmod 555 {} + \

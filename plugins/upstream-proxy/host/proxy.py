@@ -18,6 +18,14 @@ Each route in routes.json:
   allowPaths     path prefixes the proxy will relay (default: everything)
   auth           how the credential is injected, see _Injector below
   maxBodyBytes   request body cap (default 8 MiB)
+  port           loopback port the container reaches this route on, used to derive localUrl
+  localUrl       what the sandbox calls this upstream (default http://127.0.0.1:<port>)
+  rewriteUrls    rewrite localUrl <-> upstream in bodies and headers (default true)
+
+The rewrite is what keeps the real endpoint, not just the credential, on the host: the container's
+config holds only the dummy localUrl, requests that quote it are rewritten to the real upstream on
+the way out, and anything the upstream says about itself is rewritten back on the way in. The
+agent therefore never sees the upstream's hostname.
 
 Anything not matching the method/path allowlists is refused with 403 without touching the
 upstream, so the proxy is also a capability boundary, not only a secrecy one.
@@ -47,7 +55,15 @@ TIMEOUT = 120
 STRIP_REQUEST_HEADERS = {
     "host", "authorization", "api-key", "x-api-key", "connection", "keep-alive",
     "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade",
+    # Dropped so the upstream answers in plain text: we rewrite URLs in the response body, and a
+    # compressed body would sail through unchanged (Content-Encoding is stripped on the way back).
+    "accept-encoding",
 }
+
+# Only bodies we can safely search-and-replace as text get rewritten; images and octet-streams are
+# forwarded byte for byte.
+REWRITABLE_TYPES = ("application/json", "application/xml", "application/javascript",
+                    "application/x-www-form-urlencoded", "text/", "+json", "+xml")
 STRIP_RESPONSE_HEADERS = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer",
     "transfer-encoding", "upgrade", "content-encoding", "content-length",
@@ -56,6 +72,11 @@ STRIP_RESPONSE_HEADERS = {
 
 def log(msg: str) -> None:
     print(f"[upstream-proxy] {msg}", file=sys.stderr, flush=True)
+
+
+def _rewritable(content_type: str) -> bool:
+    ct = content_type.split(";", 1)[0].strip().lower()
+    return bool(ct) and any(marker in ct for marker in REWRITABLE_TYPES)
 
 
 def load_env_file(path: str) -> int:
@@ -157,8 +178,42 @@ class _Route:
         self.max_body = int(cfg.get("maxBodyBytes", DEFAULT_MAX_BODY))
         self.injector = _Injector(cfg.get("auth", {}))
 
+        # The address the sandbox knows this upstream by. It is a dummy — a loopback port on the
+        # container's socat forwarder — so that the real hostname can stay out of the repo's
+        # config and out of the container's environment entirely.
+        port = cfg.get("port")
+        self.local_url = str(cfg.get("localUrl") or (f"http://127.0.0.1:{port}" if port else "")).rstrip("/")
+        self._out_pairs: list[tuple[bytes, bytes]] = []
+        self._in_pairs: list[tuple[bytes, bytes]] = []
+        if self.local_url and cfg.get("rewriteUrls", True):
+            local_host = urllib.parse.urlsplit(self.local_url).netloc
+            up_host = urllib.parse.urlsplit(self.upstream).netloc
+            # Full URLs first: replacing the bare host inside a URL we already rewrote would be a
+            # no-op, but doing it the other way round would leave a mangled scheme behind.
+            self._out_pairs = [
+                (self.local_url.encode(), self.upstream.encode()),
+                (local_host.encode(), up_host.encode()),
+            ]
+            self._in_pairs = [(b, a) for a, b in self._out_pairs]
+
+    @property
+    def rewrites(self) -> bool:
+        return bool(self._out_pairs)
+
     def permits(self, method: str, path: str) -> bool:
         return method.upper() in self.methods and path.startswith(self.paths)
+
+    def to_upstream(self, data: bytes) -> bytes:
+        """Rewrite the sandbox's dummy address to the real one, on its way out."""
+        for src, dst in self._out_pairs:
+            data = data.replace(src, dst)
+        return data
+
+    def to_local(self, data: bytes) -> bytes:
+        """Rewrite the real address back to the sandbox's dummy one, on its way in."""
+        for src, dst in self._in_pairs:
+            data = data.replace(src, dst)
+        return data
 
 
 def _handler_for(route: _Route):
@@ -194,6 +249,14 @@ def _handler_for(route: _Route):
                 k: v for k, v in self.headers.items()
                 if k.lower() not in STRIP_REQUEST_HEADERS
             }
+            # The agent only ever knows the dummy localUrl, so anything it quotes back — a webhook
+            # target, a Referer, an id in a JSON payload — has to be restored to the real endpoint.
+            if body and _rewritable(headers.get("Content-Type", "")):
+                body = route.to_upstream(body)
+                headers["Content-Length"] = str(len(body))
+            for key in list(headers):
+                if key.lower() not in ("content-length", "content-type"):
+                    headers[key] = route.to_upstream(headers[key].encode()).decode("latin-1")
             try:
                 headers.update(route.injector.headers())
             except Exception as exc:  # credential problem is the host's fault, not the agent's
@@ -214,10 +277,17 @@ def _handler_for(route: _Route):
                 self._refuse(502, "sandbox proxy could not reach the upstream")
 
         def _respond(self, status: int, headers, body: bytes) -> None:
+            kept = [(k, v) for k, v in headers if k.lower() not in STRIP_RESPONSE_HEADERS]
+            content_type = next((v for k, v in kept if k.lower() == "content-type"), "")
+            # Hide the upstream wherever it names itself: Location and Link redirects, and any
+            # self-referential URL in the body.
+            if _rewritable(content_type):
+                body = route.to_local(body)
             self.send_response(status)
-            for key, value in headers:
-                if key.lower() not in STRIP_RESPONSE_HEADERS:
-                    self.send_header(key, value)
+            for key, value in kept:
+                if key.lower() != "content-type":
+                    value = route.to_local(value.encode("latin-1")).decode("latin-1")
+                self.send_header(key, value)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -266,7 +336,9 @@ def main() -> int:
         os.chmod(path, 0o666)
         servers.append(server)
         threading.Thread(target=server.serve_forever, daemon=True).start()
-        log(f"{route.name} → {route.upstream} ({'/'.join(sorted(route.methods))} {' '.join(route.paths)})")
+        rewrite = f", rewriting {route.local_url} ↔ upstream" if route.rewrites else ""
+        log(f"{route.name} → {route.upstream} "
+            f"({'/'.join(sorted(route.methods))} {' '.join(route.paths)}{rewrite})")
 
     # Parent (run.sh) kills us on exit; until then just park.
     try:

@@ -15,7 +15,12 @@ RUN_ID="${RUN_ID:-$(openssl rand -hex 3)}"   # 6 lowercase hex chars, DNS-safe
 # Branch prefix and commit identity come from the running agent's manifest ("git" block in
 # agents/<name>/agent.json), so a copilot run is not signed as Claude Code. An agent that omits
 # the block falls back to its own directory name; BRANCH_PREFIX in .env overrides both.
-if [ -z "${BRANCH_PREFIX:-}" ]; then
+if [ -n "${BRANCH_PREFIX:-}" ]; then
+  # An explicit prefix names the identity of this run, so the commits carry it too: work from a
+  # `feature-x` prefix should not show up authored as "Claude Code".
+  prefix_is_explicit=1
+else
+  prefix_is_explicit=0
   BRANCH_PREFIX=$(agent_meta '.git.branchPrefix // empty')
   BRANCH_PREFIX="${BRANCH_PREFIX:-$AGENT}"
 fi
@@ -23,8 +28,13 @@ AGENT_BRANCH_PREFIX="$BRANCH_PREFIX"
 # The date makes a branch listing readable at a glance; the RUN_ID keeps it unique.
 AGENT_BRANCH="$AGENT_BRANCH_PREFIX/$(date -u +%Y%m%d)-$RUN_ID"
 export RUN_ID AGENT_BRANCH AGENT_BRANCH_PREFIX
-agent_git_name=$(agent_meta '.git.userName // empty')
-agent_git_email=$(agent_meta '.git.userEmail // empty')
+if [ "$prefix_is_explicit" = 1 ]; then
+  agent_git_name="$BRANCH_PREFIX"
+  agent_git_email="$BRANCH_PREFIX@sandbox.local"
+else
+  agent_git_name=$(agent_meta '.git.userName // empty')
+  agent_git_email=$(agent_meta '.git.userEmail // empty')
+fi
 git config user.name "${agent_git_name:-$AGENT}"
 git config user.email "${agent_git_email:-$AGENT@sandbox.local}"
 

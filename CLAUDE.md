@@ -83,7 +83,7 @@ its flag.
 | `s3-auth` | any | `aws-credentials` | — | AWS CLI v2 install; mints a short-lived STS session on the host and passes only that in; off by default |
 | `ssh-credentials` | any | `ssh-credentials` | — | `openssh-client` install; writes the key + `~/.ssh/config` for the agent user; off by default |
 | `project-deps` | any | `project-deps` | — | installs what the target repo needs, from the project config: `apt`/`npm`/`pip` package lists (root, at boot) and `setup` commands (agent user, in `/workspace`). Nothing configured → does nothing |
-| `upstream-proxy` | any | `upstream-proxy` | — | runs credential-injecting reverse proxies on the HOST, one per route from the project config, and bind-mounts their unix sockets; `socat` bridges each to a loopback port, so the agent talks plain HTTP and never sees the API keys. No routes configured → does nothing |
+| `upstream-proxy` | any | `upstream-proxy` | — | runs credential-injecting reverse proxies on the HOST, one per route from the project config, and bind-mounts their unix sockets; `socat` bridges each to a loopback port, so the agent talks plain HTTP and never sees the API keys. It also rewrites the upstream's URL out of the traffic (`rewriteUrls`, on by default): the container knows only the loopback `localUrl`, which the proxy swaps for the real endpoint on the way out and swaps back in response bodies and headers, so the upstream's hostname stays on the host too. No routes configured → does nothing |
 
 Disable them all and the agent starts plain in an empty `/workspace` with no GitHub access.
 
@@ -157,7 +157,7 @@ only required while that one is in use.
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Path to App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default: `github.com`) |
-| `BRANCH_PREFIX` | git-workspace | Leading segment of the per-run branch name, read from the **worked-on repo's** `$HOST_CWD/.env` (not the sandbox's); `.plugins["git-workspace"].branchPrefix` in its `.claude-sandbox.json` wins over it, and with neither it defaults to the agent manifest's `branchPrefix`, else the agent's directory name |
+| `BRANCH_PREFIX` | git-workspace | Leading segment of the per-run branch name, read from the **worked-on repo's** `$HOST_CWD/.env` (not the sandbox's); `.plugins["git-workspace"].branchPrefix` in its `.claude-sandbox.json` wins over it, and with neither it defaults to the agent manifest's `branchPrefix`, else the agent's directory name. When set explicitly it also becomes the run's git identity (`user.name`, and `user.email` as `<prefix>@sandbox.local`), replacing the manifest's `userName`/`userEmail` |
 | `BASE_BRANCH` | git-workspace | Branch to cut from (default: the repo's own default branch, via `origin/HEAD`) |
 | `HOST_WORKSPACE_DIR` | cwd-workspace | Host dir mounted at `/workspace` (default: run.sh's cwd) |
 | `AGENT_WORKSPACE_DIR` | agent-workspace | Host dir holding the per-run mirrors of `/workspace`, created if missing (default: `$HOME/.agent-workspace`; each run uses `<dir>/<RUN_ID>`) |

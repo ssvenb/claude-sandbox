@@ -58,12 +58,13 @@ the image, but only the selected one's `install.sh` runs at build time, and the 
 
 ## Plugins
 
-All plugins ship in the image; `ENABLE_<NAME>` flags in `.env` decide which run. `run.sh` passes
+All plugins ship in the image; `ENABLE_<NAME>` flags decide which run. `run.sh` passes
 the resolved set to `docker build` as the `ENABLED_PLUGINS` build arg, so only enabled plugins'
 `install.sh` execute and a disabled plugin's dependencies stay out of the image — changing the mix
 means the next `./run.sh` rebuilds those layers. Flag names uppercase the directory name
-(`github-auth` → `ENABLE_GITHUB_AUTH`); an unset flag falls back to the manifest's
-`defaultEnabled`. A plugin whose `requiredAgent` is not the running agent is skipped regardless of
+(`github-auth` → `ENABLE_GITHUB_AUTH`); the worked-on repo can override any of them (its `.env`,
+or `.plugins["<name>"].enabled` in its `.claude-sandbox.json`, which wins over everything), and an
+unset flag falls back to the manifest's `defaultEnabled`. A plugin whose `requiredAgent` is not the running agent is skipped regardless of
 its flag.
 
 | Plugin | Agent | Provides | Requires | Owns |
@@ -114,8 +115,26 @@ optional `.claude-sandbox.json` in `$HOST_CWD` (override: `PROJECT_CONFIG_FILE`)
 `src/lib/host-project-config.sh` before plugin resolution:
 
 ```json
-{ "plugins": { "upstream-proxy": { "envFile": ".env", "routes": [ ... ] } } }
+{ "env": { "AGENT": "copilot", "CLAUDE_EFFORT": "high" },
+  "plugins": { "git-workspace": { "enabled": false },
+               "upstream-proxy": { "envFile": ".env", "routes": [ ... ] } } }
 ```
+
+Every sandbox setting is per-project. `src/lib/host-settings.sh` overlays the repo's own files on
+top of the sandbox `.env` before `agent_resolve`/`plugins_resolve` run, so `AGENT` and the plugin
+mix are configurable per checkout too. Precedence, lowest first:
+
+1. the plugin manifest's `defaultEnabled`, and each setting's built-in default
+2. the sandbox's `.env` (or whatever is already exported in your shell)
+3. the worked-on repo's `.env` — **sandbox-owned names only**
+4. the worked-on repo's `.claude-sandbox.json` — the `env` block, and each plugin's `enabled`
+
+"Sandbox-owned" is every key that appears in `.env.example` (which all of them must, see above)
+plus any `ENABLE_*` flag. Layer 3 is filtered because that file is the *target repo's*, full of
+its own secrets — everything not owned stays in the `project_env` array and never becomes an
+environment variable on the host. Layer 4 is written for the sandbox, so an unrecognised name
+there is a typo and fails the run. `PROJECT_CONFIG_FILE` and `PROJECT_ENV_FILE` are the exception:
+they name those files, so only the sandbox `.env` or the shell can set them.
 
 A `host.sh` reads its own section — `.plugins["<plugin>"]`, keyed by `$PLUGIN_NAME`, no need to
 name itself — with `plugin_config` (scalars) and `plugin_config_json` (objects/arrays); both take
@@ -128,7 +147,8 @@ The worked-on repo's own `.env` is loaded centrally too, by `src/lib/host-projec
 (`$HOST_CWD/.env`, override `PROJECT_ENV_FILE`, `/dev/null` to load nothing): a `host.sh` reads one
 key from it with `project_env NAME [default]` (`git-workspace` takes `BRANCH_PREFIX` this way). The
 file is scanned, never sourced — it is the target repo's, so its secrets and commands stay out of
-`run.sh`'s shell.
+`run.sh`'s shell — the sandbox-owned keys `host-settings.sh` lifts out of it are the only ones that
+go any further.
 
 ## Build & Run
 
@@ -140,20 +160,21 @@ AGENT=copilot ./run.sh                # same sandbox, GitHub Copilot CLI instead
 
 ## Environment Variables
 
-All env variables must have an example in `.env.example`. Configuration lives in `.env`
-(git-ignored). Only `AGENT` belongs to the core; the rest are owned by an agent or a plugin and
+All env variables must have an example in `.env.example` — that file doubles as the allowlist of
+sandbox-owned names a project's `.env` may override. Configuration lives in `.env` (git-ignored),
+and any of it can be overridden per project (see [Project configuration](#project-configuration)). Only `AGENT` belongs to the core; the rest are owned by an agent or a plugin and
 only required while that one is in use.
 
 | Variable | Owner | Purpose |
 |----------|-------|---------|
 | `AGENT` | core | Which agent runs: a directory name under `agents/` (default `claude`) |
 | `AGENT_VERSION` | core | Version of the agent's CLI baked into the image; empty (default) resolves the registry's latest on every run |
-| `PROJECT_CONFIG_FILE` | core | Per-project plugin configuration (default `$HOST_CWD/.claude-sandbox.json`; optional) |
-| `PROJECT_ENV_FILE` | core | The worked-on repo's `.env`, scanned for plugin settings it keeps there (default `$HOST_CWD/.env`; `/dev/null` loads nothing) |
+| `PROJECT_CONFIG_FILE` | core | Per-project configuration: `env` block, plugin sections, plugin `enabled` switches (default `$HOST_CWD/.claude-sandbox.json`; optional) |
+| `PROJECT_ENV_FILE` | core | The worked-on repo's `.env`, scanned for the sandbox settings and plugin settings it keeps there (default `$HOST_CWD/.env`; `/dev/null` loads nothing) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | agents/claude | Claude Code OAuth token for API auth (required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does) |
 | `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low` (default), `medium`, `high`, `xhigh`, `max` |
 | `COPILOT_GITHUB_TOKEN` | agents/copilot | Fine-grained PAT with the "Copilot Requests" permission (or a Copilot/`gh` OAuth token); required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_HEADROOM` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_NETBIRD` / `ENABLE_S3_AUTH` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_CA_CERTS` / `ENABLE_HOST_NETWORK` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` | core | plugin switches (default on, except `cwd-workspace`, `netbird`, `s3-auth`, `ssh-credentials`) |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_HEADROOM` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_NETBIRD` / `ENABLE_S3_AUTH` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_CA_CERTS` / `ENABLE_HOST_NETWORK` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` | core | plugin switches (default on, except `cwd-workspace`, `netbird`, `s3-auth`, `ssh-credentials`); overridable per project |
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Path to App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default: `github.com`) |

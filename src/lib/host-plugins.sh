@@ -81,16 +81,25 @@ plugins_discover() {
 }
 
 plugins_resolve() {
-  local name flag value wanted
+  local name flag value source wanted
   ENABLED_PLUGINS=""
   for name in "${PLUGIN_LIST[@]}"; do
     flag=$(plugin_flag_name "$name")
-    # Unset flag falls back to the manifest default, so existing .env files keep working.
-    value="${!flag:-$(plugin_meta "$name" '.defaultEnabled // false')}"
+    # The worked-on repo has the last word: a checkout that cannot be cloned, or wants a plugin
+    # your .env leaves off, says so in its own .claude-sandbox.json. Then the ENABLE_ flag (the
+    # sandbox's .env, already overlaid with the project's own — see host-settings.sh), and
+    # finally the manifest default, so an .env that names no flags keeps working.
+    value=$(project_plugin_setting "$name" '.enabled')
+    source="$PROJECT_CONFIG_FILE (.plugins[\"$name\"].enabled)"
+    if [ -z "$value" ]; then
+      value="${!flag:-}"
+      source="$flag"
+    fi
+    [ -n "$value" ] || { value=$(plugin_meta "$name" '.defaultEnabled // false'); source="$name's manifest"; }
     case "$value" in
       1|true|yes|on)   ;;
       0|false|no|off)  continue ;;
-      *) die "$flag must be 0 or 1 (got: $value)" ;;
+      *) die "$source must be 0 or 1 (got: $value)" ;;
     esac
     # A plugin tied to one agent (Claude-shaped hooks, a wrapper around `claude`, …) is silently
     # dropped when another agent runs, instead of failing the run.
@@ -109,7 +118,7 @@ plugins_validate() {
     while read -r other; do
       [ -n "$other" ] || continue
       case " $ENABLED_PLUGINS " in
-        *" $other "*) die "Plugins '$name' and '$other' cannot be enabled together. Disable one of them in .env." ;;
+        *" $other "*) die "Plugins '$name' and '$other' cannot be enabled together. Disable one of them in .env or in the project's .claude-sandbox.json." ;;
       esac
     done < <(plugin_meta "$name" '.conflicts // [] | .[]')
   done
@@ -117,7 +126,7 @@ plugins_validate() {
   for name in $ENABLED_PLUGINS; do
     while read -r var; do
       [ -n "$var" ] || continue
-      [ -n "${!var:-}" ] || die "Plugin '$name' requires $var to be set in .env"
+      [ -n "${!var:-}" ] || die "Plugin '$name' requires $var to be set in .env or in the project's .claude-sandbox.json"
     done < <(plugin_meta "$name" '.requiredEnv // [] | .[]')
     provided+="$(plugin_meta "$name" '.provides // [] | join(" ")') "
   done

@@ -8,6 +8,10 @@
 # plus whatever credentials that agent asks for — see agents/*/host.sh. Everything else belongs
 # to a plugin — see plugins/*/plugin.json and .env.example. Plugins are switched with
 # ENABLE_<PLUGIN_NAME> flags, e.g. ENABLE_GITHUB_AUTH=0.
+#
+# Those are defaults: the repo you launch from overrides any of them, in its own .env (sandbox
+# variables only) or in its .claude-sandbox.json ("env" block, per-plugin "enabled"). See
+# src/lib/host-settings.sh.
 set -euo pipefail
 
 # The directory you launched from is the repo/folder the agent works on, so remember it before
@@ -28,6 +32,8 @@ set +a
 . src/lib/host-project-config.sh
 # shellcheck source=src/lib/host-project-env.sh
 . src/lib/host-project-env.sh
+# shellcheck source=src/lib/host-settings.sh
+. src/lib/host-settings.sh
 
 # --resume <RUN_ID>: re-attach to that run. No arg → fresh run.
 usage() { echo "Usage: $0 [--resume <RUN_ID>]   (RUN_ID is 6 hex chars)" >&2; exit "${1:-1}"; }
@@ -47,14 +53,18 @@ if [ "$RESUME" = 1 ]; then
   esac
 fi
 
+# The repo you launched from configures its own sandbox: load its files and let their settings
+# overlay .env before anything reads one, so even AGENT and the plugin mix can be per-project.
+project_config_load
+project_env_load
+project_settings_apply
+
 # Pick the agent first: plugins that declare a different requiredAgent are dropped from the run.
 agent_resolve
 
 # Work out which plugins run, fail fast on unmet config/capabilities, then let each one
 # contribute its own docker run arguments. The agent's host stage comes last, so a plugin that
 # brings credentials of its own (AGENT_AUTH_PROVIDED=1) is already accounted for.
-project_config_load
-project_env_load
 plugins_discover
 plugins_resolve
 plugins_validate

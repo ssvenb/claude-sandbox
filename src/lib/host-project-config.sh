@@ -8,10 +8,16 @@
 #
 #   .claude-sandbox.json
 #   {
+#     "env": { "AGENT": "copilot", "ENABLE_GIT_WORKSPACE": 0 },
 #     "plugins": {
-#       "upstream-proxy": { "routes": [ ... ] }
+#       "upstream-proxy": { "routes": [ ... ] },
+#       "git-workspace": { "enabled": false }
 #     }
 #   }
+#
+# The "env" block sets any sandbox variable for this project only (applied by
+# project_settings_apply, see host-settings.sh), and a plugin section's "enabled" switches that
+# plugin — both override the sandbox's own .env.
 #
 # The file is optional, and every key in it is optional: a plugin reads what it wants with
 # `plugin_config` and falls back to its own default. Nothing here is passed to the container —
@@ -27,8 +33,23 @@ project_config_load() {
     || die "Project config '$PROJECT_CONFIG_FILE' must be a JSON object."
   jq -e '(.plugins // {}) | type == "object"' "$PROJECT_CONFIG_FILE" >/dev/null 2>&1 \
     || die "Project config '$PROJECT_CONFIG_FILE': .plugins must be an object keyed by plugin name."
+  jq -e '(.env // {}) | type == "object" and (all(.[]; type != "object" and type != "array"))' \
+    "$PROJECT_CONFIG_FILE" >/dev/null 2>&1 \
+    || die "Project config '$PROJECT_CONFIG_FILE': .env must be an object of scalar values."
   PROJECT_CONFIG_JSON=$(jq -c . "$PROJECT_CONFIG_FILE")
   echo "📄 Project config: $PROJECT_CONFIG_FILE"
+}
+
+# project_plugin_setting <plugin> <jq-filter> [default] — like plugin_config, but naming the
+# plugin explicitly, for callers outside a plugin stage: plugins_resolve reads ".enabled" before
+# any plugin's host.sh is sourced. Unlike plugin_config it survives a `false` value, which is
+# exactly the one an enable flag cares about.
+project_plugin_setting() {
+  local out
+  [ -n "$PROJECT_CONFIG_JSON" ] || { printf '%s' "${3-}"; return 0; }
+  out=$(printf '%s' "$PROJECT_CONFIG_JSON" \
+    | jq -r --arg p "$1" "(.plugins[\$p] // {}) | ($2) | select(. != null) | tostring")
+  printf '%s' "${out:-${3-}}"
 }
 
 # --- helpers available to plugin host.sh scripts ---------------------------------------------

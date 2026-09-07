@@ -6,10 +6,9 @@ agent can *use* an upstream API without ever holding the key that authenticates 
 
 Usage: proxy.py [--env-file FILE]... <routes.json> <socket-dir>
 
---env-file loads KEY=VALUE pairs into THIS process only. The secrets a route names are usually
-kept in the target repo's own .env, which run.sh never sources; loading them here rather than in
-host.sh keeps them out of run.sh's environment, where a later plugin's pass_env could otherwise
-forward them into the container. Values already set in the environment win over the file.
+--env-file loads KEY=VALUE pairs into THIS process only, so a route's secrets never enter run.sh's
+environment where a later plugin's pass_env could forward them into the container. Values already
+set in the environment win over the file.
 
 Each route in routes.json:
   name           socket basename (<socket-dir>/<name>.sock)
@@ -22,13 +21,10 @@ Each route in routes.json:
   localUrl       what the sandbox calls this upstream (default http://127.0.0.1:<port>)
   rewriteUrls    rewrite localUrl <-> upstream in bodies and headers (default true)
 
-The rewrite is what keeps the real endpoint, not just the credential, on the host: the container's
-config holds only the dummy localUrl, requests that quote it are rewritten to the real upstream on
-the way out, and anything the upstream says about itself is rewritten back on the way in. The
-agent therefore never sees the upstream's hostname.
-
-Anything not matching the method/path allowlists is refused with 403 without touching the
-upstream, so the proxy is also a capability boundary, not only a secrecy one.
+The rewrite keeps the real endpoint, not just the credential, on the host: the container knows only
+the dummy localUrl, which is swapped for the upstream on the way out and swapped back on the way
+in. Anything outside the method/path allowlists is refused with 403 without touching the upstream,
+so the proxy is a capability boundary as well as a secrecy one.
 """
 
 from __future__ import annotations

@@ -1,10 +1,8 @@
 # shellcheck shell=bash
 # Per-project configuration. Sourced by run.sh (bash, on YOUR machine).
 #
-# Some plugins need settings that belong to the repo the agent works on, not to the sandbox:
-# which upstreams to proxy, which bucket to hand over, which hosts an ssh key is for. Those live
-# in a single JSON file in the directory you launched run.sh from — $HOST_CWD — so a checkout can
-# carry its own sandbox configuration while .env stays about the sandbox itself.
+# Settings that belong to the repo the agent works on — which upstreams to proxy, which bucket to
+# hand over — live in one JSON file next to that checkout, so .env stays about the sandbox itself:
 #
 #   .claude-sandbox.json
 #   {
@@ -15,13 +13,8 @@
 #     }
 #   }
 #
-# The "env" block sets any sandbox variable for this project only (applied by
-# project_settings_apply, see host-settings.sh), and a plugin section's "enabled" switches that
-# plugin — both override the sandbox's own .env.
-#
-# The file is optional, and every key in it is optional: a plugin reads what it wants with
-# `plugin_config` and falls back to its own default. Nothing here is passed to the container —
-# it is host-side configuration, and a plugin decides what (if anything) crosses over.
+# The file and every key in it are optional. Nothing here is passed to the container — a plugin
+# decides what, if anything, crosses over.
 
 PROJECT_CONFIG_FILE="${PROJECT_CONFIG_FILE:-${HOST_CWD:-$PWD}/.claude-sandbox.json}"
 # Whole file, compact, or empty when there is none.
@@ -40,10 +33,9 @@ project_config_load() {
   echo "📄 Project config: $PROJECT_CONFIG_FILE"
 }
 
-# project_plugin_setting <plugin> <jq-filter> [default] — like plugin_config, but naming the
-# plugin explicitly, for callers outside a plugin stage: plugins_resolve reads ".enabled" before
-# any plugin's host.sh is sourced. Unlike plugin_config it survives a `false` value, which is
-# exactly the one an enable flag cares about.
+# project_plugin_setting <plugin> <jq-filter> [default] — one scalar from a plugin's section.
+# Names the plugin explicitly, for callers outside a plugin stage: plugins_resolve reads ".enabled"
+# before any host.sh is sourced.
 project_plugin_setting() {
   local out
   [ -n "$PROJECT_CONFIG_JSON" ] || { printf '%s' "${3-}"; return 0; }
@@ -58,12 +50,7 @@ project_plugin_setting() {
 
 # plugin_config <jq-filter> [default] — a scalar, e.g. plugin_config '.envFile' "$HOST_CWD/.env"
 plugin_config() {
-  local out
-  [ -n "$PROJECT_CONFIG_JSON" ] || { printf '%s' "${2-}"; return 0; }
-  out=$(printf '%s' "$PROJECT_CONFIG_JSON" \
-    | jq -r --arg p "${PLUGIN_NAME:?plugin_config called outside a plugin stage}" \
-        "(.plugins[\$p] // {}) | ($1) // empty")
-  printf '%s' "${out:-${2-}}"
+  project_plugin_setting "${PLUGIN_NAME:?plugin_config called outside a plugin stage}" "$1" "${2-}"
 }
 
 # plugin_config_json <jq-filter> [default-json] — a raw JSON value, for objects and arrays.

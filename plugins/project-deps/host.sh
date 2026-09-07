@@ -9,24 +9,20 @@
 #       "setup": ["make bootstrap"]
 #   } } }
 #
-# Dependencies belong to the repo the agent works on, not to the sandbox, which is why they live
-# in $PROJECT_CONFIG_FILE next to that checkout instead of in .env. With none configured the
-# plugin does nothing, so it can stay on by default.
-#
-# Packages are installed by root at boot (root-init.sh); "setup" commands run later, as the
-# unprivileged agent user in the provisioned /workspace, after the secrets have been dropped —
-# arbitrary project-supplied shell never runs in the privileged stage.
+# Packages are installed by root at boot (root-init.sh); "setup" commands run later as the
+# unprivileged agent user in the provisioned /workspace — arbitrary project-supplied shell never
+# runs in the privileged stage. Nothing configured → the plugin does nothing.
 
-# A package name, not a shell command: the list is expanded unquoted by apt/npm/pip, so anything
+# A package name, not a shell command: the lists are expanded unquoted by apt/npm/pip, so anything
 # that could smuggle in a second word or a redirection is rejected. Covers the punctuation real
 # specifiers use (pnpm@9, ruff==0.6.*, git+https://…, ./local-pkg).
 PROJECT_DEPS_NAME_RE='^[A-Za-z0-9@._+:/~^=<>*-]+$'
+PROJECT_DEPS_SUMMARY=""
 
-# Read one list, validate it, and hand it over as a space-separated string. Sets $PROJECT_DEPS_LIST
-# rather than printing it: a command substitution would run pass_value in a subshell, where its
-# append to DOCKER_ARGS would be lost.
+# Validate one list and hand it over as a space-separated string. Cannot print its result: a
+# command substitution would run pass_value in a subshell, losing the append to DOCKER_ARGS.
 project_deps_pass_list() {
-  local key=$1 var=$2 json entry
+  local key=$1 var=$2 json entry list
   json=$(plugin_config_json ".$key" '[]')
   printf '%s' "$json" | jq -e 'type == "array" and all(type == "string")' >/dev/null 2>&1 \
     || die "project-deps: .plugins[\"project-deps\"].$key in '$PROJECT_CONFIG_FILE' must be an array of strings."
@@ -35,29 +31,32 @@ project_deps_pass_list() {
     [[ $entry =~ $PROJECT_DEPS_NAME_RE ]] \
       || die "project-deps: '$entry' is not a valid $key package name (no spaces or shell metacharacters)."
   done < <(printf '%s' "$json" | jq -r '.[]')
-  PROJECT_DEPS_LIST=$(printf '%s' "$json" | jq -r 'join(" ")')
-  [ -n "$PROJECT_DEPS_LIST" ] && pass_value "$var" "$PROJECT_DEPS_LIST"
-  return 0
+  list=$(printf '%s' "$json" | jq -r 'join(" ")')
+  [ -n "$list" ] || return 0
+  pass_value "$var" "$list"
+  PROJECT_DEPS_SUMMARY+=" $key($list)"
 }
 
-project_deps_pass_list apt PROJECT_DEPS_APT; PROJECT_DEPS_APT=$PROJECT_DEPS_LIST
-project_deps_pass_list npm PROJECT_DEPS_NPM; PROJECT_DEPS_NPM=$PROJECT_DEPS_LIST
-project_deps_pass_list pip PROJECT_DEPS_PIP; PROJECT_DEPS_PIP=$PROJECT_DEPS_LIST
+project_deps_pass_list apt PROJECT_DEPS_APT
+project_deps_pass_list npm PROJECT_DEPS_NPM
+project_deps_pass_list pip PROJECT_DEPS_PIP
 
-# Setup commands are shell, so they only get the same validation JSON gives them: a list of
-# strings. They cross over as JSON and are run one at a time by agent-init.sh.
+# Setup commands are shell, so JSON's own "a list of strings" is all the validation there is. They
+# cross over as JSON and are run one at a time by agent-init.sh.
 PROJECT_DEPS_SETUP=$(plugin_config_json '.setup' '[]')
 printf '%s' "$PROJECT_DEPS_SETUP" | jq -e 'type == "array" and all(type == "string")' >/dev/null 2>&1 \
   || die "project-deps: .plugins[\"project-deps\"].setup in '$PROJECT_CONFIG_FILE' must be an array of strings."
-[ "$(printf '%s' "$PROJECT_DEPS_SETUP" | jq 'length')" != 0 ] \
-  && pass_value PROJECT_DEPS_SETUP "$PROJECT_DEPS_SETUP"
+PROJECT_DEPS_SETUP_COUNT=$(printf '%s' "$PROJECT_DEPS_SETUP" | jq 'length')
+if [ "$PROJECT_DEPS_SETUP_COUNT" != 0 ]; then
+  pass_value PROJECT_DEPS_SETUP "$PROJECT_DEPS_SETUP"
+  PROJECT_DEPS_SUMMARY+=" $PROJECT_DEPS_SETUP_COUNT setup command(s)"
+fi
 
-if [ -n "$PROJECT_DEPS_APT$PROJECT_DEPS_NPM$PROJECT_DEPS_PIP" ] \
-   || [ "$(printf '%s' "$PROJECT_DEPS_SETUP" | jq 'length')" != 0 ]; then
-  echo "📦 project-deps:${PROJECT_DEPS_APT:+ apt($PROJECT_DEPS_APT)}${PROJECT_DEPS_NPM:+ npm($PROJECT_DEPS_NPM)}${PROJECT_DEPS_PIP:+ pip($PROJECT_DEPS_PIP)}${PROJECT_DEPS_SETUP:+ $(printf '%s' "$PROJECT_DEPS_SETUP" | jq 'length') setup command(s)}"
+if [ -n "$PROJECT_DEPS_SUMMARY" ]; then
+  echo "📦 project-deps:$PROJECT_DEPS_SUMMARY"
 else
   echo "ℹ️  project-deps: nothing configured in '$PROJECT_CONFIG_FILE'; no dependencies installed."
 fi
 
 unset -f project_deps_pass_list
-unset PROJECT_DEPS_NAME_RE PROJECT_DEPS_LIST PROJECT_DEPS_APT PROJECT_DEPS_NPM PROJECT_DEPS_PIP PROJECT_DEPS_SETUP
+unset PROJECT_DEPS_NAME_RE PROJECT_DEPS_SUMMARY PROJECT_DEPS_SETUP PROJECT_DEPS_SETUP_COUNT

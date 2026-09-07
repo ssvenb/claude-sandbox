@@ -1,17 +1,13 @@
 # shellcheck shell=sh
 # Agent stage: run the project's setup commands (`npm ci`, `make bootstrap`, `uv sync`, …) as the
-# agent user, in /workspace. Priority 25 puts this after the workspace plugins (20) have
-# provisioned the checkout and before the guardrails (30) and the launcher (40).
-#
-# These are arbitrary shell from the project config, so they deliberately run HERE: unprivileged,
-# with the secrets already dropped, and with exactly the environment the agent itself will have —
-# which also means a command that succeeds here works the same way when the agent repeats it.
+# agent user, in /workspace — unprivileged, with the secrets already dropped, and in exactly the
+# environment the agent itself will have, so a command that works here works when it repeats it.
+# Priority 25: after the workspace plugins (20), before the guardrails (30) and the launcher (40).
 
 # Sourced, not executed, so nothing here may exit: a failure must leave the boot sequence intact.
 if [ -n "${PROJECT_DEPS_SETUP:-}" ] && cd /workspace; then
-  # One command per line: the host validated the list as JSON strings, and jq -r gives each back
-  # verbatim. A failure is reported and the boot continues — a half-provisioned workspace the
-  # agent knows about beats no agent at all.
+  # A half-provisioned workspace the agent knows about beats no agent at all, so a failed command
+  # is reported and the boot continues.
   printf '%s' "$PROJECT_DEPS_SETUP" | jq -r '.[]' | while IFS= read -r _cmd; do
     [ -n "$_cmd" ] || continue
     echo "🔧 project-deps: $_cmd"

@@ -1,8 +1,6 @@
 # shellcheck shell=sh
 # Container-side agent framework. Sourced by entrypoint.sh (root) and agent-setup.sh (node).
-#
-# $AGENT was already resolved and validated on the host by run.sh; here we only locate its
-# directory and run its stage scripts.
+# $AGENT was already resolved and validated on the host; here we only locate it and run its stages.
 
 AGENT_ROOT="${AGENT_ROOT:-/opt/agents}"
 AGENT="${AGENT:-claude}"
@@ -16,8 +14,7 @@ export AGENT AGENT_DIR
 
 agent_meta() { jq -r "$1" "$AGENT_DIR/agent.json"; }
 
-# Run one lifecycle stage ("agent-init" / "launch") of the selected agent. The script is SOURCED,
-# so its exports reach the rest of the boot sequence.
+# Run one lifecycle stage ("agent-init" / "launch"). SOURCED, so exports reach the rest of boot.
 agent_run_stage() {
   if [ -f "$AGENT_DIR/$1.sh" ]; then
     # shellcheck disable=SC1090  # path resolved at runtime

@@ -12,7 +12,7 @@
 
 PLUGIN_ROOT="${PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/plugins}"
 
-# Every -e/-v flag the plugins want on the `docker run` command line.
+# Every flag the plugins want on the `docker run` command line.
 DOCKER_ARGS=()
 # Space-separated, priority-ordered names of the plugins that will actually run.
 ENABLED_PLUGINS=""
@@ -51,11 +51,11 @@ pass_env() {
 # Forward a computed value the host has but the environment doesn't (e.g. a file's contents).
 pass_value() { DOCKER_ARGS+=(-e "$1=$2"); }
 
-# Add raw `docker run` flags for a plugin that needs more than an env var or a mount —
-# capabilities, devices, networking: pass_arg --cap-add=NET_ADMIN --device=/dev/net/tun
+# Raw `docker run` flags, for what an env var or a mount cannot express:
+# pass_arg --cap-add=NET_ADMIN --device=/dev/net/tun
 pass_arg() { DOCKER_ARGS+=("$@"); }
 
-# Mount a host path into the container: pass_mount <host-path> <container-path> [options]
+# pass_mount <host-path> <container-path> [options]
 pass_mount() {
   local host_path=$1 container_path=$2 options=${3:-}
   [ -e "$host_path" ] || die "Plugin '${PLUGIN_NAME:-?}' wants to mount '$host_path', which does not exist."
@@ -85,10 +85,8 @@ plugins_resolve() {
   ENABLED_PLUGINS=""
   for name in "${PLUGIN_LIST[@]}"; do
     flag=$(plugin_flag_name "$name")
-    # The worked-on repo has the last word: a checkout that cannot be cloned, or wants a plugin
-    # your .env leaves off, says so in its own .claude-sandbox.json. Then the ENABLE_ flag (the
-    # sandbox's .env, already overlaid with the project's own — see host-settings.sh), and
-    # finally the manifest default, so an .env that names no flags keeps working.
+    # The worked-on repo has the last word, then the ENABLE_ flag (already overlaid with the
+    # project's own .env, see host-settings.sh), then the manifest default.
     value=$(project_plugin_setting "$name" '.enabled')
     source="$PROJECT_CONFIG_FILE (.plugins[\"$name\"].enabled)"
     if [ -z "$value" ]; then
@@ -101,8 +99,7 @@ plugins_resolve() {
       0|false|no|off)  continue ;;
       *) die "$source must be 0 or 1 (got: $value)" ;;
     esac
-    # A plugin tied to one agent (Claude-shaped hooks, a wrapper around `claude`, …) is silently
-    # dropped when another agent runs, instead of failing the run.
+    # A plugin tied to one agent is silently dropped when another agent runs, rather than failing.
     wanted=$(plugin_meta "$name" '.requiredAgent // empty')
     if [ -n "$wanted" ] && [ "$wanted" != "${AGENT:-claude}" ]; then
       continue
@@ -144,8 +141,7 @@ plugins_validate() {
   done
 }
 
-# Source each enabled plugin's host.sh so it can validate its own config and contribute
-# docker run arguments.
+# Source each enabled plugin's host.sh so it can validate its config and contribute docker args.
 plugins_host_stage() {
   local name
   for name in $ENABLED_PLUGINS; do

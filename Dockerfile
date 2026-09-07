@@ -1,7 +1,6 @@
 FROM node:20-bookworm-slim
 
-# Install automation dependencies and system utilities. Anything a single plugin owns is
-# installed by that plugin's install.sh instead (see the plugin build stage below).
+# Shared dependencies only; anything a single plugin needs is installed by its own install.sh.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
@@ -15,14 +14,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# Agents. Every agent's files ship in the image, but only the one named by the AGENT build arg
-# gets its CLI installed, so an unused agent's binaries stay out of the image. run.sh passes the
-# resolved name and tags the image per agent, so switching agents rebuilds this layer only.
-#
-# AGENT_VERSION is the version of the agent's CLI to install; empty means the registry's latest.
-# run.sh resolves it on the host, which is what makes the cache do the right thing: the arg is
-# part of this layer's cache key, so the layer rebuilds exactly when a new version is out and is
-# reused otherwise. It is referenced in the RUN below so the value cannot be optimised away.
+# Every agent's files ship in the image, but only the one named by AGENT gets its CLI installed.
+# AGENT_VERSION (resolved on the host, empty means latest) is part of this layer's cache key, so
+# the layer rebuilds exactly when a new release is out; it is referenced in the RUN so the value
+# cannot be optimised away.
 COPY agents /opt/agents
 ARG AGENT=claude
 ARG AGENT_VERSION=
@@ -36,17 +31,11 @@ RUN chown -R root:root /opt/agents \
     && find /opt/agents -type d -exec chmod 555 {} + \
     && find /opt/agents -type f -exec chmod 444 {} +
 
-# Set up the workspace directory
 WORKDIR /workspace
 
-# Plugins. Every plugin's files ship in the image; ENABLE_<NAME> flags decide which ones actually
-# run (see run.sh) and which ones get their dependencies installed below. Permissions follow a
-# convention: bin/ is world-executable (hooks run as the agent), root/ is root-only (secrets),
-# and everything lands root-owned outside /workspace so the agent cannot edit its own guardrails.
+# Every plugin's files ship in the image; only those in ENABLED_PLUGINS (resolved by run.sh, empty
+# means all) get their dependencies installed, so flipping a flag rebuilds from here.
 COPY plugins /opt/plugins
-# Only the plugins listed in ENABLED_PLUGINS get their dependencies installed, so a disabled
-# plugin's binaries stay out of the image. Flipping ENABLE_<NAME> therefore needs a rebuild;
-# run.sh passes the resolved list as a build arg. Empty means "install everything".
 ARG ENABLED_PLUGINS=
 RUN set -eu; for f in /opt/plugins/*/install.sh; do \
       [ -f "$f" ] || continue; \
@@ -56,14 +45,16 @@ RUN set -eu; for f in /opt/plugins/*/install.sh; do \
       fi; \
       echo "📦 $f"; sh "$f"; \
     done
+# bin/ is world-executable (hooks run as the agent), root/ is root-only (secrets), and everything
+# lands root-owned outside /workspace so the agent cannot edit its own guardrails.
 RUN chown -R root:root /opt/plugins \
     && find /opt/plugins -type d -exec chmod 555 {} + \
     && find /opt/plugins -type f -exec chmod 444 {} + \
     && find /opt/plugins -type f -path '*/bin/*' -exec chmod 555 {} + \
     && find /opt/plugins -type f -path '*/root/*' -exec chmod 500 {} +
 
-# Plugin and agent frameworks: the shell libraries the boot scripts source, the settings merger,
-# and the base policy that plugin settings.json fragments are merged into at runtime.
+# The frameworks the boot scripts source, the settings merger, and the base policy the plugin
+# settings.json fragments are merged into at runtime.
 COPY src/lib/plugins.sh /usr/local/lib/sandbox/plugins.sh
 COPY src/lib/agents.sh /usr/local/lib/sandbox/agents.sh
 COPY src/merge-settings.py /usr/local/bin/merge-settings.py
@@ -72,12 +63,9 @@ RUN chmod 555 /usr/local/bin/merge-settings.py \
     && chmod 444 /usr/local/lib/sandbox/plugins.sh /usr/local/lib/sandbox/agents.sh \
                  /usr/local/share/sandbox/settings-base.json
 
-# Create an entrypoint shell script to handle token generation and boot the agent.
-# agent-setup.sh holds the sequence the entrypoint runs as the 'node' user; it
-# lives in its own file so editors give it linting/highlighting.
+# entrypoint.sh boots as root; agent-setup.sh is the part it runs as 'node'.
 COPY src/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY src/agent-setup.sh /usr/local/bin/agent-setup.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/agent-setup.sh
 
-# The container will run under the unprivileged 'node' user by default
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

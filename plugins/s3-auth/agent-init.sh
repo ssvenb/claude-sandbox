@@ -1,13 +1,12 @@
 # shellcheck shell=sh
-# Agent stage: the credentials themselves arrive as env vars (the AWS CLI and every SDK read them
-# straight from there), so all that is left is the surrounding config — region, endpoint — and
-# telling the agent what it has and for how long.
+# Agent stage: the credentials arrive as env vars, which the AWS CLI and every SDK read directly,
+# so only the surrounding config is left — plus telling the agent what it has and for how long.
 
 export AWS_DEFAULT_REGION="${AWS_REGION:-us-east-1}"
 # AWS CLI v2 and the current SDKs honour AWS_ENDPOINT_URL globally; needed for non-AWS S3.
 [ -n "${S3_ENDPOINT_URL:-}" ] && export AWS_ENDPOINT_URL="$S3_ENDPOINT_URL"
 
-# Mirror it into ~/.aws/config as well, for tools that read the config file rather than the env.
+# Mirrored into ~/.aws/config too, for tools that read the config file rather than the env.
 mkdir -p "$HOME/.aws"
 {
   echo "[default]"

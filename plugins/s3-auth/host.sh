@@ -1,13 +1,11 @@
 # shellcheck shell=bash
-# Host stage. The whole point of this plugin: the durable AWS credential (your IAM user's access
-# key, your SSO session) never enters the container. It is used HERE, on the host, to mint a
-# short-lived session, and only that session's keys are passed in. They expire on their own —
-# there is deliberately no in-container refresh loop, because refreshing would require shipping
-# the durable credential the agent must not have.
+# Host stage. The durable AWS credential (your IAM user's access key, your SSO session) never
+# enters the container: it is used HERE to mint a short-lived session, and only that session's keys
+# are passed in. They expire on their own — there is deliberately no in-container refresh loop,
+# because refreshing would need the durable credential the agent must not have.
 #
-# Two modes:
-#   S3_ROLE_ARN set  → sts assume-role, so the agent's reach is exactly that role's policy.
-#   S3_ROLE_ARN unset → export whatever credentials the host's profile currently resolves to.
+#   S3_ROLE_ARN set   → sts assume-role, so the agent's reach is exactly that role's policy.
+#   S3_ROLE_ARN unset → whatever the host's profile currently resolves to.
 # The first is strongly preferred: it is the only one that also narrows *what* the agent can do.
 
 command -v aws >/dev/null || die "s3-auth needs the AWS CLI on the host to mint session credentials."
@@ -16,7 +14,7 @@ _aws_profile_args=()
 [ -n "${AWS_PROFILE:-}" ] && _aws_profile_args=(--profile "$AWS_PROFILE")
 
 if [ -n "${S3_ROLE_ARN:-}" ]; then
-  # Session name ties the CloudTrail entries back to this sandbox. RUN_ID is not minted yet at
+  # The session name ties CloudTrail entries back to this sandbox; RUN_ID does not exist yet at
   # host-stage time, so use a timestamp.
   _s3_creds=$(aws "${_aws_profile_args[@]}" sts assume-role \
                 --role-arn "$S3_ROLE_ARN" \
@@ -35,10 +33,9 @@ _s3_token=$(jq -r '.SessionToken // empty' <<<"$_s3_creds")
 _s3_expiry=$(jq -r '.Expiration // empty' <<<"$_s3_creds")
 [ -n "$_s3_key" ] && [ -n "$_s3_secret" ] || die "s3-auth: could not read credentials from the AWS CLI output."
 
-if [ -z "$_s3_token" ]; then
-  # No session token means these are long-lived user keys, valid until you rotate them by hand.
-  echo "⚠️  s3-auth is passing LONG-LIVED AWS keys into the container (no session token). Set S3_ROLE_ARN to hand the agent a short-lived, narrowly-scoped session instead."
-fi
+# No session token means long-lived user keys, valid until you rotate them by hand.
+[ -n "$_s3_token" ] \
+  || echo "⚠️  s3-auth is passing LONG-LIVED AWS keys into the container (no session token). Set S3_ROLE_ARN to hand the agent a short-lived, narrowly-scoped session instead."
 
 pass_value AWS_ACCESS_KEY_ID "$_s3_key"
 pass_value AWS_SECRET_ACCESS_KEY "$_s3_secret"

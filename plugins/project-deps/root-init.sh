@@ -1,8 +1,6 @@
 # shellcheck shell=sh
-# Root stage: install the packages the project asked for. Runs as root because apt, global npm
-# and system pip all write outside the agent user's home — and at boot rather than at image build
-# time, because the list belongs to the repo being worked on, not to the image (the same image
-# serves every project).
+# Root stage: install the packages the project asked for. At boot rather than at image build time,
+# because the list belongs to the repo being worked on and the same image serves every project.
 #
 # Only package NAMES arrive here, validated on the host against a strict character set, so the
 # unquoted expansions below cannot turn into a second command. Project-supplied shell runs in
@@ -23,8 +21,7 @@ if [ -n "${PROJECT_DEPS_NPM:-}" ]; then
 fi
 
 if [ -n "${PROJECT_DEPS_PIP:-}" ]; then
-  # Debian marks its python as externally managed (PEP 668); this is a throwaway container, so
-  # installing into the system interpreter is the simplest thing that works.
+  # PEP 668: Debian's python is externally managed, but this is a throwaway container.
   echo "📦 project-deps: pip install $PROJECT_DEPS_PIP"
   pip3 install --no-cache-dir --break-system-packages $PROJECT_DEPS_PIP \
     || echo "⚠️  project-deps: pip install failed ($PROJECT_DEPS_PIP)" >&2

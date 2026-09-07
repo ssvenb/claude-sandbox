@@ -1,8 +1,7 @@
 # shellcheck shell=sh
 # Root stage. Bridge each bind-mounted unix socket to a loopback TCP port so ordinary HTTP clients
-# can reach it. There is no secret here — the credential lives in the host proxy on the far side
-# of the socket — but socat runs as root so `node` cannot kill or replace a forwarder and point
-# an endpoint somewhere else.
+# can reach it. No secret here — the credential lives in the host proxy on the far side — but socat
+# runs as root so `node` cannot replace a forwarder and point an endpoint somewhere else.
 
 for entry in ${UPSTREAM_PROXY_PORTS:-}; do
   name=${entry%%:*}

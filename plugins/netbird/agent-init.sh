@@ -1,7 +1,6 @@
 # shellcheck shell=sh
-# Agent stage: the peer is already up (root brought it up); the agent only needs to be told that
-# it is on a mesh, and under which name. This script's stdout is not visible to the agent, so the
-# part it must know travels through the prompt.
+# Agent stage: root already brought the peer up, so all that is left is telling the agent it is on
+# a mesh and under which name — stdout is invisible to it, so that has to go through the prompt.
 
 if [ "${NB_ENROLLED:-0}" = 1 ]; then
   printf 'This sandbox is a NetBird peer named %s: private mesh hosts are reachable by their NetBird name, and the peer is removed when the container stops. Reaching a given host still depends on a NetBird access policy allowing this peer.\n' \

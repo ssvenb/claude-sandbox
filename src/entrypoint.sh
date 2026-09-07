@@ -9,13 +9,13 @@ chown -R node:node /workspace
 # shellcheck source=lib/agents.sh
 . /usr/local/lib/sandbox/agents.sh
 
-# Root stage: this is the only context that holds the secrets run.sh passed in, so anything
-# needing them (minting tokens, starting refresh loops) happens here.
+# Root stage: the only context holding the secrets run.sh passed in, so anything needing them
+# (minting tokens, starting refresh loops) happens here.
 plugin_run_stage root-init
 
-# Compose the enterprise policy from the fragments the enabled plugins contribute, at the path
-# the selected agent reads it from (agents that have no such file declare none). Written by root
-# outside /workspace and read-only, so the agent can't disable its own guardrails.
+# Compose the enterprise policy from the enabled plugins' fragments, at the path the selected
+# agent reads it from. Root-owned, outside /workspace and read-only, so the agent cannot disable
+# its own guardrails.
 MANAGED_SETTINGS=$(agent_meta '.managedSettings // empty')
 if [ -n "$MANAGED_SETTINGS" ]; then
   mkdir -p "$(dirname "$MANAGED_SETTINGS")"
@@ -26,7 +26,7 @@ if [ -n "$MANAGED_SETTINGS" ]; then
   chmod 444 "$MANAGED_SETTINGS"
 fi
 
-# Hand off to 'node'. Drop every var the plugins declared as a secret first, so the agent only
+# Hand off to 'node', dropping every var the plugins declared as a secret first — the agent only
 # ever sees the short-lived derivatives the root stage exported. -m preserves that curated env.
 for _secret in $(plugin_secret_vars); do
   unset "$_secret"

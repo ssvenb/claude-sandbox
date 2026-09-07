@@ -1,8 +1,6 @@
 # shellcheck shell=sh
 # Container-side plugin framework. Sourced by entrypoint.sh (root) and agent-setup.sh (node).
-#
-# $ENABLED_PLUGINS was already resolved and validated on the host by run.sh; here we only run
-# the stage scripts of the plugins it names.
+# $ENABLED_PLUGINS was already resolved and validated on the host; here we only run the stages.
 
 PLUGIN_ROOT="${PLUGIN_ROOT:-/opt/plugins}"
 
@@ -25,7 +23,7 @@ plugin_run_stage() {
   unset _stage PLUGIN_NAME PLUGIN_DIR
 }
 
-# Print the settings.json fragments contributed by enabled plugins, in order.
+# The settings.json fragments contributed by enabled plugins, in order.
 plugin_settings_files() {
   for _name in ${ENABLED_PLUGINS:-}; do
     [ -f "$PLUGIN_ROOT/$_name/settings.json" ] && echo "$PLUGIN_ROOT/$_name/settings.json"
@@ -34,8 +32,7 @@ plugin_settings_files() {
   return 0
 }
 
-# Print every env var enabled plugins declare as a secret, so root can drop them before
-# handing control to the unprivileged agent user.
+# Every env var enabled plugins declare as a secret, so root can drop them before handing over.
 plugin_secret_vars() {
   for _name in ${ENABLED_PLUGINS:-}; do
     [ -f "$PLUGIN_ROOT/$_name/plugin.json" ] &&

@@ -1,21 +1,12 @@
 #!/bin/bash
-# Build and launch a coding-agent sandbox container. Runs on YOUR machine, where any long-lived
-# credentials stay; the container only ever receives what the agent and the enabled plugins
-# hand it.
-#
-# Configuration comes from .env next to this script. The core needs only:
-#   AGENT                   which CLI agent runs (agents/*, default: claude)
-# plus whatever credentials that agent asks for — see agents/*/host.sh. Everything else belongs
-# to a plugin — see plugins/*/plugin.json and .env.example. Plugins are switched with
-# ENABLE_<PLUGIN_NAME> flags, e.g. ENABLE_GITHUB_AUTH=0.
-#
-# Those are defaults: the repo you launch from overrides any of them, in its own .env (sandbox
-# variables only) or in its .claude-sandbox.json ("env" block, per-plugin "enabled"). See
-# src/lib/host-settings.sh.
+# Build and launch a coding-agent sandbox container. Runs on YOUR machine, where the long-lived
+# credentials stay; the container only ever receives what the agent and the enabled plugins hand
+# it. Configuration lives in .env; the repo you launch from can override any of it (.env,
+# .claude-sandbox.json — see src/lib/host-settings.sh).
 set -euo pipefail
 
-# The directory you launched from is the repo/folder the agent works on, so remember it before
-# hopping to the script's own directory — plugins read it as $HOST_CWD, never as $PWD.
+# The directory you launched from is the repo the agent works on — plugins read it as $HOST_CWD,
+# never as $PWD.
 export HOST_CWD="$PWD"
 cd "$(dirname "$0")"
 # Export everything sourced so plugins and the container inherit it.
@@ -35,7 +26,6 @@ set +a
 # shellcheck source=src/lib/host-settings.sh
 . src/lib/host-settings.sh
 
-# --resume <RUN_ID>: re-attach to that run. No arg → fresh run.
 usage() { echo "Usage: $0 [--resume <RUN_ID>]   (RUN_ID is 6 hex chars)" >&2; exit "${1:-1}"; }
 RESUME=0
 RUN_ID=""
@@ -53,18 +43,17 @@ if [ "$RESUME" = 1 ]; then
   esac
 fi
 
-# The repo you launched from configures its own sandbox: load its files and let their settings
-# overlay .env before anything reads one, so even AGENT and the plugin mix can be per-project.
+# The worked-on repo's own files overlay .env before anything reads it, so even AGENT and the
+# plugin mix are per-project.
 project_config_load
 project_env_load
 project_settings_apply
 
-# Pick the agent first: plugins that declare a different requiredAgent are dropped from the run.
+# Agent first: plugins declaring a different requiredAgent are dropped from the run.
 agent_resolve
 
-# Work out which plugins run, fail fast on unmet config/capabilities, then let each one
-# contribute its own docker run arguments. The agent's host stage comes last, so a plugin that
-# brings credentials of its own (AGENT_AUTH_PROVIDED=1) is already accounted for.
+# The agent's host stage comes last, so a plugin bringing credentials of its own
+# (AGENT_AUTH_PROVIDED=1) is already accounted for.
 plugins_discover
 plugins_resolve
 plugins_validate
@@ -73,14 +62,11 @@ agent_host_stage
 echo "🤖 Agent: $AGENT"
 echo "🔌 Plugins: ${ENABLED_PLUGINS:-<none>}"
 
-# One id keys the run; a plugin may derive a branch name from it. Fresh run mints one;
-# --resume reuses it.
-[ "$RESUME" = 1 ] || RUN_ID=$(openssl rand -hex 3)   # 6 lowercase hex chars, DNS-safe
+# One id keys the run; --resume reuses it. 6 lowercase hex chars, DNS-safe.
+[ "$RESUME" = 1 ] || RUN_ID=$(openssl rand -hex 3)
 
-# Agent and plugin mix are baked in: only the selected agent's and the enabled plugins'
-# install.sh run, so changing either rebuilds. Each agent gets its own image tag.
-# The CLI version joins them, so a new upstream release rebuilds the install layer and nothing
-# else; an unchanged version leaves the whole build cached.
+# Agent, plugin mix and CLI version are all build args, so the image rebuilds exactly when one of
+# them changes and is fully cached otherwise.
 IMAGE="claude-agent:$AGENT"
 agent_version_resolve
 docker build -t "$IMAGE" \

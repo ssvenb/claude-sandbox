@@ -1,10 +1,7 @@
 # shellcheck shell=bash
-# Host stage: hand the container the extra root certificates this machine trusts.
-#
-# Needed wherever egress passes through a TLS-intercepting proxy: the host has the proxy's root
-# CA installed, the image ships only Debian's default bundle, so every HTTPS call from inside the
-# container fails with "self-signed certificate in certificate chain". Nothing here is secret —
-# these are public root certificates, mounted read-only.
+# Host stage: hand the container the extra root certificates this machine trusts, for networks
+# behind a TLS-intercepting proxy (the image ships only Debian's bundle, so every HTTPS call from
+# inside fails with "self-signed certificate in certificate chain"). Public certs, mounted ro.
 
 CA_CERTS_DIR="${CA_CERTS_DIR:-/usr/local/share/ca-certificates}"
 [ -d "$CA_CERTS_DIR" ] \

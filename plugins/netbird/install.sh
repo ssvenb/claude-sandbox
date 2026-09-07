@@ -1,8 +1,8 @@
 #!/bin/sh
-# Build-time install (root, during docker build). The NetBird client plus the kernel-networking
-# tools it drives. Each sandbox runs its OWN client (see root-init.sh) on the container's network
-# namespace, so mesh traffic never flows through the host's peer. The release tarball ships a
-# static Go binary; the version is pinned here — bump it and rebuild.
+# Build-time install (root, during docker build). The NetBird client (a static Go binary from the
+# release tarball, pinned here) plus the kernel-networking tools it drives to install its routes
+# and firewall rules. Each sandbox runs its OWN client, so mesh traffic never flows through the
+# host's peer.
 set -eu
 
 NETBIRD_VERSION=0.72.4
@@ -14,8 +14,6 @@ case "$(dpkg --print-architecture)" in
 esac
 
 apt-get update
-# WireGuard is created in-kernel via the tun device; iptables/iproute2 are what the client uses
-# to install its routes and firewall rules.
 apt-get install -y --no-install-recommends iptables iproute2
 rm -rf /var/lib/apt/lists/*
 

@@ -1,9 +1,7 @@
 #!/bin/sh
-# Build-time install (root, during docker build). Headroom compression proxy, used by this
-# plugin's agent-init.sh to wrap the Claude launch command. Installed into an isolated venv so
-# it can't perturb system Python; [proxy] pulls the FastAPI/uvicorn server + core compressors
-# (no torch/ML — too heavy for the sandbox, and the JSON/AST compressors deliver most of the
-# savings). Only the entrypoint is linked onto PATH, keeping the venv's python out of it.
+# Build-time install (root, during docker build). Isolated venv so it can't perturb system Python,
+# with only the entrypoint linked onto PATH. [proxy] pulls the server plus the JSON/AST
+# compressors; no torch/ML, which is too heavy here and adds little.
 set -eu
 
 python3 -m venv /opt/headroom

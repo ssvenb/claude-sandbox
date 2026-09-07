@@ -1,6 +1,5 @@
 # shellcheck shell=sh
-# Agent stage: /workspace is already populated by the host bind-mount, so there is nothing to
-# provision — just tell the agent that its edits are live on the host.
+# Agent stage: the bind-mount already populated /workspace; only the warning is left to give.
 
 printf 'Your /workspace is a live bind-mount of a directory on the host: every edit takes effect immediately outside the sandbox and there is no per-run branch isolating your work.\n' \
   >> "$AGENT_PROMPT_FILE"

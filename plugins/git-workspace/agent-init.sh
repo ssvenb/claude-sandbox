@@ -7,7 +7,6 @@ BASE_BRANCH="${BASE_BRANCH:-main}"
 git clone "$REPO_URL" /workspace
 cd /workspace
 
-RUN_ID="${RUN_ID:-$(openssl rand -hex 3)}"   # 6 lowercase hex chars, DNS-safe
 
 # Prefix and commit identity come from the running agent's manifest, so a copilot run is not signed
 # as Claude Code. An explicit BRANCH_PREFIX names the identity of this run instead: work from a
@@ -27,7 +26,7 @@ git config user.email "${agent_git_email:-$AGENT@sandbox.local}"
 # Each run gets its own branch so parallel agents don't collide: the date makes a branch listing
 # readable, the RUN_ID keeps it unique.
 AGENT_BRANCH_PREFIX="$BRANCH_PREFIX"
-AGENT_BRANCH="$AGENT_BRANCH_PREFIX/$(date -u +%Y%m%d)-$RUN_ID"
+AGENT_BRANCH="$AGENT_BRANCH_PREFIX/$RUN_DATE-$RUN_ID"
 export RUN_ID AGENT_BRANCH AGENT_BRANCH_PREFIX
 
 if [ "${RESUME:-0}" = 1 ]; then

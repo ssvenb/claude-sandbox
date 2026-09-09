@@ -43,6 +43,12 @@ if [ "$RESUME" = 1 ]; then
   esac
 fi
 
+# One id and date key the run; --resume reuses the id. 6 lowercase hex chars, DNS-safe. Both are
+# core so any plugin's host stage can name its per-run artifacts the same way.
+[ "$RESUME" = 1 ] || RUN_ID=$(openssl rand -hex 3)
+RUN_DATE=$(date -u +%Y%m%d)
+export RUN_ID RUN_DATE
+
 # The worked-on repo's own files overlay .env before anything reads it, so even AGENT and the
 # plugin mix are per-project.
 project_config_load
@@ -62,9 +68,6 @@ agent_host_stage
 echo "🤖 Agent: $AGENT"
 echo "🔌 Plugins: ${ENABLED_PLUGINS:-<none>}"
 
-# One id keys the run; --resume reuses it. 6 lowercase hex chars, DNS-safe.
-[ "$RESUME" = 1 ] || RUN_ID=$(openssl rand -hex 3)
-
 # Agent, plugin mix and CLI version are all build args, so the image rebuilds exactly when one of
 # them changes and is fully cached otherwise.
 IMAGE="claude-agent:$AGENT"
@@ -76,6 +79,7 @@ docker build -t "$IMAGE" \
 
 docker run -it --rm \
   -e RUN_ID="$RUN_ID" \
+  -e RUN_DATE="$RUN_DATE" \
   -e RESUME="$RESUME" \
   -e AGENT="$AGENT" \
   -e ENABLED_PLUGINS="$ENABLED_PLUGINS" \

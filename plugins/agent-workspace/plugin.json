@@ -1,6 +1,6 @@
 {
   "name": "agent-workspace",
-  "description": "Mirrors the container's /workspace into ~/.agent-workspace/<RUN_ID> on the host, so you can watch and open the agent's checkout in a local editor. Supplies the storage only — a workspace plugin still fills it.",
+  "description": "Mirrors the container's /workspace into ~/.agent-workspaces/<project>-<date>-<RUN_ID> on the host, so you can watch and open the agent's checkout in a local editor. Supplies the storage only — a workspace plugin still fills it.",
   "priority": 15,
   "defaultEnabled": true,
   "provides": ["workspace-mirror"],

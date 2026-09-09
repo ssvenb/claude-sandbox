@@ -123,7 +123,7 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | `upstream-proxy` | 15 | on | any | `upstream-proxy` | — | credential-injecting reverse proxies on the HOST, one per route from the project config, bind-mounted as unix sockets and bridged to loopback ports with `socat`; no routes configured → does nothing |
 | `git-workspace` | 20 | on | any | `workspace` | `git-credentials` | clone the `origin` remote of `run.sh`'s cwd into `/workspace`, per-run branch named after the agent (or `$BRANCH_PREFIX`) and the date, its commit identity, resume briefing |
 | `cwd-workspace` | 20 | off | any | `workspace` | — | bind-mounts the host's cwd (or `$HOST_WORKSPACE_DIR`) at `/workspace`; conflicts with `git-workspace` |
-| `agent-workspace` | 15 | on | any | `workspace-mirror` | — | bind-mounts `$AGENT_WORKSPACE_DIR/<RUN_ID>` (default `~/.agent-workspace/<RUN_ID>`, created if missing) at `/workspace`, so the agent's checkout is visible on the host; complements `git-workspace`, conflicts with `cwd-workspace` |
+| `agent-workspace` | 15 | on | any | `workspace-mirror` | — | bind-mounts `$AGENT_WORKSPACE_DIR/<project>-<date>-<RUN_ID>` (default `~/.agent-workspaces/<project>-<date>-<RUN_ID>`, created if missing) at `/workspace`, so the agent's checkout is visible on the host; removed when the container exits, unless `AGENT_WORKSPACE_CLEANUP=0`; complements `git-workspace`, conflicts with `cwd-workspace` |
 | `project-deps` | 25 | on | any | `project-deps` | — | installs the dependencies the target repo declares in the project config: apt/npm/pip packages (as root, at boot) and `setup` shell commands (as the agent user, in the provisioned `/workspace`); nothing configured → does nothing |
 | `branch-guard` | 30 | on | claude | — | `workspace` | `guard-branch.py` PreToolUse hook |
 | `headroom` | 40 | on | claude | `llm-proxy` | — | wraps the launch command in the headroom compression proxy (`headroom-ai[proxy,mcp]` in `/opt/headroom`) |
@@ -405,7 +405,8 @@ only required while that agent or plugin is in use.
 | `BASE_BRANCH` | git-workspace | Branch to cut from (default: the repo's own default branch, via `origin/HEAD`) |
 | `HOST_WORKSPACE_DIR` | cwd-workspace | Host dir mounted at `/workspace` (default: `run.sh`'s cwd) |
 | `BRANCH_PREFIX` | git-workspace | Leading segment of the per-run branch name, read from the **worked-on repo's** `$HOST_CWD/.env` (not the sandbox's); `.plugins["git-workspace"].branchPrefix` in its `.claude-sandbox.json` wins over it, and with neither it defaults to the agent manifest's `branchPrefix`, else the agent's directory name |
-| `AGENT_WORKSPACE_DIR` | agent-workspace | Host dir holding the per-run mirrors of `/workspace`, created if missing (default: `$HOME/.agent-workspace`; each run uses `<dir>/<RUN_ID>`) |
+| `AGENT_WORKSPACE_DIR` | agent-workspace | Host dir holding the per-run mirrors of `/workspace`, created if missing (default: `$HOME/.agent-workspaces`; each run uses `<dir>/<project>-<date>-<RUN_ID>`) |
+| `AGENT_WORKSPACE_CLEANUP` | agent-workspace | Delete the run's mirror directory when the container exits; 0 keeps it for inspection, at one leftover directory per run (default: 1) |
 | `CA_CERTS_DIR` | ca-certs | Host dir holding extra root certificates, PEM or DER (default `/usr/local/share/ca-certificates`) |
 | `CLAUDE_HOME_DIR` | claude-home | Host dir mounted as the agent's `~/.claude` (default `$HOME/.claude`) |
 | `COPILOT_HOME_DIR` | copilot-home | Host dir mounted as the agent's `~/.copilot` (default `$HOME/.copilot`) |

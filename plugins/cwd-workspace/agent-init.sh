@@ -1,7 +1,14 @@
 # shellcheck shell=sh
-# Agent stage: the bind-mount already populated /workspace; only the warning is left to give.
+# Agent stage. Say which files were masked, so the agent does not waste a turn on an "empty" file.
 
-printf 'Your /workspace is a live bind-mount of a directory on the host: every edit takes effect immediately outside the sandbox and there is no per-run branch isolating your work.\n' \
-  >> "$AGENT_PROMPT_FILE"
+[ -n "${CWD_WORKSPACE_HIDDEN:-}" ] || return 0
 
-echo "✅ /workspace is bind-mounted from the host"
+{
+  printf '\n## Masked files\n\n'
+  printf 'These files exist on the host but are deliberately masked in here and read as empty:\n\n'
+  for path in $CWD_WORKSPACE_HIDDEN; do
+    printf -- '- `%s`\n' "$path"
+  done
+  printf '\nThey usually hold credentials. Do not try to read, recreate, or write them — treat '
+  printf 'them as present and correct outside the sandbox.\n'
+} >> "$AGENT_PROMPT_FILE"

@@ -24,6 +24,9 @@ chmod 755 "$UPSTREAM_PROXY_DIR"
 UPSTREAM_PROXY_SOCK_DIR="$UPSTREAM_PROXY_DIR/sockets"
 mkdir -m 755 "$UPSTREAM_PROXY_SOCK_DIR"
 UPSTREAM_PROXY_ROUTE_FILE="$UPSTREAM_PROXY_DIR/routes.json"
+# The proxy logs a line per request; run.sh shares its terminal with the agent's TUI, so send that
+# to a file instead of into the agent's input field.
+UPSTREAM_PROXY_LOG="$UPSTREAM_PROXY_DIR/proxy.log"
 printf '%s' "$UPSTREAM_PROXY_ROUTES_JSON" >"$UPSTREAM_PROXY_ROUTE_FILE"
 
 # The credentials a route names usually live in the target repo's own .env, which run.sh never
@@ -41,7 +44,8 @@ fi
 
 "$PLUGIN_DIR/host/proxy.py" \
   ${UPSTREAM_PROXY_ENV_ARGS[@]+"${UPSTREAM_PROXY_ENV_ARGS[@]}"} \
-  "$UPSTREAM_PROXY_ROUTE_FILE" "$UPSTREAM_PROXY_SOCK_DIR" &
+  "$UPSTREAM_PROXY_ROUTE_FILE" "$UPSTREAM_PROXY_SOCK_DIR" \
+  >"$UPSTREAM_PROXY_LOG" 2>&1 &
 UPSTREAM_PROXY_PID=$!
 
 # run.sh's last statement is `docker run`, so an EXIT trap fires once the agent's session ends.
@@ -55,10 +59,12 @@ for _ in $(seq 1 50); do
     [ -S "$UPSTREAM_PROXY_SOCK_DIR/$name.sock" ] || missing=1
   done < <(jq -r '.[].name' "$UPSTREAM_PROXY_ROUTE_FILE")
   [ "$missing" = 0 ] && break
-  kill -0 "$UPSTREAM_PROXY_PID" 2>/dev/null || die "upstream-proxy: the proxy exited during startup."
+  kill -0 "$UPSTREAM_PROXY_PID" 2>/dev/null \
+    || die "upstream-proxy: the proxy exited during startup.$(printf '\n')$(cat "$UPSTREAM_PROXY_LOG")"
   sleep 0.1
 done
-[ "${missing:-1}" = 0 ] || die "upstream-proxy: sockets did not appear in $UPSTREAM_PROXY_SOCK_DIR."
+[ "${missing:-1}" = 0 ] \
+  || die "upstream-proxy: sockets did not appear in $UPSTREAM_PROXY_SOCK_DIR.$(printf '\n')$(cat "$UPSTREAM_PROXY_LOG")"
 
 pass_mount "$UPSTREAM_PROXY_SOCK_DIR" /run/upstream-proxy
 

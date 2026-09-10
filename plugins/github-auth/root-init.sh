@@ -15,7 +15,6 @@ export GH_INITIAL_TOKEN
 (
   while sleep 2400; do   # 40 min, inside the 1h expiry
     T=$("$PLUGIN_DIR/root/mint-gh-token.py") || continue   # keep looping on transient failure
-    su -s /bin/sh node -c "export HOME=/home/node GH_HOST='$GH_HOST'; echo '$T' | gh auth login --hostname '$GH_HOST' --with-token" \
-      && echo "🔄 Refreshed GitHub installation token"
+    su -s /bin/sh node -c "export HOME=/home/node GH_HOST='$GH_HOST'; echo '$T' | gh auth login --hostname '$GH_HOST' --with-token"
   done
-) &
+) >/dev/null 2>&1 &

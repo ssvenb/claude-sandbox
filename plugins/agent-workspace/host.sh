@@ -9,7 +9,8 @@ run_dir="$AGENT_WORKSPACE_DIR/$(basename "$HOST_CWD")-$RUN_DATE-$RUN_ID"
 # On --resume the date segment is the day the run was created, not today: reuse the directory that
 # already carries this RUN_ID rather than opening a second one for the same run.
 if [ "$RESUME" = 1 ]; then
-  existing=$(ls -d "$AGENT_WORKSPACE_DIR"/*-"$RUN_ID" 2>/dev/null | head -n 1)
+  # `|| true`: run.sh runs under `set -eo pipefail`, so a no-match `ls` would abort the run.
+  existing=$(ls -d "$AGENT_WORKSPACE_DIR"/*-"$RUN_ID" 2>/dev/null | head -n 1) || true
   [ -n "$existing" ] && run_dir="$existing"
 fi
 

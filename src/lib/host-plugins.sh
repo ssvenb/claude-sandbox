@@ -62,6 +62,16 @@ pass_mount() {
   DOCKER_ARGS+=(-v "$host_path:$container_path${options:+:$options}")
 }
 
+# Cleanup a plugin wants run once `docker run` returns (normal exit, failure or Ctrl-C). A plain
+# `trap ... EXIT` would replace whatever an earlier plugin registered, so collect them instead.
+PLUGIN_EXIT_HOOKS=()
+on_exit() { PLUGIN_EXIT_HOOKS+=("$1"); }
+plugins_run_exit_hooks() {
+  local hook
+  for hook in ${PLUGIN_EXIT_HOOKS[@]+"${PLUGIN_EXIT_HOOKS[@]}"}; do eval "$hook"; done
+}
+trap plugins_run_exit_hooks EXIT
+
 # --- framework -----------------------------------------------------------------------------
 
 plugins_discover() {

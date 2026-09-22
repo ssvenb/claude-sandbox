@@ -48,9 +48,8 @@ fi
   >"$UPSTREAM_PROXY_LOG" 2>&1 &
 UPSTREAM_PROXY_PID=$!
 
-# run.sh's last statement is `docker run`, so an EXIT trap fires once the agent's session ends.
-# shellcheck disable=SC2064  # expand the pid and path now, not at trap time
-trap "kill $UPSTREAM_PROXY_PID 2>/dev/null; rm -rf '$UPSTREAM_PROXY_DIR'" EXIT
+# run.sh's last statement is `docker run`, so the exit hooks fire once the agent's session ends.
+on_exit "kill $UPSTREAM_PROXY_PID 2>/dev/null; rm -rf '$UPSTREAM_PROXY_DIR'"
 
 # Wait for every socket rather than racing the container's socat forwarders.
 for _ in $(seq 1 50); do

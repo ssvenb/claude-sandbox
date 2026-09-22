@@ -32,8 +32,7 @@ echo "📂 /workspace is mirrored to $run_dir on this machine"
 # run.sh's shell, so an EXIT trap here fires after `docker run` returns — normal exit, failure or
 # Ctrl-C alike. Anything the agent did not commit and push goes with it: set
 # AGENT_WORKSPACE_CLEANUP=0 to keep the checkout around for inspection.
-# ponytail: the only EXIT trap in the codebase; a second plugin wanting one needs a real post stage.
 case "${AGENT_WORKSPACE_CLEANUP:-1}" in
   1|true|yes|on)
-    trap 'echo "🧹 Removing $run_dir"; rm -rf -- "${run_dir:?}"' EXIT ;;
+    on_exit "echo '🧹 Removing $run_dir'; rm -rf -- '${run_dir:?}'" ;;
 esac

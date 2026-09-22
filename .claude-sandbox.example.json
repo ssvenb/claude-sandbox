@@ -1,5 +1,8 @@
 {
   "plugins": {
+    "data-mounts": {
+      "mounts": ["/srv/datasets:/data:ro", "~/scratch:/scratch"]
+    },
     "git-workspace": {
       "branchPrefix": "sandbox"
     },
@@ -37,7 +40,9 @@
           },
           "containerEnv": {
             "AZURE_OPENAI_ENDPOINT": "http://127.0.0.1:8082",
-            "AZURE_OPENAI_API_KEY": "proxied-on-the-host"
+            "AZURE_OPENAI_API_KEY": "proxied-on-the-host",
+            "AZURE_OPENAI_EMBEDDING_DEPLOYMENT": "${AZURE_OPENAI_EMBEDDING_DEPLOYMENT}",
+            "AZURE_OPENAI_API_VERSION": "${AZURE_OPENAI_API_VERSION}"
           }
         }
       ]

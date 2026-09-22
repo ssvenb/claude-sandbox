@@ -73,8 +73,37 @@ pass_value UPSTREAM_PROXY_PORTS "$(jq -r '[.[] | "\(.name):\(.port)"] | join(" "
 
 # Each route declares the env the agent should see: endpoints pointed at loopback, and placeholder
 # credentials for SDKs that insist on one. The real values never leave this host.
+#
+# ${VAR} in a value is expanded from the route file's envFile, else run.sh's environment, so
+# non-secret settings (a deployment name, an api version) need not be duplicated here. This DOES
+# put that value in the container — naming a credential here defeats the proxy, so don't.
+declare -A UPSTREAM_PROXY_ENV=()
+env_scan_into UPSTREAM_PROXY_ENV "$UPSTREAM_PROXY_ENV_FILE"
+
+upstream_proxy_expand() {
+  local in=$1 out="" name rest
+  while [ -n "$in" ]; do
+    case "$in" in
+      *'${'*)
+        out+=${in%%'${'*}
+        rest=${in#*'${'}
+        case "$rest" in
+          *'}'*)
+            name=${rest%%\}*}
+            out+="${UPSTREAM_PROXY_ENV[$name]-${!name-}}"
+            in=${rest#*\}}
+            ;;
+          *) out+=$rest; in="" ;;
+        esac
+        ;;
+      *) out+=$in; in="" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
 while IFS=$'\t' read -r key value; do
-  pass_value "$key" "$value"
+  pass_value "$key" "$(upstream_proxy_expand "$value")"
 done < <(jq -r '.[] | (.containerEnv // {}) | to_entries[] | "\(.key)\t\(.value)"' "$UPSTREAM_PROXY_ROUTE_FILE")
 
 echo "🔒 upstream-proxy: $(jq -r '[.[].name] | join(", ")' "$UPSTREAM_PROXY_ROUTE_FILE") proxied from the host"

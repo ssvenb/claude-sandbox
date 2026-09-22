@@ -1,0 +1,10 @@
+{
+  "name": "data-mounts",
+  "description": "Bind-mounts extra host directories into the container, listed in the project config.",
+  "priority": 15,
+  "defaultEnabled": true,
+  "provides": ["data-mounts"],
+  "requires": [],
+  "requiredEnv": [],
+  "secrets": []
+}

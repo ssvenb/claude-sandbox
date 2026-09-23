@@ -1,11 +1,11 @@
 # shellcheck shell=bash
 # Per-project settings. Sourced by run.sh (bash, on YOUR machine).
 #
-# Everything in the sandbox's .env can be overridden per project, so a checkout carries the way it
-# wants to be sandboxed. Lowest to highest precedence:
+# Configuration is per-project: a checkout carries the way it wants to be sandboxed, and the
+# sandbox's own directory contributes nothing. Lowest to highest precedence:
 #
 #   1. a plugin manifest's defaultEnabled, and each setting's built-in default
-#   2. the sandbox's .env (or anything already exported in your shell)
+#   2. anything already exported in your shell
 #   3. the worked-on repo's .env               — sandbox-owned keys only
 #   4. the worked-on repo's .claude-sandbox.json — "env" block, and per-plugin "enabled"
 #

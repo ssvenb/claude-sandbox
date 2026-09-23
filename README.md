@@ -13,7 +13,9 @@ container only sees short-lived installation tokens), and each run works on its 
 ## Quick start
 
 ```bash
-cp .env.example .env      # pick AGENT, fill in its token and any plugin variables
+# configuration is per-project: put it in the repo you work on, not here
+cp .env.example ~/code/my-repo/.env   # pick AGENT, fill in its token and any plugin variables
+cd ~/code/my-repo
 ./run.sh                  # build + fresh run (generates a RUN_ID)
 ./run.sh --resume a1b2c3  # re-attach to an existing run's branch
 ```
@@ -26,7 +28,7 @@ want to build without running.
 
 ```
 run.sh (host)
-  ├─ sources .env, resolves AGENT and the ENABLE_<PLUGIN> flags, validates config + capabilities
+  ├─ loads the worked-on repo's config, resolves AGENT and the ENABLE_<PLUGIN> flags, validates config + capabilities
   ├─ each enabled plugin's host.sh, then the agent's host.sh, contribute `docker run` args
   ├─ docker build --build-arg AGENT=... --build-arg ENABLED_PLUGINS=...
   └─ docker run → entrypoint.sh (root)
@@ -202,7 +204,7 @@ can't perturb each other.
 
 ### `host.sh` — host stage (your user)
 
-Sourced by `run.sh` in bash with your full environment, including everything from `.env`. This is
+Sourced by `run.sh` in bash with your full environment, including the worked-on repo's settings. This is
 where long-lived credentials are read; they must never be handed to the container verbatim.
 
 Available context:
@@ -212,7 +214,7 @@ Available context:
 | `$PLUGIN_NAME` | this plugin's directory name |
 | `$PLUGIN_DIR` | absolute path to `plugins/<name>` on the host |
 | `$ENABLED_PLUGINS` | space-separated, priority-ordered list of enabled plugins |
-| everything in `.env` | exported by `run.sh` before sourcing |
+| sandbox-owned settings | exported by `run.sh` from the worked-on repo's `.env` / `.claude-sandbox.json` |
 
 Available helpers:
 
@@ -246,7 +248,8 @@ Validation that can be done here should be done here: it runs before the build.
 
 ### Project configuration — `.claude-sandbox.json`
 
-`.env` configures the *sandbox*. Settings that belong to the *repo the agent works on* — which
+The sandbox's own directory holds no configuration — its `.env` is never read. Settings that
+belong to the *repo the agent works on* — which
 upstreams to proxy, which hosts a key is for — live in an optional `.claude-sandbox.json` in the
 directory you launched `run.sh` from (`$HOST_CWD`), so a checkout can carry its own sandbox
 configuration. `PROJECT_CONFIG_FILE` points somewhere else.
@@ -386,8 +389,9 @@ Everything else under the plugin directory is 444 with 555 directories.
 
 ## Environment variables
 
-Every variable must have an entry in `.env.example`. Configuration lives in `.env`
-(git-ignored). Only `AGENT` belongs to the core; the rest are owned by an agent or a plugin and
+Every variable must have an entry in `.env.example`, which doubles as the allowlist of
+sandbox-owned names. Configuration is per-project: it lives in the worked-on repo's `.env` /
+`.claude-sandbox.json`, never in the sandbox's own directory. Only `AGENT` belongs to the core; the rest are owned by an agent or a plugin and
 only required while that agent or plugin is in use.
 
 | Variable | Owner | Purpose |

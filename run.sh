@@ -1,19 +1,14 @@
 #!/bin/bash
 # Build and launch a coding-agent sandbox container. Runs on YOUR machine, where the long-lived
 # credentials stay; the container only ever receives what the agent and the enabled plugins hand
-# it. Configuration lives in .env; the repo you launch from can override any of it (.env,
-# .claude-sandbox.json — see src/lib/host-settings.sh).
+# it. Configuration is project-specific: it comes from the repo you launch from (.env,
+# .claude-sandbox.json — see src/lib/host-settings.sh), never from the sandbox's own directory.
 set -euo pipefail
 
 # The directory you launched from is the repo the agent works on — plugins read it as $HOST_CWD,
 # never as $PWD.
 export HOST_CWD="$PWD"
 cd "$(dirname "$0")"
-# Export everything sourced so plugins and the container inherit it.
-set -a
-# shellcheck disable=SC1091
-[ -f .env ] && source .env
-set +a
 
 # shellcheck source=src/lib/host-plugins.sh
 . src/lib/host-plugins.sh

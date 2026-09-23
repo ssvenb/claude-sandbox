@@ -15,7 +15,7 @@ feature branch (`<prefix>/<yyyymmdd>-<RUN_ID>`, e.g. `claude-code/20260902-1a2b3
 
 ```
 run.sh (host)
-  ├─ sources .env and the project config, resolves AGENT and the ENABLE_<PLUGIN> flags, validates
+  ├─ loads the worked-on repo's config, resolves AGENT and the ENABLE_<PLUGIN> flags, validates
   │  config + capabilities
   ├─ plugin host.sh scripts, then the agent's host.sh, contribute `docker run` args (secrets stay on the host)
   └─ docker run → entrypoint.sh (root)
@@ -111,8 +111,10 @@ built.
 
 ### Project configuration
 
-`.env` configures the sandbox; settings that belong to the *repo being worked on* live in an
-optional `.claude-sandbox.json` in `$HOST_CWD` (override: `PROJECT_CONFIG_FILE`), loaded by
+Configuration is project-specific: the sandbox's own directory holds no config (its `.env` is
+never read — only `.env.example`, as the allowlist of sandbox-owned names). Settings come from the
+*repo being worked on*: its `.env`, and an optional `.claude-sandbox.json` in `$HOST_CWD`
+(override: `PROJECT_CONFIG_FILE`), loaded by
 `src/lib/host-project-config.sh` before plugin resolution:
 
 ```json
@@ -121,12 +123,12 @@ optional `.claude-sandbox.json` in `$HOST_CWD` (override: `PROJECT_CONFIG_FILE`)
                "upstream-proxy": { "envFile": ".env", "routes": [ ... ] } } }
 ```
 
-Every sandbox setting is per-project. `src/lib/host-settings.sh` overlays the repo's own files on
-top of the sandbox `.env` before `agent_resolve`/`plugins_resolve` run, so `AGENT` and the plugin
-mix are configurable per checkout too. Precedence, lowest first:
+Every sandbox setting is per-project. `src/lib/host-settings.sh` applies the repo's own files
+before `agent_resolve`/`plugins_resolve` run, so `AGENT` and the plugin mix are configurable per
+checkout too. Precedence, lowest first:
 
 1. the plugin manifest's `defaultEnabled`, and each setting's built-in default
-2. the sandbox's `.env` (or whatever is already exported in your shell)
+2. whatever is already exported in your shell
 3. the worked-on repo's `.env` — **sandbox-owned names only**
 4. the worked-on repo's `.claude-sandbox.json` — the `env` block, and each plugin's `enabled`
 
@@ -135,7 +137,7 @@ plus any `ENABLE_*` flag. Layer 3 is filtered because that file is the *target r
 its own secrets — everything not owned stays in the `project_env` array and never becomes an
 environment variable on the host. Layer 4 is written for the sandbox, so an unrecognised name
 there is a typo and fails the run. `PROJECT_CONFIG_FILE` and `PROJECT_ENV_FILE` are the exception:
-they name those files, so only the sandbox `.env` or the shell can set them.
+they name those files, so only the shell can set them.
 
 A `host.sh` reads its own section — `.plugins["<plugin>"]`, keyed by `$PLUGIN_NAME`, no need to
 name itself — with `plugin_config` (scalars) and `plugin_config_json` (objects/arrays); both take
@@ -162,8 +164,8 @@ AGENT=copilot ./run.sh                # same sandbox, GitHub Copilot CLI instead
 ## Environment Variables
 
 All env variables must have an example in `.env.example` — that file doubles as the allowlist of
-sandbox-owned names a project's `.env` may override. Configuration lives in `.env` (git-ignored),
-and any of it can be overridden per project (see [Project configuration](#project-configuration)). Only `AGENT` belongs to the core; the rest are owned by an agent or a plugin and
+sandbox-owned names a project's `.env` may set; the sandbox's own `.env` is never read.
+Configuration is per-project (see [Project configuration](#project-configuration)). Only `AGENT` belongs to the core; the rest are owned by an agent or a plugin and
 only required while that one is in use.
 
 | Variable | Owner | Purpose |

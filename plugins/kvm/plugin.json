@@ -1,0 +1,10 @@
+{
+  "name": "kvm",
+  "description": "Passes the host's /dev/kvm through and ships QEMU, so the agent can run hardware-accelerated VMs.",
+  "priority": 5,
+  "defaultEnabled": false,
+  "provides": ["kvm"],
+  "requires": [],
+  "requiredEnv": [],
+  "secrets": []
+}

@@ -11,6 +11,9 @@ for entry in ${UPSTREAM_PROXY_PORTS:-}; do
     echo "⚠️  upstream-proxy: $sock is missing, skipping $name" >&2
     continue
   fi
-  socat "TCP4-LISTEN:$port,bind=127.0.0.1,fork,reuseaddr" "UNIX-CONNECT:$sock" &
+  # Logged, not inherited: the agent's TUI owns the terminal, and a stray connection error
+  # written to it would scribble over the screen.
+  socat "TCP4-LISTEN:$port,bind=127.0.0.1,fork,reuseaddr" "UNIX-CONNECT:$sock" \
+    >>"/var/log/upstream-proxy-$name.log" 2>&1 &
   echo "🔌 upstream-proxy: 127.0.0.1:$port → $name"
 done

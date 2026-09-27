@@ -1,5 +1,5 @@
 #!/bin/sh
-# Runs as 'node' (invoked from entrypoint.sh via `su -m node`).
+# Runs as 'node' (invoked from entrypoint.sh via `setpriv`).
 set -e
 
 # -m preserved HOME=/root; reset it so gh/claude use the node home dir.

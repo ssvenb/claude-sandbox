@@ -32,8 +32,10 @@ if [ -n "$MANAGED_SETTINGS" ]; then
 fi
 
 # Hand off to 'node', dropping every var the plugins declared as a secret first — the agent only
-# ever sees the short-lived derivatives the root stage exported. -m preserves that curated env.
+# ever sees the short-lived derivatives the root stage exported. setpriv leaves that curated env
+# as is, and unlike `su -c` it keeps the session: su starts the command in a new one with no
+# controlling terminal, so the agent's TUI never got SIGWINCH and garbled after every resize.
 for _secret in $(plugin_secret_vars); do
   unset "$_secret"
 done
-su -m -s /bin/sh node -c '/usr/local/bin/agent-setup.sh'
+exec setpriv --reuid=node --regid=node --init-groups /usr/local/bin/agent-setup.sh

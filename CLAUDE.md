@@ -100,7 +100,7 @@ Disable them all and the agent starts plain in an empty `/workspace` with no Git
 | `plugin.json` | — | manifest: `priority`, `defaultEnabled`, `requiredAgent`, `provides`, `requires`, `conflicts`, `requiredEnv`, `secrets` |
 | `install.sh` | root, at image build | install the plugin's dependencies (e.g. `gh`); runs only when the plugin is enabled |
 | `host.sh` | you, on the host | validate config; call `pass_env VAR` / `pass_value NAME VALUE` / `pass_mount HOST_PATH CONTAINER_PATH [OPTS]` / `pass_arg FLAG...` to add `docker run` args; read per-project settings with `plugin_config FILTER [DEFAULT]` / `plugin_config_json FILTER [DEFAULT]` / `project_env NAME [DEFAULT]`; set `AGENT_AUTH_PROVIDED=1` if the plugin supplies the agent's credentials itself |
-| `root-init.sh` | root, in container | anything needing secrets; exports survive the `su -m node` handoff |
+| `root-init.sh` | root, in container | anything needing secrets; exports survive the `setpriv` handoff to `node` |
 | `agent-init.sh` | `node`, in container | agent-visible setup; append to `$AGENT_PROMPT_FILE` to brief the agent |
 | `settings.json` | — | fragment merged into the managed policy (objects merge, lists concatenate) |
 | `bin/` | `node` | world-executable helpers, e.g. hook scripts (chmod 555) |

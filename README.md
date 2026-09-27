@@ -35,7 +35,7 @@ run.sh (host)
        ├─ chown /workspace to node
        ├─ each enabled plugin's root-init.sh (only context that holds secrets)
        ├─ merges settings-base.json + plugin settings.json → the agent's managedSettings path (0444)
-       ├─ unsets every var declared in a plugin's `secrets`, then `su -m node`
+       ├─ unsets every var declared in a plugin's `secrets`, then `setpriv` to `node`
        └─ agent-setup.sh (node)
             ├─ the agent's agent-init.sh (seeds its own config for a non-interactive boot)
             ├─ each enabled plugin's agent-init.sh (auth, /workspace, guardrails, briefing)
@@ -304,7 +304,7 @@ container except through the plugin's own `pass_*` calls.
 
 Sourced by `entrypoint.sh` as root, in POSIX `sh`. This is the **only** context that still holds
 the vars listed in `secrets`, so token minting, key handling and background refresh loops belong
-here. Anything you `export` survives the `su -m node` handoff (except the secrets themselves,
+here. Anything you `export` survives the `setpriv` handoff to `node` (except the secrets themselves,
 which are dropped right after this stage).
 
 Context: `$PLUGIN_NAME`, `$PLUGIN_DIR` (`/opt/plugins/<name>`), `$ENABLED_PLUGINS`, `$RUN_ID`,
@@ -421,7 +421,7 @@ Volume mounts are contributed by plugins via `pass_mount`; the core `docker run`
 
 - The agent user (`node`) never sees the GitHub App private key — only 1-hour installation
   tokens, re-minted by root every 40 minutes.
-- Vars listed in a plugin's `secrets` are unset before `su -m node`.
+- Vars listed in a plugin's `secrets` are unset before the `setpriv` handoff to `node`.
 - `/opt/plugins`, `/opt/agents` and the merged managed-settings file are root-owned and
   read-only, so the agent cannot edit or disable its own guardrails.
 - `branch-guard` blocks `git checkout/switch/branch/worktree` outright and only allows `git push`

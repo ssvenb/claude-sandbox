@@ -37,7 +37,9 @@ agent_version_resolve() {
     echo "📌 $pkg@$AGENT_VERSION (pinned)"
     return 0
   fi
-  AGENT_VERSION=$(npm view "$pkg" version 2>/dev/null | tr -d '[:space:]') || true
+  # Ask the registry directly: the host need not have npm installed.
+  AGENT_VERSION=$(curl -fsSL --max-time 10 "https://registry.npmjs.org/$pkg/latest" 2>/dev/null \
+    | jq -r '.version // empty' 2>/dev/null | tr -d '[:space:]') || true
   if [ -n "$AGENT_VERSION" ]; then
     echo "📌 $pkg@$AGENT_VERSION (latest)"
   else

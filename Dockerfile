@@ -14,6 +14,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
+# Terraform, from HashiCorp's apt repository.
+RUN curl -fsSL https://apt.releases.hashicorp.com/gpg \
+        | gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(. /etc/os-release && echo "$VERSION_CODENAME") main" \
+        > /etc/apt/sources.list.d/hashicorp.list \
+    && apt-get update && apt-get install -y --no-install-recommends terraform \
+    && rm -rf /var/lib/apt/lists/*
+
 # Every agent's files ship in the image, but only the one named by AGENT gets its CLI installed.
 # AGENT_VERSION (resolved on the host, empty means latest) is part of this layer's cache key, so
 # the layer rebuilds exactly when a new release is out; it is referenced in the RUN so the value

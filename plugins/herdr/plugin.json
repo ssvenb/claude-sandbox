@@ -1,0 +1,11 @@
+{
+  "name": "herdr",
+  "description": "Tells a host-side herdr which agent runs behind the `docker run` wrapper, so the sandbox's pane shows up under herdr's agents with live idle/working/blocked state.",
+  "priority": 5,
+  "defaultEnabled": true,
+  "provides": ["herdr"],
+  "requires": [],
+  "conflicts": [],
+  "requiredEnv": [],
+  "secrets": []
+}

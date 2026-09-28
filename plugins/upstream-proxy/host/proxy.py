@@ -34,6 +34,7 @@ import json
 import os
 import shlex
 import socketserver
+import subprocess
 import ssl
 import sys
 import threading
@@ -133,6 +134,8 @@ class _Injector:
             return {"Authorization": f"Bearer {self._env('valueEnv')}"}
         if self.kind == "oauth2_client_credentials":
             return {"Authorization": f"Bearer {self._oauth_token()}"}
+        if self.kind == "gcp":
+            return {"Authorization": f"Bearer {self._gcp_token()}"}
         raise ValueError(f"unknown auth.type '{self.kind}'")
 
     def _oauth_token(self) -> str:
@@ -161,6 +164,53 @@ class _Injector:
             return self._token
 
 
+    def _gcp_token(self) -> str:
+        """A Google access token for `serviceAccount`, minted by the host's own gcloud login.
+
+        The host identity needs roles/iam.serviceAccountTokenCreator on the service account, which
+        in turn holds only the roles the sandbox should have (e.g. storage.objectViewer on one
+        bucket). An optional `accessBoundary` (a Credential Access Boundary, Cloud Storage only)
+        downscopes the token further via Google's STS, so even a broadly-granted account yields a
+        token good for just the listed buckets/prefixes. Nothing here ever leaves the host.
+        """
+        with self._lock:
+            if self._token and time.time() < self._expires:
+                return self._token
+            account = os.path.expandvars(self.spec.get("serviceAccount", ""))
+            cmd = ["gcloud", "auth", "print-access-token", "--quiet"]
+            if account:
+                cmd.append(f"--impersonate-service-account={account}")
+            done = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT)
+            if done.returncode != 0:
+                raise RuntimeError(f"{' '.join(cmd)} failed: {done.stderr.strip()}")
+            token = done.stdout.strip()
+            # gcloud does not report the expiry; its tokens live an hour.
+            lifetime = 3600
+            boundary = self.spec.get("accessBoundary")
+            if boundary:
+                form = urllib.parse.urlencode({
+                    "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+                    "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+                    "requested_token_type": "urn:ietf:params:oauth:token-type:access_token",
+                    "subject_token": token,
+                    "options": json.dumps({"accessBoundary": boundary}),
+                }).encode()
+                req = urllib.request.Request(
+                    "https://sts.googleapis.com/v1/token", data=form,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+                    body = json.load(resp)
+                token = body["access_token"]
+                lifetime = int(body.get("expires_in", lifetime))
+            self._token = token
+            # Renew well before gcloud's cached token underneath could lapse.
+            self._expires = time.time() + max(lifetime - 600, 60)
+            who = account or "the host's gcloud account"
+            log(f"minted GCP token for {who}{' (downscoped)' if boundary else ''}")
+            return self._token
+
+
 class _Route:
     def __init__(self, cfg: dict):
         self.name = cfg["name"]
@@ -173,6 +223,10 @@ class _Route:
         self.paths = tuple(cfg.get("allowPaths", ["/"]))
         self.max_body = int(cfg.get("maxBodyBytes", DEFAULT_MAX_BODY))
         self.injector = _Injector(cfg.get("auth", {}))
+        # Fail at startup, not on the agent's first request: a bad login or a missing
+        # tokenCreator grant should stop run.sh while the user is still watching.
+        if self.injector.kind == "gcp":
+            self.injector.headers()
 
         # The address the sandbox knows this upstream by. It is a dummy — a loopback port on the
         # container's socat forwarder — so that the real hostname can stay out of the repo's

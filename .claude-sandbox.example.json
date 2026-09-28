@@ -44,6 +44,27 @@
             "AZURE_OPENAI_EMBEDDING_DEPLOYMENT": "${AZURE_OPENAI_EMBEDDING_DEPLOYMENT}",
             "AZURE_OPENAI_API_VERSION": "${AZURE_OPENAI_API_VERSION}"
           }
+        },
+        {
+          "name": "gcs",
+          "port": 8083,
+          "upstream": "https://storage.googleapis.com",
+          "allowMethods": ["GET", "HEAD"],
+          "allowPaths": ["/storage/v1/b/my-bucket/o", "/download/storage/v1/b/my-bucket/o"],
+          "auth": {
+            "type": "gcp",
+            "serviceAccount": "sandbox-reader@my-project.iam.gserviceaccount.com",
+            "accessBoundary": {
+              "accessBoundaryRules": [{
+                "availableResource": "//storage.googleapis.com/projects/_/buckets/my-bucket",
+                "availablePermissions": ["inRole:roles/storage.objectViewer"]
+              }]
+            }
+          },
+          "containerEnv": {
+            "STORAGE_EMULATOR_HOST": "http://127.0.0.1:8083",
+            "CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE": "http://127.0.0.1:8083/storage/v1/"
+          }
         }
       ]
     },

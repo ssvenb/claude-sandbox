@@ -286,6 +286,30 @@ Both the file and every key in it are optional, so a plugin that reads config mu
 without one. Nothing in the file reaches the container by itself — the plugin decides what
 crosses over, via `pass_*`. See [.claude-sandbox.example.json](.claude-sandbox.example.json).
 
+### Scoped GCP access through `upstream-proxy`
+
+A route with `"auth": {"type": "gcp"}` gives the agent Google Cloud access without a single
+credential entering the container. The host proxy mints the token itself, running
+`gcloud auth print-access-token --impersonate-service-account=<serviceAccount>` on your own
+login, caches it, and re-mints it before it expires, so long runs keep working. Access is narrowed
+in three places:
+
+1. **IAM:** a dedicated service account holding only what the sandbox may do, e.g.
+   `roles/storage.objectViewer` on one bucket (bucket-level binding, not project-level). Your host
+   identity needs `roles/iam.serviceAccountTokenCreator` on it.
+2. **`accessBoundary`** (optional, Cloud Storage only): a
+   [Credential Access Boundary](https://cloud.google.com/iam/docs/downscoping-short-lived-credentials)
+   the proxy exchanges the token through at `sts.googleapis.com`, downscoping it to the listed
+   buckets/prefixes/roles.
+3. **`allowMethods` / `allowPaths`:** the proxy refuses anything else with 403 before it reaches
+   Google, e.g. only `GET`/`HEAD` on `/storage/v1/b/my-bucket/o` and `/download/storage/v1/b/my-bucket/o`.
+
+In the container, `STORAGE_EMULATOR_HOST` points the Python/Go/Node storage clients at the proxy
+(unauthenticated, which is what you want: the proxy adds the credential), and
+`CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE` does the same for `gcloud storage`; plain `curl
+http://127.0.0.1:<port>/storage/v1/b/my-bucket/o` works too. A bad login or a missing grant fails
+`run.sh` at startup. See the `gcs` route in [.claude-sandbox.example.json](.claude-sandbox.example.json).
+
 ### The worked-on repo's `.env`
 
 Some of those per-project settings conventionally live in the repo's own `.env` instead

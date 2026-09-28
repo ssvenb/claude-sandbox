@@ -1,0 +1,10 @@
+{
+  "name": "libvirt",
+  "description": "virsh + the host's libvirt socket, so the agent can drive the host's VMs, storage pools and networks (qemu:///system).",
+  "priority": 5,
+  "defaultEnabled": false,
+  "provides": ["libvirt"],
+  "requires": [],
+  "requiredEnv": [],
+  "secrets": []
+}

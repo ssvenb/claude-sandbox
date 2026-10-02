@@ -81,12 +81,15 @@ Omit it and no policy file is written. An optional `git` block names the agent i
 `git-workspace` reads it:
 
 ```json
-"git": { "branchPrefix": "claude-code", "userName": "Claude Code", "userEmail": "claude-code@anthropic.com" }
+"git": { "branchPrefix": "claude-code", "userName": "Claude Code" }
 ```
 
-The branch becomes `<branchPrefix>/<yyyymmdd>-<RUN_ID>` and commits are authored under that name
-and email; an agent that omits the block falls back to its own directory name
-(`copilot/20260902-1a2b3c`, `copilot@sandbox.local`). The worked-on repo overrides the prefix, either with
+The branch becomes `<branchPrefix>/<yyyymmdd>-<RUN_ID>` and commits are authored under that name;
+an agent that omits the block falls back to its own directory name (`copilot/20260902-1a2b3c`).
+The email defaults to `<agent>@sandbox.local`. An optional `userEmail` replaces it, but GitHub
+credits a commit to whichever account has registered its email, so never use an address you
+don't control: `claude-code@anthropic.com` showed a stranger's account as the author of every
+commit. The worked-on repo overrides the prefix, either with
 `BRANCH_PREFIX` in its `.env` or — winning over that — `.plugins["git-workspace"].branchPrefix`
 in its `.claude-sandbox.json`.
 

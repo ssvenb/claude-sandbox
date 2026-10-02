@@ -5,7 +5,6 @@
   "npmPackage": "@github/copilot",
   "git": {
     "branchPrefix": "copilot",
-    "userName": "GitHub Copilot CLI",
-    "userEmail": "copilot@github.com"
+    "userName": "GitHub Copilot CLI"
   }
 }

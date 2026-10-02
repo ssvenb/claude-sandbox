@@ -5,7 +5,6 @@
   "npmPackage": "@anthropic-ai/claude-code",
   "git": {
     "branchPrefix": "claude-code",
-    "userName": "Claude Code",
-    "userEmail": "claude-code@anthropic.com"
+    "userName": "Claude Code"
   }
 }

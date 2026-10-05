@@ -70,7 +70,8 @@ agent_version_resolve
 docker build -t "$IMAGE" \
   --build-arg AGENT="$AGENT" \
   --build-arg AGENT_VERSION="${AGENT_VERSION:-}" \
-  --build-arg ENABLED_PLUGINS="$ENABLED_PLUGINS" .
+  --build-arg ENABLED_PLUGINS="$ENABLED_PLUGINS" \
+  ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"} .
 
 docker run -it --rm \
   -e RUN_ID="$RUN_ID" \

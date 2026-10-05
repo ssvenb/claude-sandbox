@@ -15,6 +15,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
+# Extra root CAs from the ca-certs plugin (PEM, empty when it is off), so HTTPS during the build
+# works behind a TLS-intercepting proxy too. The ENV points Node and Python at the system store,
+# which is a superset of their own bundles.
+ARG EXTRA_CA_CERTS=
+RUN if [ -n "$EXTRA_CA_CERTS" ]; then \
+      printf '%s\n' "$EXTRA_CA_CERTS" > /usr/local/share/ca-certificates/sandbox-extra.crt \
+      && update-ca-certificates; \
+    fi
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+
 # Terraform, from HashiCorp's apt repository.
 RUN curl -fsSL https://apt.releases.hashicorp.com/gpg \
         | gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg \

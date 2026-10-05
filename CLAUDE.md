@@ -77,7 +77,7 @@ its flag.
 | `headroom` | claude | `llm-proxy` | — | wraps the launch command in the headroom compression proxy (`headroom-ai[proxy,mcp]`, installed in `/opt/headroom`) |
 | `claude-home` | claude | `claude-home` | — | mounts the host's `~/.claude` (or `$CLAUDE_HOME_DIR`) at `/home/node/.claude` |
 | `copilot-home` | copilot | `copilot-home` | — | mounts the host's `~/.copilot` (or `$COPILOT_HOME_DIR`) at `/home/node/.copilot` |
-| `ca-certs` | any | `ca-certs` | — | installs the host's extra root CAs (or `$CA_CERTS_DIR`) into the container trust store, for networks behind a TLS-intercepting proxy; off by default |
+| `ca-certs` | any | `ca-certs` | — | installs the host's extra root CAs (or `$CA_CERTS_DIR`) into the container trust store, at build time and at boot, for networks behind a TLS-intercepting proxy; off by default |
 | `host-network` | any | `host-network` | — | runs the container in the host's network namespace (`--network host`), so ports the agent binds are reachable from the host and the host's localhost services are reachable from the agent; conflicts with `netbird` |
 | `herdr` | any | `herdr` | — | when `run.sh` runs inside a herdr pane (`HERDR_ENV=1`), exports `HERDR_AGENT=$AGENT` on the host so herdr applies that agent's screen manifest to the `docker run` pane and lists it under its agents; nothing enters the container |
 | `docker-cli` | any | `docker-cli` | — | Docker CLI + compose plugin install; mounts the host's `/var/run/docker.sock` and joins `node` to a group with the socket's gid |
@@ -101,7 +101,7 @@ Disable them all and the agent starts plain in an empty `/workspace` with no Git
 |------|---------|---------|
 | `plugin.json` | — | manifest: `priority`, `defaultEnabled`, `requiredAgent`, `provides`, `requires`, `conflicts`, `requiredEnv`, `secrets` |
 | `install.sh` | root, at image build | install the plugin's dependencies (e.g. `gh`); runs only when the plugin is enabled |
-| `host.sh` | you, on the host | validate config; call `pass_env VAR` / `pass_value NAME VALUE` / `pass_mount HOST_PATH CONTAINER_PATH [OPTS]` / `pass_arg FLAG...` to add `docker run` args; read per-project settings with `plugin_config FILTER [DEFAULT]` / `plugin_config_json FILTER [DEFAULT]` / `project_env NAME [DEFAULT]`; set `AGENT_AUTH_PROVIDED=1` if the plugin supplies the agent's credentials itself |
+| `host.sh` | you, on the host | validate config; call `pass_env VAR` / `pass_value NAME VALUE` / `pass_mount HOST_PATH CONTAINER_PATH [OPTS]` / `pass_arg FLAG...` to add `docker run` args, `pass_build_arg NAME VALUE` for a `docker build` arg (never a secret — it lands in the image history); read per-project settings with `plugin_config FILTER [DEFAULT]` / `plugin_config_json FILTER [DEFAULT]` / `project_env NAME [DEFAULT]`; set `AGENT_AUTH_PROVIDED=1` if the plugin supplies the agent's credentials itself |
 | `root-init.sh` | root, in container | anything needing secrets; exports survive the `setpriv` handoff to `node` |
 | `agent-init.sh` | `node`, in container | agent-visible setup; append to `$AGENT_PROMPT_FILE` to brief the agent |
 | `settings.json` | — | fragment merged into the managed policy (objects merge, lists concatenate) |

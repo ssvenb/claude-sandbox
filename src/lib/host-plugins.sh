@@ -14,6 +14,8 @@ PLUGIN_ROOT="${PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/
 
 # Every flag the plugins want on the `docker run` command line.
 DOCKER_ARGS=()
+# Every --build-arg the plugins want on the `docker build` command line.
+BUILD_ARGS=()
 # Space-separated, priority-ordered names of the plugins that will actually run.
 ENABLED_PLUGINS=""
 # Priority-ordered names of every plugin found on disk.
@@ -54,6 +56,10 @@ pass_value() { DOCKER_ARGS+=(-e "$1=$2"); }
 # Raw `docker run` flags, for what an env var or a mount cannot express:
 # pass_arg --cap-add=NET_ADMIN --device=/dev/net/tun
 pass_arg() { DOCKER_ARGS+=("$@"); }
+
+# Hand the image build a value (it must match an ARG in the Dockerfile). Build args land in the
+# image history, so never a secret.
+pass_build_arg() { BUILD_ARGS+=(--build-arg "$1=$2"); }
 
 # pass_mount <host-path> <container-path> [options]
 pass_mount() {

@@ -10,3 +10,13 @@ CA_CERTS_DIR="${CA_CERTS_DIR:-/usr/local/share/ca-certificates}"
   || die "No certificates in $CA_CERTS_DIR — nothing for the ca-certs plugin to install."
 
 pass_mount "$CA_CERTS_DIR" /opt/ca-certs ro
+
+# The build needs them as well (curl/apt/npm/pip during `docker build`), as one PEM bundle;
+# DER files are converted here for the same reason root-init.sh does.
+_ca_pem=""
+for _src in "$CA_CERTS_DIR"/*; do
+  [ -f "$_src" ] || continue
+  _ca_pem+=$(openssl x509 -in "$_src" 2>/dev/null || openssl x509 -inform DER -in "$_src" 2>/dev/null)$'\n'
+done
+pass_build_arg EXTRA_CA_CERTS "$_ca_pem"
+unset _src _ca_pem

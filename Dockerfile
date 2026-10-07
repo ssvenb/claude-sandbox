@@ -36,16 +36,23 @@ RUN curl -fsSL https://apt.releases.hashicorp.com/gpg \
     && rm -rf /var/lib/apt/lists/*
 
 # Headless Chromium, from Debian's repository. Docker has no user namespaces for its sandbox and a
-# 64 MB /dev/shm, so the Debian wrapper always adds the flags that work around both; Puppeteer and
-# Playwright are pointed at it instead of downloading their own browser.
+# 64 MB /dev/shm, so the Debian wrapper always adds the flags that work around both; Puppeteer is
+# pointed at it instead of downloading its own browser.
 RUN apt-get update && apt-get install -y --no-install-recommends chromium fonts-liberation \
     && rm -rf /var/lib/apt/lists/* \
     && echo 'export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --disable-dev-shm-usage"' \
         > /etc/chromium.d/sandbox
 ENV CHROME_BIN=/usr/bin/chromium \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
-    PUPPETEER_SKIP_DOWNLOAD=1 \
-    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+    PUPPETEER_SKIP_DOWNLOAD=1
+
+# Playwright's own Chromium, because a project's @playwright/test only runs the exact build it
+# pins, not Debian's. Shared path, owned by node so a project pinning another Playwright release
+# can still `npx playwright install chromium` its build next to this one.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN npx -y playwright@latest install --with-deps chromium \
+    && chown -R node:node /ms-playwright \
+    && rm -rf /var/lib/apt/lists/* /root/.npm
 
 # Every agent's files ship in the image, but only the one named by AGENT gets its CLI installed.
 # AGENT_VERSION (resolved on the host, empty means latest) is part of this layer's cache key, so

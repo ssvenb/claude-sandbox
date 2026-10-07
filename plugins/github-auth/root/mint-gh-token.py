@@ -8,6 +8,7 @@ unprivileged 'node' user the agent runs as. Installation tokens are hard-capped 
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -41,6 +42,8 @@ def api(path: str, jwt: str, method: str = "GET"):
             hint = ("\nGH_APP_ID must be the App ID (a number, from the App's settings page) "
                     "— not the Client ID or the installation ID — and GH_PRIVATE_KEY_FILE must "
                     "be a .pem generated for that same App. Also check the host clock.")
+        elif e.code == 404 and path.endswith("/installation"):
+            hint = "\nThe GitHub App is not installed on REPO_URL's org, or not granted that repo."
         sys.exit(f"mint-gh-token: {method} {path} failed: HTTP {e.code} {detail}{hint}")
 
 
@@ -60,10 +63,15 @@ with tempfile.NamedTemporaryFile("w", suffix=".pem") as pem:
         input=signing_input, capture_output=True, check=True).stdout
 jwt = f"{signing_input.decode()}.{b64url(sig)}"
 
-installations = api("/app/installations", jwt)
-if not installations:
-    sys.exit("mint-gh-token: the GitHub App has no installations; install it on the "
-             "account or org that owns REPO_URL.")
-installation_id = installations[0]["id"]
+# The App may be installed on several orgs; a token from the wrong one sees REPO_URL as "not found".
+repo = re.search(r"[/:]([^/:]+)/([^/]+?)(?:\.git)?/?$", os.environ.get("REPO_URL", ""))
+if repo:
+    installation_id = api(f"/repos/{repo[1]}/{repo[2]}/installation", jwt)["id"]
+else:
+    installations = api("/app/installations", jwt)
+    if not installations:
+        sys.exit("mint-gh-token: the GitHub App has no installations; install it on the "
+                 "account or org that owns REPO_URL.")
+    installation_id = installations[0]["id"]
 token = api(f"/app/installations/{installation_id}/access_tokens", jwt, "POST")["token"]
 print(token)

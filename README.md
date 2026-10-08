@@ -45,8 +45,7 @@ run.sh (host)
 Two variables steer the tail of that sequence:
 
 - **`$AGENT_LAUNCH_CMD`** — how the agent binary is started; empty means the agent's own default
-  (`claude`, `copilot`). An `agent-init.sh` may replace it with a wrapper (the `headroom` plugin
-  sets `headroom wrap claude --no-serena --`).
+  (`claude`, `copilot`). An `agent-init.sh` may replace it with a wrapper.
 - **`$AGENT_PROMPT_FILE`** — a temp file plugins append to during the agent stage. Its contents
   become the agent's initial prompt. Stage script stdout is *not* visible to the agent, so
   anything the agent must know has to go through this file.
@@ -132,7 +131,6 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | `package-managers` | 25 | on | any | `package-managers` | — | `sudo` install; lets the agent install packages itself — `npm -g`/`pip` into its home, `apt-get`/`apt` via a passwordless sudo rule (which amounts to root, so its guardrails become advisory) |
 | `project-deps` | 25 | on | any | `project-deps` | — | installs the dependencies the target repo declares in the project config: apt/npm/pip packages (as root, at boot) and `setup` shell commands (as the agent user, in the provisioned `/workspace`); nothing configured → does nothing |
 | `branch-guard` | 30 | on | claude | — | `workspace` | `guard-branch.py` PreToolUse hook |
-| `headroom` | 40 | on | claude | `llm-proxy` | — | wraps the launch command in the headroom compression proxy (`headroom-ai[proxy,mcp]` in `/opt/headroom`) |
 
 Disable them all and the agent starts plain, in an empty `/workspace` with no GitHub access.
 
@@ -198,9 +196,9 @@ the only input. Use it to install packages the plugin needs and nothing else:
 ```sh
 #!/bin/sh
 set -eu
-python3 -m venv /opt/headroom
-/opt/headroom/bin/pip install --no-cache-dir "headroom-ai[proxy,mcp]"
-ln -sf /opt/headroom/bin/headroom /usr/local/bin/headroom
+python3 -m venv /opt/mytool
+/opt/mytool/bin/pip install --no-cache-dir mytool
+ln -sf /opt/mytool/bin/mytool /usr/local/bin/mytool
 ```
 
 Install outside `/workspace` and prefer isolated locations (a venv, `/opt/<name>`) so plugins
@@ -430,7 +428,7 @@ only required while that agent or plugin is in use.
 | `CLAUDE_CODE_OAUTH_TOKEN` | agents/claude | Claude Code OAuth token (`claude setup-token`). Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does |
 | `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low` (the sandbox default), `medium`, `high`, `xhigh`, `max` |
 | `COPILOT_GITHUB_TOKEN` | agents/copilot | Fine-grained PAT with the "Copilot Requests" permission (or a Copilot/`gh` OAuth token). Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_HEADROOM` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_CA_CERTS` / `ENABLE_HOST_NETWORK` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_NETBIRD` / `ENABLE_S3_AUTH` / `ENABLE_SSH_CREDENTIALS` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `netbird`, `s3-auth` and `ssh-credentials`) |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_CA_CERTS` / `ENABLE_HOST_NETWORK` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_NETBIRD` / `ENABLE_S3_AUTH` / `ENABLE_SSH_CREDENTIALS` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `netbird`, `s3-auth` and `ssh-credentials`) |
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Host path to the App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default `github.com`) |
@@ -456,7 +454,6 @@ Volume mounts are contributed by plugins via `pass_mount`; the core `docker run`
   of the run's own branch.
 - `DISABLE_AUTOUPDATER=1` / `COPILOT_AUTO_UPDATE=false` — the agent version is pinned at image
   build time.
-- `HEADROOM_TELEMETRY=off` (set by the `headroom` plugin) — no telemetry leaves the container.
 
 ## Repository layout
 

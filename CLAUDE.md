@@ -29,8 +29,7 @@ run.sh (host)
 ```
 
 - **$AGENT_LAUNCH_CMD** — how the agent binary is started; empty means the agent's own default
-  (`claude`, `copilot`), and a plugin's `agent-init.sh` may replace it with a wrapper (the
-  `headroom` plugin sets `headroom wrap claude --no-serena --`).
+  (`claude`, `copilot`), and a plugin's `agent-init.sh` may replace it with a wrapper.
 - **settings-base.json** — the empty policy base plugin fragments are merged into by
   `src/merge-settings.py`; the result is written root-owned and read-only to the path the agent's
   manifest names (`/etc/claude-code/managed-settings.json` for `claude`).
@@ -74,7 +73,6 @@ its flag.
 | `cwd-workspace` | any | `workspace` | — | bind-mounts the host's cwd (or `$HOST_WORKSPACE_DIR`) at `/workspace`, masking `$CWD_WORKSPACE_HIDE` (default `.env`) with read-only `/dev/null` mounts; conflicts with `git-workspace`, off by default |
 | `agent-workspace` | any | `workspace-mirror` | — | bind-mounts `$AGENT_WORKSPACE_DIR/<project>-<date>-<RUN_ID>` (default `~/.agent-workspaces/<project>-<date>-<RUN_ID>`, created if missing) at `/workspace`, so the agent's checkout is visible on the host; removed when the container exits, unless `AGENT_WORKSPACE_CLEANUP=0`; complements `git-workspace`, conflicts with `cwd-workspace` |
 | `branch-guard` | claude | — | `workspace` | `guard-branch.py` PreToolUse hook |
-| `headroom` | claude | `llm-proxy` | — | wraps the launch command in the headroom compression proxy (`headroom-ai[proxy,mcp]`, installed in `/opt/headroom`) |
 | `claude-home` | claude | `claude-home` | — | mounts the host's `~/.claude` (or `$CLAUDE_HOME_DIR`) at `/home/node/.claude` |
 | `copilot-home` | copilot | `copilot-home` | — | mounts the host's `~/.copilot` (or `$COPILOT_HOME_DIR`) at `/home/node/.copilot` |
 | `ca-certs` | any | `ca-certs` | — | installs the host's extra root CAs (or `$CA_CERTS_DIR`) into the container trust store, at build time and at boot, for networks behind a TLS-intercepting proxy; off by default |
@@ -181,7 +179,7 @@ only required while that one is in use.
 | `CLAUDE_CODE_OAUTH_TOKEN` | agents/claude | Claude Code OAuth token for API auth (required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does) |
 | `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low` (default), `medium`, `high`, `xhigh`, `max` |
 | `COPILOT_GITHUB_TOKEN` | agents/copilot | Fine-grained PAT with the "Copilot Requests" permission (or a Copilot/`gh` OAuth token); required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_HEADROOM` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_KVM` / `ENABLE_LIBVIRT` / `ENABLE_NETBIRD` / `ENABLE_S3_AUTH` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_CA_CERTS` / `ENABLE_HOST_NETWORK` / `ENABLE_HERDR` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_PACKAGE_MANAGERS` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `kvm`, `libvirt`, `netbird`, `s3-auth`, `ssh-credentials`); overridable per project |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_KVM` / `ENABLE_LIBVIRT` / `ENABLE_NETBIRD` / `ENABLE_S3_AUTH` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_CA_CERTS` / `ENABLE_HOST_NETWORK` / `ENABLE_HERDR` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_PACKAGE_MANAGERS` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `kvm`, `libvirt`, `netbird`, `s3-auth`, `ssh-credentials`); overridable per project |
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Path to App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default: `github.com`) |
@@ -212,4 +210,3 @@ Volume mounts are contributed by plugins via `pass_mount`; the core `docker run`
 - The agent user (`node`) never sees the GitHub App private key — only short-lived tokens.
 - `/opt/plugins` and `/opt/agents` are root-owned and immutable from within the container, so the agent cannot edit or disable its own guardrails.
 - `DISABLE_AUTOUPDATER=1` / `COPILOT_AUTO_UPDATE=false` — the agent version is pinned at image build time; `run.sh` resolves the latest release on the host and passes it as the `AGENT_VERSION` build arg, so the install layer rebuilds when (and only when) a new version is out.
-- `HEADROOM_TELEMETRY=off` (set by the `headroom` plugin) — no telemetry leaves the container.

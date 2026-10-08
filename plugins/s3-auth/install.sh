@@ -17,6 +17,6 @@ rm -rf /var/lib/apt/lists/*
 tmp=$(mktemp -d)
 curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${AWS_ARCH}.zip" -o "$tmp/awscliv2.zip"
 unzip -q "$tmp/awscliv2.zip" -d "$tmp"
-# Isolated install dir, only the entrypoints linked onto PATH (same shape as the headroom venv).
+# Isolated install dir, only the entrypoints linked onto PATH.
 "$tmp/aws/install" --install-dir /opt/aws-cli --bin-dir /usr/local/bin
 rm -rf "$tmp"

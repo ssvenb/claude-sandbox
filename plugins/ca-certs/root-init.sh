@@ -23,7 +23,7 @@ unset _src _dst
 update-ca-certificates >/dev/null 2>&1 || echo "⚠️  update-ca-certificates failed" >&2
 
 # Node ignores the system store, so both CLIs need this pointer too; the Python variables cover pip
-# and the headroom proxy. The exports survive the `setpriv` handoff to `node`.
+# and other Python tools. The exports survive the `setpriv` handoff to `node`.
 export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt

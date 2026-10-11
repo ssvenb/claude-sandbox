@@ -3,6 +3,9 @@
     "data-mounts": {
       "mounts": ["/srv/datasets:/data:ro", "~/scratch:/scratch"]
     },
+    "kvm": {
+      "briefing": ["Disk images are mounted read-only at /data/vm-images.", "Boot them through a qcow2 overlay."]
+    },
     "git-workspace": {
       "branchPrefix": "sandbox"
     },

@@ -9,3 +9,7 @@ KVM is available: /dev/kvm is passed through and QEMU is installed (qemu-system-
 cloud-localds, OVMF firmware). Start VMs with `-accel kvm -cpu host`. There is no libvirt and no
 bridge/TAP networking; use user-mode networking (`-netdev user,id=n0,hostfwd=tcp::2222-:22`).
 EOF
+
+if [ -n "${KVM_BRIEFING:-}" ]; then
+  printf '\n%s\n' "$KVM_BRIEFING" >> "$AGENT_PROMPT_FILE"
+fi

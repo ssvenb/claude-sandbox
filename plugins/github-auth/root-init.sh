@@ -12,9 +12,14 @@ export GH_INITIAL_TOKEN
 # Installation tokens expire after 1h (hard GitHub limit), so re-mint in the background as root and
 # push the fresh token into node's gh auth (read by both git and gh). The App key stays in root's
 # environment — node, a different uid, cannot read it.
+# The deadline is wall-clock, checked every minute: sleep's clock stops while the host is
+# suspended, so a single long sleep would outlive the token after a suspend.
 (
-  while sleep 2400; do   # 40 min, inside the 1h expiry
-    T=$("$PLUGIN_DIR/root/mint-gh-token.py") || continue   # keep looping on transient failure
-    su -s /bin/sh node -c "export HOME=/home/node GH_HOST='$GH_HOST'; echo '$T' | gh auth login --hostname '$GH_HOST' --with-token"
+  next=$(( $(date +%s) + 2400 ))   # 40 min, inside the 1h expiry
+  while sleep 60; do
+    [ "$(date +%s)" -ge "$next" ] || continue
+    T=$("$PLUGIN_DIR/root/mint-gh-token.py") || continue   # retry next minute on transient failure
+    su -s /bin/sh node -c "export HOME=/home/node GH_HOST='$GH_HOST'; echo '$T' | gh auth login --hostname '$GH_HOST' --with-token" || continue
+    next=$(( $(date +%s) + 2400 ))
   done
 ) >/dev/null 2>&1 &

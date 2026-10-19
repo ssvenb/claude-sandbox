@@ -229,7 +229,7 @@ class _Route:
             self.injector.headers()
 
         # The address the sandbox knows this upstream by. It is a dummy — a loopback port on the
-        # container's socat forwarder — so that the real hostname can stay out of the repo's
+        # container's forwarder — so that the real hostname can stay out of the repo's
         # config and out of the container's environment entirely.
         port = cfg.get("port")
         self.local_url = str(cfg.get("localUrl") or (f"http://127.0.0.1:{port}" if port else "")).rstrip("/")
@@ -382,7 +382,7 @@ def main() -> int:
         if os.path.exists(path):
             os.unlink(path)
         server = _UnixServer(path, _handler_for(route))
-        # The container's root-init connects as root; node reaches it only through socat.
+        # The container's root-init connects as root; node reaches it only through the forwarder.
         os.chmod(path, 0o666)
         servers.append(server)
         threading.Thread(target=server.serve_forever, daemon=True).start()

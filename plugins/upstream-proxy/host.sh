@@ -51,7 +51,7 @@ UPSTREAM_PROXY_PID=$!
 # run.sh's last statement is `docker run`, so the exit hooks fire once the agent's session ends.
 on_exit "kill $UPSTREAM_PROXY_PID 2>/dev/null; rm -rf '$UPSTREAM_PROXY_DIR'"
 
-# Wait for every socket rather than racing the container's socat forwarders.
+# Wait for every socket rather than racing the container's forwarder.
 for _ in $(seq 1 50); do
   missing=0
   while read -r name; do
@@ -67,7 +67,7 @@ done
 
 pass_mount "$UPSTREAM_PROXY_SOCK_DIR" /run/upstream-proxy
 
-# name:port pairs drive the container-side socat forwarders in root-init.sh.
+# name:port pairs drive the container-side forwarder in root-init.sh.
 pass_value UPSTREAM_PROXY_PORTS "$(jq -r '[.[] | "\(.name):\(.port)"] | join(" ")' "$UPSTREAM_PROXY_ROUTE_FILE")"
 
 # Each route declares the env the agent should see: endpoints pointed at loopback, and placeholder

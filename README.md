@@ -124,7 +124,7 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | `github-auth` | 10 | on | any | `git-credentials` | — | `gh` CLI install, App token minting + 40-min refresh loop, `gh auth login` |
 | `s3-auth` | 10 | off | any | `aws-credentials` | — | AWS CLI v2 install; mints a short-lived STS session on the host, passes only that in |
 | `ssh-credentials` | 15 | off | any | `ssh-credentials` | — | `openssh-client` install; writes `~/.ssh/sandbox_key` + `~/.ssh/config` for the agent user |
-| `upstream-proxy` | 15 | on | any | `upstream-proxy` | — | credential-injecting reverse proxies on the HOST, one per route from the project config, bind-mounted as unix sockets and bridged to loopback ports that only the container's own processes may use; no routes configured → does nothing |
+| `upstream-proxy` | 15 | on | any | `upstream-proxy` | — | credential-injecting reverse proxies on the HOST, one per route from the project config, shared by all of a project's running sandboxes, bind-mounted as unix sockets and bridged to loopback ports that only the project's own sandboxes may use; no routes configured → does nothing |
 | `git-workspace` | 20 | on | any | `workspace` | `git-credentials` | clone the `origin` remote of `run.sh`'s cwd into `/workspace`, per-run branch named after the agent (or `$BRANCH_PREFIX`) and the date, its commit identity, resume briefing |
 | `cwd-workspace` | 20 | off | any | `workspace` | — | bind-mounts the host's cwd (or `$HOST_WORKSPACE_DIR`) at `/workspace`; conflicts with `git-workspace` |
 | `agent-workspace` | 15 | on | any | `workspace-mirror` | — | bind-mounts `$AGENT_WORKSPACE_DIR/<project>-<date>-<RUN_ID>` (default `~/.agent-workspaces/<project>-<date>-<RUN_ID>`, created if missing) at `/workspace`, so the agent's checkout is visible on the host; removed when the container exits, unless `AGENT_WORKSPACE_CLEANUP=0`; complements `git-workspace`, conflicts with `cwd-workspace` |
@@ -311,11 +311,18 @@ In the container, `STORAGE_EMULATOR_HOST` points the Python/Go/Node storage clie
 http://127.0.0.1:<port>/storage/v1/b/my-bucket/o` works too. A bad login or a missing grant fails
 `run.sh` at startup. See the `gcs` route in [.claude-sandbox.example.json](.claude-sandbox.example.json).
 
+Sandboxes of the same project — launched from the same checkout, with the same routes, env file
+and network mode — share one host proxy: the first `run.sh` starts it, later ones reuse it, and the
+last one to exit stops it. It loads its credentials once, at start, so a rotated key in the env
+file takes effect only once no sandbox of the project is running.
+
 With `host-network` on, those loopback ports are the *host's*, shared with every other sandbox on
-the machine. The container-side forwarder therefore traces each connection to its socket's owner
-and serves only processes in its own container; anyone else — another sandbox, the host — gets a
-403. A port another sandbox already listens on fails the container's start rather than sending
-this agent's requests to that sandbox's proxy, so projects that run at the same time need distinct
+the machine. The shared host proxy then listens on them itself, so they stay up for as long as any
+of the project's sandboxes runs, and every container runs a small root-owned attestor instead of a
+forwarder. For each connection the proxy asks the project's attestors whether its client end
+belongs to one of their processes; anyone else — another project's sandbox, the host — gets a 403.
+A port another project already listens on fails `run.sh` at startup rather than sending this
+agent's requests to that project's proxy, so projects that run at the same time need distinct
 route ports. This isolates the proxies, not the sandboxes: with `docker-cli` on, an agent can still
 reach the host's Docker daemon and from there anything else.
 

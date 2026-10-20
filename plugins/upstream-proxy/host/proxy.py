@@ -4,7 +4,15 @@
 Runs on the HOST, where the long-lived secrets live. The container gets only the sockets, so the
 agent can *use* an upstream API without ever holding the key that authenticates to it.
 
-Usage: proxy.py [--env-file FILE]... <routes.json> <socket-dir>
+Usage: proxy.py [--env-file FILE]... [--attest-dir DIR] <routes.json> <socket-dir>
+
+One proxy serves every sandbox of a project at once: run.sh starts it for the first and stops it
+after the last, and it outlives the terminal of the run that started it.
+
+--attest-dir is for host-network, where the containers share the HOST's loopback: the proxy then
+also listens on each route's port itself, for as long as any of the project's sandboxes runs, and
+admits a connection only if one of the attestors in DIR — one per running sandbox of the project,
+see root/forward.py — vouches for its client end. Everyone else gets a 403.
 
 --env-file loads KEY=VALUE pairs into THIS process only, so a route's secrets never enter run.sh's
 environment where a later plugin's pass_env could forward them into the container. Values already
@@ -30,9 +38,11 @@ so the proxy is a capability boundary as well as a secrecy one.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import shlex
+import socket
 import socketserver
 import subprocess
 import ssl
@@ -46,6 +56,11 @@ from http.server import BaseHTTPRequestHandler
 
 DEFAULT_MAX_BODY = 8 * 1024 * 1024
 TIMEOUT = 120
+ATTEST_TIMEOUT = 2
+REFUSAL = (
+    b"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
+    b"This port belongs to another project's upstream-proxy; use the endpoints in your own briefing.\n"
+)
 
 # Hop-by-hop headers, plus the ones we own: the client's idea of Host and of authentication is
 # never forwarded — that is the whole point.
@@ -355,14 +370,64 @@ class _UnixServer(socketserver.ThreadingUnixStreamServer):
         return request, ("local", 0)
 
 
+def _attested(attest_dir: str, peer_port: int, local_port: int) -> bool:
+    """Whether a sandbox of this project holds the client end of 127.0.0.1:peer_port → local_port."""
+    try:
+        entries = os.listdir(attest_dir)
+    except OSError:
+        return False
+    for entry in entries:
+        path = os.path.join(attest_dir, entry)
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+            conn.settimeout(ATTEST_TIMEOUT)
+            try:
+                conn.connect(path)
+                conn.sendall(f"{peer_port} {local_port}\n".encode())
+                if conn.makefile("rb").readline(16).strip() == b"1":
+                    return True
+            except ConnectionRefusedError:
+                # Its container is gone without a chance to clean up after itself.
+                with contextlib.suppress(OSError):
+                    os.unlink(path)
+            except OSError:
+                continue
+    return False
+
+
+class _LoopbackServer(socketserver.ThreadingTCPServer):
+    daemon_threads = True
+    # Gets past TIME_WAIT leftovers only; on Linux it never lets a second listener share the port.
+    allow_reuse_address = True
+
+    def __init__(self, port: int, handler, attest_dir: str):
+        self.attest_dir = attest_dir
+        super().__init__(("127.0.0.1", port), handler)
+
+    def verify_request(self, request, client_address) -> bool:
+        port = self.server_address[1]
+        if _attested(self.attest_dir, client_address[1], port):
+            return True
+        log(f"refused :{port} ← 127.0.0.1:{client_address[1]}: not a sandbox of this project")
+        with contextlib.suppress(OSError):
+            request.sendall(REFUSAL)
+        return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env-file", action="append", default=[], metavar="FILE",
                         help="load secrets from a .env-style file into this process only")
+    parser.add_argument("--attest-dir", metavar="DIR",
+                        help="also listen on each route's loopback port, for the sandboxes attesting in DIR")
     parser.add_argument("routes_file")
     parser.add_argument("sock_dir")
     args = parser.parse_args()
     routes_file, sock_dir = args.routes_file, args.sock_dir
+
+    # Every sandbox of the project uses this one process, so it must not die with the terminal of
+    # the run that happened to start it (a SIGHUP to that run's process group).
+    with contextlib.suppress(OSError):
+        os.setsid()
 
     # Before the routes: their ${VAR} upstreams and *Env credential lookups both read os.environ.
     for env_file in args.env_file:
@@ -379,18 +444,33 @@ def main() -> int:
         if len(path.encode()) > 100:
             log(f"socket path too long ({len(path)} bytes): {path}")
             return 1
+        handler = _handler_for(route)
+        # The port first: its socket appearing is what tells run.sh this route is ready.
+        if args.attest_dir:
+            port = cfg.get("port")
+            if not port:
+                log(f"route '{route.name}' needs a port")
+                return 1
+            try:
+                servers.append(_LoopbackServer(int(port), handler, args.attest_dir))
+            except OSError as exc:
+                log(f"cannot listen on 127.0.0.1:{port}: {exc.strerror}. Under host-network the port is "
+                    "shared with the host and every other sandbox — give this route a port no other "
+                    "project's running sandbox, and no host service, uses.")
+                return 1
         if os.path.exists(path):
             os.unlink(path)
-        server = _UnixServer(path, _handler_for(route))
+        servers.append(_UnixServer(path, handler))
         # The container's root-init connects as root; node reaches it only through the forwarder.
         os.chmod(path, 0o666)
-        servers.append(server)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
         rewrite = f", rewriting {route.local_url} ↔ upstream" if route.rewrites else ""
         log(f"{route.name} → {route.upstream} "
             f"({'/'.join(sorted(route.methods))} {' '.join(route.paths)}{rewrite})")
 
-    # Parent (run.sh) kills us on exit; until then just park.
+    for server in servers:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    # The last run.sh of the project to exit kills us; until then just park.
     try:
         threading.Event().wait()
     except KeyboardInterrupt:

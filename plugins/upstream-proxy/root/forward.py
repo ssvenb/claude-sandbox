@@ -1,24 +1,31 @@
 #!/usr/bin/env python3
-"""Bridge each bind-mounted proxy socket to a loopback TCP port, for this sandbox's processes only.
+"""The container half of upstream-proxy, in one of two modes.
 
 Usage: forward.py --log FILE <port>=<socket> [<port>=<socket>]...
+       forward.py --log FILE --attest DIR
 
-The container half of upstream-proxy: ordinary HTTP clients need a TCP port, the host proxy listens
-on a unix socket. Under host-network the container shares the HOST's loopback, so a plain bridge
-(socat) would hand every other sandbox on the machine this one's credentials. Each connection is
-therefore traced back to its owner — the client end shows up in /proc/net/tcp with a socket inode,
-and that inode must be an open fd of a process in this container's PID namespace. Other sandboxes'
-processes, and the host's, are not visible here, so their connections are refused.
+Forwarding: ordinary HTTP clients need a TCP port, the host proxy listens on a unix socket, so each
+bind-mounted socket is bridged to a loopback port — for this sandbox's processes only. Each
+connection is traced back to its owner: the client end shows up in /proc/net/tcp with a socket
+inode, and that inode must be an open fd of a process in this container's PID namespace.
 
-Runs as root so the agent cannot replace a forwarder. Binds every port before detaching, so a port
-another sandbox already holds fails the container's start instead of silently routing this agent's
-traffic to someone else's listener.
+Attesting (host-network): the container shares the HOST's loopback with every other sandbox on the
+machine, so the project's shared host proxy listens on the ports itself — a forwarder here would
+die with this container and take the port away from the project's other sandboxes. What only this
+container can tell is whether a connection's client end is one of its own processes; the host
+proxy asks every attestor of its project over a unix socket in DIR, and refuses a connection none
+of them vouches for. Other projects' sandboxes, and the host's own processes, have no attestor
+there, so they get a 403.
+
+Runs as root so the agent cannot replace it. Binds before detaching, so a port that cannot be
+bound fails the container's start.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import secrets
 import selectors
 import socket
 import struct
@@ -139,6 +146,28 @@ def bridge(client: socket.socket, upstream: socket.socket) -> None:
     upstream.close()
 
 
+def attest(lsock: socket.socket) -> None:
+    """Answer the host proxy, one `<peer port> <local port>` question per connection: 1 if a process
+    of this sandbox holds the client end of that loopback connection, else 0. Sequential, because
+    owned_here switches the process-wide euid."""
+    while True:
+        try:
+            conn, _ = lsock.accept()
+        except OSError:
+            continue
+        with conn:
+            conn.settimeout(2)
+            try:
+                peer_port, local_port = map(int, conn.makefile("rb").readline(64).split())
+                inode = peer_inode(peer_port, local_port)
+                ok = inode is not None and owned_here(inode)
+                conn.sendall(b"1\n" if ok else b"0\n")
+            except (OSError, ValueError):
+                continue
+            if not ok:
+                log(f"not ours: :{local_port} ← 127.0.0.1:{peer_port}")
+
+
 def serve(listeners: dict[socket.socket, tuple[int, str]]) -> None:
     sel = selectors.DefaultSelector()
     for lsock in listeners:
@@ -173,8 +202,22 @@ def serve(listeners: dict[socket.socket, tuple[int, str]]) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--log", required=True)
-    ap.add_argument("routes", nargs="+", metavar="PORT=SOCKET")
+    ap.add_argument("--attest", metavar="DIR", help="vouch for this sandbox's connections in DIR")
+    ap.add_argument("routes", nargs="*", metavar="PORT=SOCKET")
     args = ap.parse_args()
+    if bool(args.attest) == bool(args.routes):
+        ap.error("pass either --attest DIR or PORT=SOCKET routes")
+
+    attestor = None
+    if args.attest:
+        # Every sandbox of the project shares DIR, so the name only has to be unique; the host
+        # proxy drops the socket once nothing answers on it any more.
+        path = os.path.join(args.attest, f"{os.environ.get('RUN_ID', 'sandbox')}-{secrets.token_hex(4)}.sock")
+        attestor = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        attestor.bind(path)
+        # The host proxy connects as the host user; a question answers nothing the asker could abuse.
+        os.chmod(path, 0o666)
+        attestor.listen(16)
 
     listeners: dict[socket.socket, tuple[int, str]] = {}
     for route in args.routes:
@@ -187,9 +230,9 @@ def main() -> int:
         try:
             lsock.bind((LOOPBACK, port))
         except OSError as e:
-            print(f"upstream-proxy: cannot listen on 127.0.0.1:{port}: {e.strerror}. Under host-network "
-                  "the port is shared with the host and every other sandbox — give this route a port "
-                  "no other running sandbox uses.", file=sys.stderr)
+            print(f"upstream-proxy: cannot listen on 127.0.0.1:{port}: {e.strerror}. Something else "
+                  "in this container already holds the port — give this route another one.",
+                  file=sys.stderr)
             return 1
         lsock.listen(128)
         listeners[lsock] = (port, sock_path)
@@ -202,7 +245,10 @@ def main() -> int:
     os.dup2(devnull, 0)
     os.dup2(out, 1)
     os.dup2(out, 2)
-    serve(listeners)
+    if attestor:
+        attest(attestor)
+    else:
+        serve(listeners)
     return 0
 
 

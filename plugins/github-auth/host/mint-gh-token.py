@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Mint a short-lived GitHub App installation token and print it to stdout.
 
-Root-only: reads the App key ($GH_PRIVATE_KEY, $GH_APP_ID), which never reach the
-unprivileged 'node' user the agent runs as. Installation tokens are hard-capped at
-1h by GitHub, so entrypoint.sh calls this at startup and on a refresh loop.
+Runs on the HOST: reads the App key from $GH_PRIVATE_KEY_FILE, which never enters the
+container. Installation tokens are hard-capped at 1h by GitHub, so run.sh's credential
+refresher (src/lib/host-credentials.sh) calls this at startup and again every 40 minutes.
 """
 import base64
 import json
@@ -11,7 +11,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -47,20 +46,16 @@ def api(path: str, jwt: str, method: str = "GET"):
         sys.exit(f"mint-gh-token: {method} {path} failed: HTTP {e.code} {detail}{hint}")
 
 
-# Build the RS256-signed JWT. openssl (already in the image) does the signing so we
-# don't pull a Python crypto dependency into the container.
+# Build the RS256-signed JWT. openssl does the signing so the host needs no Python crypto package.
 now = int(time.time())
 header = b64url(json.dumps({"alg": "RS256", "typ": "JWT"}).encode())
 payload = b64url(json.dumps(
     {"iat": now - 60, "exp": now + 300, "iss": os.environ["GH_APP_ID"]}).encode())
 signing_input = f"{header}.{payload}".encode()
 
-with tempfile.NamedTemporaryFile("w", suffix=".pem") as pem:
-    pem.write(os.environ["GH_PRIVATE_KEY"].rstrip("\n") + "\n")
-    pem.flush()
-    sig = subprocess.run(
-        ["openssl", "dgst", "-sha256", "-sign", pem.name],
-        input=signing_input, capture_output=True, check=True).stdout
+sig = subprocess.run(
+    ["openssl", "dgst", "-sha256", "-sign", os.environ["GH_PRIVATE_KEY_FILE"]],
+    input=signing_input, capture_output=True, check=True).stdout
 jwt = f"{signing_input.decode()}.{b64url(sig)}"
 
 # The App may be installed on several orgs; a token from the wrong one sees REPO_URL as "not found".

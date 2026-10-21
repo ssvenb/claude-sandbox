@@ -15,7 +15,8 @@ unset skip p
 . /usr/local/lib/sandbox/agents.sh
 
 # Root stage: the only context holding the secrets run.sh passed in, so anything needing them
-# (minting tokens, starting refresh loops) happens here.
+# happens here. Tokens derived from long-lived keys are minted on the host instead and arrive
+# ready-made under /run/credentials (src/lib/host-credentials.sh).
 plugin_run_stage root-init
 
 # Compose the enterprise policy from the enabled plugins' fragments, at the path the selected

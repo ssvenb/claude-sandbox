@@ -6,8 +6,9 @@ The core is repo- and agent-agnostic: it builds an image, starts a container, an
 selected agent with every permission prompt disabled. Which agent that is comes from **`AGENT`**
 (see [agents/](agents)); everything opinionated — GitHub authentication, cloning a repo, pinning
 the agent to a branch, mounting your `~/.claude` — lives in **plugins** that can be switched off
-individually. With the defaults, the GitHub App private key never leaves your machine (the
-container only sees short-lived installation tokens), and each run works on its own
+individually. With the defaults, the GitHub App private key never leaves your machine — tokens are
+minted and refreshed on the host, and the container only sees the current short-lived installation
+token — and each run works on its own
 `<prefix>/<yyyymmdd>-<RUN_ID>` branch enforced by a managed hook the agent cannot edit.
 
 ## Quick start
@@ -30,10 +31,11 @@ want to build without running.
 run.sh (host)
   ├─ loads the worked-on repo's config, resolves AGENT and the ENABLE_<PLUGIN> flags, validates config + capabilities
   ├─ each enabled plugin's host.sh, then the agent's host.sh, contribute `docker run` args
+  ├─ mints the credentials plugins registered, mounts them at /run/credentials (ro), refreshes them in the background
   ├─ docker build --build-arg AGENT=... --build-arg ENABLED_PLUGINS=...
   └─ docker run → entrypoint.sh (root)
        ├─ chown /workspace to node
-       ├─ each enabled plugin's root-init.sh (only context that holds secrets)
+       ├─ each enabled plugin's root-init.sh (only context that holds the vars plugins declared as secrets)
        ├─ merges settings-base.json + plugin settings.json → the agent's managedSettings path (0444)
        ├─ unsets every var declared in a plugin's `secrets`, then `setpriv` to `node`
        └─ agent-setup.sh (node)
@@ -121,8 +123,7 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | `docker-cli` | 5 | on | any | `docker-cli` | — | Docker CLI + compose plugin install; mounts the host's `/var/run/docker.sock` |
 | `host-network` | 5 | on | any | `host-network` | — | runs the container in the host's network namespace (`--network host`); conflicts with `netbird` |
 | `netbird` | 5 | off | any | `mesh-network` | — | NetBird client install; enrols the container as its own peer (`sandbox-<RUN_ID>`) from `$NB_SETUP_KEY`, adding `NET_ADMIN` + `/dev/net/tun` |
-| `github-auth` | 10 | on | any | `git-credentials` | — | `gh` CLI install, App token minting + 40-min refresh loop, `gh auth login` |
-| `s3-auth` | 10 | off | any | `aws-credentials` | — | AWS CLI v2 install; mints a short-lived STS session on the host, passes only that in |
+| `github-auth` | 10 | on | any | `git-credentials` | — | `gh` CLI install; mints App installation tokens on the host as the `github-token` credential (re-minted every 40 min), `gh auth login` with each one |
 | `ssh-credentials` | 15 | off | any | `ssh-credentials` | — | `openssh-client` install; writes `~/.ssh/sandbox_key` + `~/.ssh/config` for the agent user |
 | `upstream-proxy` | 15 | on | any | `upstream-proxy` | — | credential-injecting reverse proxies on the HOST, one per route from the project config, shared by all of a project's running sandboxes, bind-mounted as unix sockets and bridged to loopback ports that only the project's own sandboxes may use; no routes configured → does nothing |
 | `git-workspace` | 20 | on | any | `workspace` | `git-credentials` | clone the `origin` remote of `run.sh`'s cwd into `/workspace`, per-run branch named after the agent (or `$BRANCH_PREFIX`) and the date, its commit identity, resume briefing |
@@ -158,16 +159,14 @@ so the agent cannot edit or disable its own guardrails.
 
 ```json
 {
-  "name": "github-auth",
-  "description": "Turns a GitHub App private key held on the host into short-lived tokens.",
-  "priority": 10,
-  "defaultEnabled": true,
-  "requiredAgent": "claude",
-  "provides": ["git-credentials"],
+  "name": "netbird",
+  "description": "Enrolls the container as its own NetBird peer, so the agent reaches a private mesh network without the host's peer or the NetBird PAT ever entering the sandbox.",
+  "priority": 5,
+  "defaultEnabled": false,
+  "provides": ["mesh-network"],
   "requires": [],
-  "conflicts": [],
-  "requiredEnv": ["GH_APP_ID", "GH_PRIVATE_KEY_FILE"],
-  "secrets": ["GH_PRIVATE_KEY", "GH_APP_ID"]
+  "requiredEnv": ["NB_SETUP_KEY"],
+  "secrets": ["NB_SETUP_KEY"]
 }
 ```
 
@@ -226,6 +225,7 @@ Available helpers:
 | `pass_value NAME VALUE` | adds `-e NAME=VALUE` for a value the host computed (e.g. a file's contents) |
 | `pass_mount HOST_PATH CONTAINER_PATH [OPTS]` | adds `-v HOST:CONTAINER[:OPTS]`; aborts if the host path does not exist |
 | `pass_arg FLAG...` | adds raw `docker run` flags, for what the helpers above don't cover — capabilities, devices, networking (`pass_arg --cap-add=NET_ADMIN --device=/dev/net/tun`) |
+| `register_credential NAME INTERVAL FUNCTION` | a short-lived credential minted on the host: the core calls the shell function `FUNCTION` (which prints the credential) once every host stage has run, then every `INTERVAL` seconds (≥ 60), and keeps the result at `/run/credentials/NAME` in the container (see below) |
 | `die MESSAGE` | prints the message and aborts the run |
 | `plugin_config FILTER [DEFAULT]` | a scalar from this plugin's section of the project config file (see below) |
 | `plugin_config_json FILTER [DEFAULT]` | the same, as raw JSON, for objects and arrays |
@@ -241,12 +241,37 @@ Recognised output:
 # shellcheck shell=bash
 [ -f "$GH_PRIVATE_KEY_FILE" ] || die "GH_PRIVATE_KEY_FILE not found: $GH_PRIVATE_KEY_FILE"
 
-pass_env GH_APP_ID
+GITHUB_AUTH_DIR=$PLUGIN_DIR   # $PLUGIN_DIR is gone by the time the function runs
+github_auth_mint() {
+  GH_APP_ID="$GH_APP_ID" GH_PRIVATE_KEY_FILE="$GH_PRIVATE_KEY_FILE" REPO_URL="${REPO_URL:-}" \
+    "$GITHUB_AUTH_DIR/host/mint-gh-token.py"
+}
+register_credential github-token 2400 github_auth_mint
 pass_value GH_HOST "${GH_HOST:-github.com}"
-pass_value GH_PRIVATE_KEY "$(cat "$GH_PRIVATE_KEY_FILE")"
 ```
 
 Validation that can be done here should be done here: it runs before the build.
+
+#### Short-lived credentials
+
+A token derived from something long-lived — an App private key, your own cloud login — is minted
+on the host, never in the container: `register_credential` hands the core a function that prints
+it, and `src/lib/host-credentials.sh` does the rest for every plugin alike.
+
+- **First mint** after every plugin's (and the agent's) host stage, so the function may use what a
+  later plugin set — `github-auth` picks the installation that owns git-workspace's `REPO_URL`. A
+  failure, or empty output, aborts the run with the function's stderr, before the image is built.
+- **Refresh** every `INTERVAL` seconds in the background for as long as `run.sh` runs. The deadline
+  is wall-clock, checked once a minute, so a suspended host re-mints as soon as it wakes instead of
+  sleeping past the expiry. A failed refresh keeps the previous credential and retries a minute
+  later; each attempt goes to the refresh log `run.sh` names at startup, not to the agent's terminal.
+- **Delivery:** one file per credential in a directory only your user can reach on the host,
+  mounted read-only at `/run/credentials`. Each refresh replaces the file atomically. Read it when
+  you need it, or watch it — `github-auth`'s `agent-init.sh` re-runs `gh auth login` whenever its
+  token changes; a copy taken at boot goes stale.
+
+Pick an interval comfortably inside the credential's lifetime (GitHub's 1h tokens: 40 minutes), so
+a few failed attempts in a row still don't let it lapse.
 
 ### Project configuration — `.claude-sandbox.json`
 
@@ -345,19 +370,17 @@ container except through the plugin's own `pass_*` calls.
 ### `root-init.sh` — root stage (in the container)
 
 Sourced by `entrypoint.sh` as root, in POSIX `sh`. This is the **only** context that still holds
-the vars listed in `secrets`, so token minting, key handling and background refresh loops belong
-here. Anything you `export` survives the `setpriv` handoff to `node` (except the secrets themselves,
-which are dropped right after this stage).
+the vars listed in `secrets` — for a secret that has to enter the container as is, like netbird's
+setup key, which only root may use. Anything derived from a long-lived credential is minted on the
+host instead (`register_credential`). Anything you `export` survives the `setpriv` handoff to
+`node` (except the secrets themselves, which are dropped right after this stage).
 
 Context: `$PLUGIN_NAME`, `$PLUGIN_DIR` (`/opt/plugins/<name>`), `$ENABLED_PLUGINS`, `$RUN_ID`,
 `$RESUME`, plus every `-e` var the host stage passed in.
 
 ```sh
 # shellcheck shell=sh
-GH_INITIAL_TOKEN=$("$PLUGIN_DIR/root/mint-gh-token.py")
-export GH_INITIAL_TOKEN            # short-lived derivative the agent may see
-
-( while sleep 2400; do ... ; done ) &   # refresh loop keeps running as root
+netbird up --setup-key "$NB_SETUP_KEY" ...   # dropped from the environment right after this stage
 ```
 
 Helper scripts that need the secrets go in `root/` (chmod 500 — unreadable to `node`).
@@ -425,7 +448,7 @@ usually declares a `requiredAgent` too.
 | Directory | Mode | Owner-visible to | Use for |
 |-----------|------|------------------|---------|
 | `bin/` | 555 | everyone, incl. `node` | hook scripts and helpers Claude or the agent stage invokes |
-| `root/` | 500 | root only | anything that reads a secret (e.g. `mint-gh-token.py`) |
+| `root/` | 500 | root only | anything that reads a secret or must not be replaced by `node` (e.g. upstream-proxy's `forward.py`) |
 
 Everything else under the plugin directory is 444 with 555 directories.
 
@@ -444,7 +467,7 @@ only required while that agent or plugin is in use.
 | `CLAUDE_CODE_OAUTH_TOKEN` | agents/claude | Claude Code OAuth token (`claude setup-token`). Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does |
 | `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low` (the sandbox default), `medium`, `high`, `xhigh`, `max` |
 | `COPILOT_GITHUB_TOKEN` | agents/copilot | Fine-grained PAT with the "Copilot Requests" permission (or a Copilot/`gh` OAuth token). Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_CA_CERTS` / `ENABLE_HOST_NETWORK` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_NETBIRD` / `ENABLE_S3_AUTH` / `ENABLE_SSH_CREDENTIALS` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `netbird`, `s3-auth` and `ssh-credentials`) |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_CA_CERTS` / `ENABLE_HOST_NETWORK` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_NETBIRD` / `ENABLE_SSH_CREDENTIALS` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `netbird` and `ssh-credentials`) |
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Host path to the App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default `github.com`) |
@@ -461,8 +484,9 @@ Volume mounts are contributed by plugins via `pass_mount`; the core `docker run`
 
 ## Security model
 
-- The agent user (`node`) never sees the GitHub App private key — only 1-hour installation
-  tokens, re-minted by root every 40 minutes.
+- The GitHub App private key never enters the container, not even as root — the host mints the
+  1-hour installation tokens and re-mints them every 40 minutes; the container only reads the
+  current one from `/run/credentials`.
 - Vars listed in a plugin's `secrets` are unset before the `setpriv` handoff to `node`.
 - `/opt/plugins`, `/opt/agents` and the merged managed-settings file are root-owned and
   read-only, so the agent cannot edit or disable its own guardrails.

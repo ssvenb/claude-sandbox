@@ -18,8 +18,9 @@ run.sh (host)
   ├─ loads the worked-on repo's config, resolves AGENT and the ENABLE_<PLUGIN> flags, validates
   │  config + capabilities
   ├─ plugin host.sh scripts, then the agent's host.sh, contribute `docker run` args (secrets stay on the host)
+  ├─ mints the credentials plugins registered → /run/credentials (ro), re-minted in the background
   └─ docker run → entrypoint.sh (root)
-       ├─ plugin root-init.sh scripts (only context holding secrets)
+       ├─ plugin root-init.sh scripts (only context holding the vars plugins declared as `secrets`)
        ├─ merges plugin settings.json fragments → the agent's `managedSettings` path
        ├─ drops declared secrets, hands off to 'node' user
        └─ agent-setup.sh (node)
@@ -68,7 +69,7 @@ its flag.
 
 | Plugin | Agent | Provides | Requires | Owns |
 |--------|-------|----------|----------|------|
-| `github-auth` | any | `git-credentials` | — | `gh` CLI install, App token minting + 40-min refresh loop, `gh auth login` |
+| `github-auth` | any | `git-credentials` | — | `gh` CLI install; mints App installation tokens on the host (`host/mint-gh-token.py`) as the `github-token` credential, re-minted every 40 min; `gh auth login` with each new one |
 | `git-workspace` | any | `workspace` | `git-credentials` | clone the `origin` remote of `run.sh`'s cwd into `/workspace`, per-run branch named after the agent (or `$BRANCH_PREFIX`) and the date, its git identity, resume briefing |
 | `cwd-workspace` | any | `workspace` | — | bind-mounts the host's cwd (or `$HOST_WORKSPACE_DIR`) at `/workspace`, masking `$CWD_WORKSPACE_HIDE` (default `.env`) with read-only `/dev/null` mounts; conflicts with `git-workspace`, off by default |
 | `agent-workspace` | any | `workspace-mirror` | — | bind-mounts `$AGENT_WORKSPACE_DIR/<project>-<date>-<RUN_ID>` (default `~/.agent-workspaces/<project>-<date>-<RUN_ID>`, created if missing) at `/workspace`, so the agent's checkout is visible on the host; removed when the container exits, unless `AGENT_WORKSPACE_CLEANUP=0`; complements `git-workspace`, conflicts with `cwd-workspace` |
@@ -82,7 +83,6 @@ its flag.
 | `kvm` | any | `kvm` | — | QEMU (`qemu-system-*`, `qemu-utils`, OVMF, `cloud-image-utils`) install; passes the host's `/dev/kvm` through (`--device`) and joins `node` to a group with the device's gid; `.plugins.kvm.briefing` (a string or array of lines) is appended to the agent's briefing, e.g. to describe mounted disk images; off by default |
 | `libvirt` | any | `libvirt` | — | `libvirt-clients` install; mounts the host's per-driver sockets (`/run/libvirt/virtqemud-sock` etc.; `libvirt-sock` only for a monolithic libvirtd — virtproxyd rejects callers from another PID namespace) and sets `LIBVIRT_DEFAULT_URI=qemu:///system`, so `virsh` drives the host's VMs, pools and networks with the host user's own libvirt rights; off by default |
 | `netbird` | any | `mesh-network` | — | NetBird client install; enrols the container as its own peer (`sandbox-<RUN_ID>`) with a setup key, adding `NET_ADMIN` + `/dev/net/tun`; off by default |
-| `s3-auth` | any | `aws-credentials` | — | AWS CLI v2 install; mints a short-lived STS session on the host and passes only that in; off by default |
 | `ssh-credentials` | any | `ssh-credentials` | — | `openssh-client` install; writes the key + `~/.ssh/config` for the agent user; off by default |
 | `data-mounts` | any | `data-mounts` | — | bind-mounts extra host directories into the container, from `.plugins["data-mounts"].mounts` in the project config (`"host:container[:ro]"` strings, or a bare path, mounted at the same absolute path inside; `~` and repo-relative paths expanded). Nothing listed → does nothing |
 | `package-managers` | any | `package-managers` | — | `sudo` install; lets the agent install packages itself: `npm -g` and `pip` into its home (on PATH), `apt-get`/`apt` via a passwordless sudo rule limited to those binaries — which still amounts to root, so the agent could bypass its guardrails |
@@ -99,12 +99,20 @@ Disable them all and the agent starts plain in an empty `/workspace` with no Git
 |------|---------|---------|
 | `plugin.json` | — | manifest: `priority`, `defaultEnabled`, `requiredAgent`, `provides`, `requires`, `conflicts`, `requiredEnv`, `secrets` |
 | `install.sh` | root, at image build | install the plugin's dependencies (e.g. `gh`); runs only when the plugin is enabled |
-| `host.sh` | you, on the host | validate config; call `pass_env VAR` / `pass_value NAME VALUE` / `pass_mount HOST_PATH CONTAINER_PATH [OPTS]` / `pass_arg FLAG...` to add `docker run` args, `pass_build_arg NAME VALUE` for a `docker build` arg (never a secret — it lands in the image history); read per-project settings with `plugin_config FILTER [DEFAULT]` / `plugin_config_json FILTER [DEFAULT]` / `project_env NAME [DEFAULT]`; set `AGENT_AUTH_PROVIDED=1` if the plugin supplies the agent's credentials itself |
-| `root-init.sh` | root, in container | anything needing secrets; exports survive the `setpriv` handoff to `node` |
+| `host.sh` | you, on the host | validate config; `register_credential NAME INTERVAL FUNCTION` for a short-lived credential minted on the host (see below); call `pass_env VAR` / `pass_value NAME VALUE` / `pass_mount HOST_PATH CONTAINER_PATH [OPTS]` / `pass_arg FLAG...` to add `docker run` args, `pass_build_arg NAME VALUE` for a `docker build` arg (never a secret — it lands in the image history); read per-project settings with `plugin_config FILTER [DEFAULT]` / `plugin_config_json FILTER [DEFAULT]` / `project_env NAME [DEFAULT]`; set `AGENT_AUTH_PROVIDED=1` if the plugin supplies the agent's credentials itself |
+| `root-init.sh` | root, in container | anything needing a secret that must enter the container as is (`secrets`); exports survive the `setpriv` handoff to `node` |
 | `agent-init.sh` | `node`, in container | agent-visible setup; append to `$AGENT_PROMPT_FILE` to brief the agent |
 | `settings.json` | — | fragment merged into the managed policy (objects merge, lists concatenate) |
 | `bin/` | `node` | world-executable helpers, e.g. hook scripts (chmod 555) |
 | `root/` | root | root-only helpers holding secrets (chmod 500) |
+
+Short-lived credentials are minted on the host, never in the container. `register_credential`
+(`src/lib/host-credentials.sh`) takes a shell function that prints the credential; the core calls
+it once after every host stage (so it may use what later plugins set, e.g. `REPO_URL`; a failure
+aborts the run before the build), then every `INTERVAL` seconds (≥ 60) in the background on a
+wall-clock deadline that survives host suspend, keeping the old value when a refresh fails. Each
+lands atomically in `/run/credentials/NAME`, a read-only mount of a host dir only your user can
+reach; read it on use or watch it, since a copy taken at boot goes stale.
 
 Stage scripts are *sourced*, run in `priority` order, and are all optional. Vars listed in
 `secrets` are unset before the agent user takes over. Unmet `requires`/`requiredEnv`, or two
@@ -179,7 +187,7 @@ only required while that one is in use.
 | `CLAUDE_CODE_OAUTH_TOKEN` | agents/claude | Claude Code OAuth token for API auth (required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does) |
 | `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low` (default), `medium`, `high`, `xhigh`, `max` |
 | `COPILOT_GITHUB_TOKEN` | agents/copilot | Fine-grained PAT with the "Copilot Requests" permission (or a Copilot/`gh` OAuth token); required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_KVM` / `ENABLE_LIBVIRT` / `ENABLE_NETBIRD` / `ENABLE_S3_AUTH` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_CA_CERTS` / `ENABLE_HOST_NETWORK` / `ENABLE_HERDR` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_PACKAGE_MANAGERS` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `kvm`, `libvirt`, `netbird`, `s3-auth`, `ssh-credentials`); overridable per project |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_KVM` / `ENABLE_LIBVIRT` / `ENABLE_NETBIRD` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_CA_CERTS` / `ENABLE_HOST_NETWORK` / `ENABLE_HERDR` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_PACKAGE_MANAGERS` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `kvm`, `libvirt`, `netbird`, `ssh-credentials`); overridable per project |
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Path to App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default: `github.com`) |
@@ -195,10 +203,6 @@ only required while that one is in use.
 | `NB_SETUP_KEY` | netbird | NetBird setup key the peer enrols with (the PAT never enters the container) |
 | `NB_MANAGEMENT_URL` | netbird | Self-hosted management server (default: NetBird Cloud) |
 | `NB_HOSTNAME` | netbird | Peer name in the dashboard (default: `sandbox-<RUN_ID>`) |
-| `S3_ROLE_ARN` | s3-auth | Role assumed on the host for the sandbox session; unset falls back to the host profile's current credentials |
-| `S3_SESSION_DURATION` | s3-auth | Assumed-role session lifetime in seconds (default: 3600) |
-| `AWS_REGION` / `AWS_PROFILE` | s3-auth | Region handed to the container; host profile used for minting |
-| `S3_ENDPOINT_URL` / `S3_BUCKET` | s3-auth | Endpoint for S3-compatible providers; bucket named in the agent's briefing |
 | `SSH_PRIVATE_KEY_FILE` | ssh-credentials | Host path to the (passphrase-less) key installed for the agent |
 | `SSH_HOST_PATTERN` / `SSH_HOST_USER` / `SSH_HOST_SUFFIX` | ssh-credentials | `~/.ssh/config` stanza: hosts the key is offered for, login user, domain appended to bare names |
 | `SSH_KNOWN_HOSTS_FILE` | ssh-credentials | Host path to a known_hosts file to pin peers (default: `StrictHostKeyChecking=accept-new`) |
@@ -207,6 +211,6 @@ Volume mounts are contributed by plugins via `pass_mount`; the core `docker run`
 
 ## Key Constraints
 
-- The agent user (`node`) never sees the GitHub App private key — only short-lived tokens.
+- The GitHub App private key never enters the container, not even as root — the host mints the tokens; the container only reads the current one from `/run/credentials`.
 - `/opt/plugins` and `/opt/agents` are root-owned and immutable from within the container, so the agent cannot edit or disable its own guardrails.
 - `DISABLE_AUTOUPDATER=1` / `COPILOT_AUTO_UPDATE=false` — the agent version is pinned at image build time; `run.sh` resolves the latest release on the host and passes it as the `AGENT_VERSION` build arg, so the install layer rebuilds when (and only when) a new version is out.

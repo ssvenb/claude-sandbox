@@ -12,6 +12,8 @@ cd "$(dirname "$0")"
 
 # shellcheck source=src/lib/host-plugins.sh
 . src/lib/host-plugins.sh
+# shellcheck source=src/lib/host-credentials.sh
+. src/lib/host-credentials.sh
 # shellcheck source=src/lib/host-agents.sh
 . src/lib/host-agents.sh
 # shellcheck source=src/lib/host-project-config.sh
@@ -60,6 +62,8 @@ plugins_resolve
 plugins_validate
 plugins_host_stage
 agent_host_stage
+# After every host stage, so a credential may depend on what any of them set up.
+credentials_start
 echo "🤖 Agent: $AGENT"
 echo "🔌 Plugins: ${ENABLED_PLUGINS:-<none>}"
 

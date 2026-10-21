@@ -304,6 +304,7 @@ in three places:
    buckets/prefixes/roles.
 3. **`allowMethods` / `allowPaths`:** the proxy refuses anything else with 403 before it reaches
    Google, e.g. only `GET`/`HEAD` on `/storage/v1/b/my-bucket/o` and `/download/storage/v1/b/my-bucket/o`.
+   Both are optional on every route: left out, the route relays every method and every path.
 
 In the container, `STORAGE_EMULATOR_HOST` points the Python/Go/Node storage clients at the proxy
 (unauthenticated, which is what you want: the proxy adds the credential), and

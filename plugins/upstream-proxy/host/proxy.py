@@ -21,8 +21,8 @@ set in the environment win over the file.
 Each route in routes.json:
   name           socket basename (<socket-dir>/<name>.sock)
   upstream       scheme://host[:port] every request is forwarded to
-  allowMethods   HTTP methods the proxy will relay (default: GET)
-  allowPaths     path prefixes the proxy will relay (default: everything)
+  allowMethods   HTTP methods the proxy will relay (default: every method)
+  allowPaths     path prefixes the proxy will relay (default: every path)
   auth           how the credential is injected, see _Injector below
   maxBodyBytes   request body cap (default 8 MiB)
   port           loopback port the container reaches this route on, used to derive localUrl
@@ -234,8 +234,14 @@ class _Route:
         self.upstream = os.path.expandvars(cfg["upstream"]).rstrip("/")
         if not self.upstream.startswith(("http://", "https://")):
             raise ValueError(f"route '{self.name}': upstream must be an absolute http(s) URL")
-        self.methods = {m.upper() for m in cfg.get("allowMethods", ["GET"])}
-        self.paths = tuple(cfg.get("allowPaths", ["/"]))
+        # Unset means unrestricted. An empty list would refuse every request, which is never what
+        # the author meant — most likely a list emptied while editing — so it fails the start.
+        for key in ("allowMethods", "allowPaths"):
+            if cfg.get(key) == []:
+                raise ValueError(f"route '{self.name}': {key} is empty; omit it to allow everything")
+        methods = cfg.get("allowMethods")
+        self.methods = {m.upper() for m in methods} if methods else None
+        self.paths = tuple(cfg.get("allowPaths") or ["/"])
         self.max_body = int(cfg.get("maxBodyBytes", DEFAULT_MAX_BODY))
         self.injector = _Injector(cfg.get("auth", {}))
         # Fail at startup, not on the agent's first request: a bad login or a missing
@@ -266,7 +272,7 @@ class _Route:
         return bool(self._out_pairs)
 
     def permits(self, method: str, path: str) -> bool:
-        return method.upper() in self.methods and path.startswith(self.paths)
+        return (self.methods is None or method.upper() in self.methods) and path.startswith(self.paths)
 
     def to_upstream(self, data: bytes) -> bytes:
         """Rewrite the sandbox's dummy address to the real one, on its way out."""
@@ -357,7 +363,12 @@ def _handler_for(route: _Route):
             self.end_headers()
             self.wfile.write(body)
 
-        do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = _relay
+        def __getattr__(self, name):
+            # http.server dispatches to do_<METHOD> and answers 501 where there is none; route every
+            # method to _relay instead, so the route's allowlist is the only thing that decides.
+            if name.startswith("do_"):
+                return self._relay
+            raise AttributeError(name)
 
     return Handler
 
@@ -465,7 +476,8 @@ def main() -> int:
         os.chmod(path, 0o666)
         rewrite = f", rewriting {route.local_url} ↔ upstream" if route.rewrites else ""
         log(f"{route.name} → {route.upstream} "
-            f"({'/'.join(sorted(route.methods))} {' '.join(route.paths)}{rewrite})")
+            f"({'/'.join(sorted(route.methods)) if route.methods else 'any method'} "
+            f"{' '.join(route.paths)}{rewrite})")
 
     for server in servers:
         threading.Thread(target=server.serve_forever, daemon=True).start()

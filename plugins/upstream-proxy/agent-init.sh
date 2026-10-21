@@ -15,7 +15,7 @@
   printf 'the proxy by calling the upstream directly. The 127.0.0.1 addresses above are the real '
   printf 'endpoints as far as this container is concerned: the proxy swaps them for the actual '
   printf 'upstream hostnames on the way out and swaps them back in every response, so treat them '
-  printf 'as the canonical URLs and write them into code and config as-is. The proxy relays only '
-  printf 'an allowlisted set of methods and paths; anything else comes back as a 403 from the '
+  printf 'as the canonical URLs and write them into code and config as-is. A route may relay only '
+  printf 'an allowlisted set of methods and paths; anything it refuses comes back as a 403 from the '
   printf 'sandbox, not from the upstream.\n'
 } >> "$AGENT_PROMPT_FILE"

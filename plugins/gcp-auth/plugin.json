@@ -1,0 +1,10 @@
+{
+  "name": "gcp-auth",
+  "description": "Mints short-lived access tokens for a Google Cloud service account on the host, with your own gcloud login, and hands the container only those: gcloud and the Google client libraries use them as if running on GCE.",
+  "priority": 10,
+  "defaultEnabled": false,
+  "provides": ["gcp-credentials"],
+  "requires": [],
+  "requiredEnv": ["GCP_SERVICE_ACCOUNT"],
+  "secrets": []
+}

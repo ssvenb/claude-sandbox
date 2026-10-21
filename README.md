@@ -124,6 +124,7 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | `host-network` | 5 | on | any | `host-network` | — | runs the container in the host's network namespace (`--network host`); conflicts with `netbird` |
 | `netbird` | 5 | off | any | `mesh-network` | — | NetBird client install; enrols the container as its own peer (`sandbox-<RUN_ID>`) from `$NB_SETUP_KEY`, adding `NET_ADMIN` + `/dev/net/tun` |
 | `github-auth` | 10 | on | any | `git-credentials` | — | `gh` CLI install; mints App installation tokens on the host as the `github-token` credential (re-minted every 40 min), `gh auth login` with each one |
+| `gcp-auth` | 10 | off | any | `gcp-credentials` | — | Google Cloud CLI install; mints 1h service-account tokens on the host and makes them the container's ambient identity: `gcloud` reads the token file, a stand-in GCE metadata server serves the client libraries |
 | `ssh-credentials` | 15 | off | any | `ssh-credentials` | — | `openssh-client` install; writes `~/.ssh/sandbox_key` + `~/.ssh/config` for the agent user |
 | `upstream-proxy` | 15 | on | any | `upstream-proxy` | — | credential-injecting reverse proxies on the HOST, one per route from the project config, shared by all of a project's running sandboxes, bind-mounted as unix sockets and bridged to loopback ports that only the project's own sandboxes may use; no routes configured → does nothing |
 | `git-workspace` | 20 | on | any | `workspace` | `git-credentials` | clone the `origin` remote of `run.sh`'s cwd into `/workspace`, per-run branch named after the agent (or `$BRANCH_PREFIX`) and the date, its commit identity, resume briefing |
@@ -312,6 +313,27 @@ Both the file and every key in it are optional, so a plugin that reads config mu
 without one. Nothing in the file reaches the container by itself — the plugin decides what
 crosses over, via `pass_*`. See [.claude-sandbox.example.json](.claude-sandbox.example.json).
 
+### Google Cloud through `gcp-auth`
+
+For a service account that is already scoped to what the sandbox may do, `gcp-auth` makes it the
+container's own Google identity, so `gcloud` and every Google client library work unmodified —
+real endpoints, real TLS, no emulator variables:
+
+```json
+{ "env": { "GCP_SERVICE_ACCOUNT": "sandbox-reader@my-project.iam.gserviceaccount.com" },
+  "plugins": { "gcp-auth": { "enabled": true } } }
+```
+
+`run.sh` mints a 1-hour token for the account with your own gcloud login (you need
+`roles/iam.serviceAccountTokenCreator` on it) and re-mints it every 40 minutes as the `gcp-token`
+credential. In the container, `gcloud` reads that file on every call, and a root-owned stand-in
+for the GCE metadata server hands it to the client libraries, which find it through
+`GCE_METADATA_HOST` as they would on a VM. It listens on a free loopback port and answers only the
+container's own processes, so it works under `host-network` too. The agent holds the current
+token, usable from anywhere until it expires, but never anything it could mint a new one from; what
+it can do is decided by the account's IAM roles alone. For per-method/path restrictions on top,
+use the proxy route below instead.
+
 ### Scoped GCP access through `upstream-proxy`
 
 A route with `"auth": {"type": "gcp"}` gives the agent Google Cloud access without a single
@@ -467,7 +489,7 @@ only required while that agent or plugin is in use.
 | `CLAUDE_CODE_OAUTH_TOKEN` | agents/claude | Claude Code OAuth token (`claude setup-token`). Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does |
 | `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low` (the sandbox default), `medium`, `high`, `xhigh`, `max` |
 | `COPILOT_GITHUB_TOKEN` | agents/copilot | Fine-grained PAT with the "Copilot Requests" permission (or a Copilot/`gh` OAuth token). Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_CA_CERTS` / `ENABLE_HOST_NETWORK` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_NETBIRD` / `ENABLE_SSH_CREDENTIALS` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `netbird` and `ssh-credentials`) |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_CA_CERTS` / `ENABLE_HOST_NETWORK` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_NETBIRD` / `ENABLE_GCP_AUTH` / `ENABLE_SSH_CREDENTIALS` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `gcp-auth`, `netbird` and `ssh-credentials`) |
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Host path to the App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default `github.com`) |

@@ -93,14 +93,16 @@ RUN chown -R root:root /opt/plugins \
     && find /opt/plugins -type f -path '*/bin/*' -exec chmod 555 {} + \
     && find /opt/plugins -type f -path '*/root/*' -exec chmod 500 {} +
 
-# The frameworks the boot scripts source, the settings merger, and the base policy the plugin
-# settings.json fragments are merged into at runtime.
+# The frameworks the boot scripts source, the loopback-ownership check root helpers import, the
+# settings merger, and the base policy the plugin settings.json fragments are merged into at runtime.
 COPY src/lib/plugins.sh /usr/local/lib/sandbox/plugins.sh
 COPY src/lib/agents.sh /usr/local/lib/sandbox/agents.sh
+COPY src/lib/peer_owner.py /usr/local/lib/sandbox/peer_owner.py
 COPY src/merge-settings.py /usr/local/bin/merge-settings.py
 COPY settings-base.json /usr/local/share/sandbox/settings-base.json
 RUN chmod 555 /usr/local/bin/merge-settings.py \
     && chmod 444 /usr/local/lib/sandbox/plugins.sh /usr/local/lib/sandbox/agents.sh \
+                 /usr/local/lib/sandbox/peer_owner.py \
                  /usr/local/share/sandbox/settings-base.json
 
 # entrypoint.sh boots as root; agent-setup.sh is the part it runs as 'node'.

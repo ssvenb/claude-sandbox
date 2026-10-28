@@ -36,6 +36,15 @@ fi
 # root/forward.py). Otherwise each container has a loopback of its own and bridges the sockets.
 UPSTREAM_PROXY_HOST_NETWORK=0
 case " $ENABLED_PLUGINS " in *" host-network "*) UPSTREAM_PROXY_HOST_NETWORK=1 ;; esac
+# Docker Desktop's "host" network is its VM's, not this machine's: a container's connection reaches
+# our loopback relayed, from another address and port, so no attestor can recognise it. The VM's
+# loopback is the containers' own there, so the per-container forwarders work instead — at the
+# cost that two sandboxes of the project cannot run at once (both would bind the route ports).
+if [ "$UPSTREAM_PROXY_HOST_NETWORK" = 1 ] \
+    && docker info --format '{{.OperatingSystem}}' 2>/dev/null | grep -q 'Docker Desktop'; then
+  echo "ℹ️  upstream-proxy: Docker Desktop's host network relays connections; forwarding per container instead." >&2
+  UPSTREAM_PROXY_HOST_NETWORK=0
+fi
 
 # One proxy per project: every sandbox launched from this checkout with these routes shares it —
 # under host-network it is the only thing that can hold their common ports — the first run starts
@@ -59,10 +68,19 @@ UPSTREAM_PROXY_LOG="$UPSTREAM_PROXY_DIR/proxy.log"
 # A run killed before its exit hook leaves its file behind; a dead pid holds nothing.
 upstream_proxy_prune() {
   local f
-  for f in "$UPSTREAM_PROXY_USERS"/*; do
+  for f in "$1/users"/*; do
     [ -e "$f" ] || continue
     kill -0 "${f##*/}" 2>/dev/null || rm -f "$f"
   done
+}
+
+# Stop the proxy in dir $1 once no live run uses it. The caller holds that dir's lock.
+upstream_proxy_reap() {
+  upstream_proxy_prune "$1"
+  compgen -G "$1/users/*" >/dev/null && return
+  kill "$(cat "$1/proxy.pid" 2>/dev/null)" 2>/dev/null || true
+  # Everything but the lock, which a run starting right now may already be waiting on.
+  find "$1" -mindepth 1 ! -name lock -delete || true
 }
 
 upstream_proxy_release() {
@@ -70,18 +88,25 @@ upstream_proxy_release() {
   exec {fd}>"$UPSTREAM_PROXY_DIR/lock"
   flock "$fd"
   rm -f "$UPSTREAM_PROXY_USERS/$$"
-  upstream_proxy_prune
-  if ! compgen -G "$UPSTREAM_PROXY_USERS/*" >/dev/null; then
-    kill "$(cat "$UPSTREAM_PROXY_PID_FILE" 2>/dev/null)" 2>/dev/null || true
-    # Everything but the lock, which a run starting right now may already be waiting on.
-    find "$UPSTREAM_PROXY_DIR" -mindepth 1 ! -name lock -delete || true
-  fi
+  upstream_proxy_reap "$UPSTREAM_PROXY_DIR"
   exec {fd}>&-
 }
 
+# A killed run under another config (an edited route, a different checkout) leaves its proxy
+# orphaned in a dir no later run of that key visits — holding its ports. Sweep them all; a dir
+# whose lock is busy belongs to a run starting or exiting right now, which settles it itself.
+for _dir in "${TMPDIR:-/tmp}/upstream-proxy-$(id -u)-"*/; do
+  _dir=${_dir%/}
+  [ "$_dir" != "$UPSTREAM_PROXY_DIR" ] && [ -O "$_dir" ] && [ ! -L "$_dir" ] || continue
+  exec {_fd}>"$_dir/lock"
+  flock -n "$_fd" && upstream_proxy_reap "$_dir"
+  exec {_fd}>&-
+done
+unset _dir _fd
+
 exec {UPSTREAM_PROXY_LOCK_FD}>"$UPSTREAM_PROXY_DIR/lock"
 flock "$UPSTREAM_PROXY_LOCK_FD"
-upstream_proxy_prune
+upstream_proxy_prune "$UPSTREAM_PROXY_DIR"
 UPSTREAM_PROXY_PID=$(cat "$UPSTREAM_PROXY_PID_FILE" 2>/dev/null || true)
 if [ -n "$UPSTREAM_PROXY_PID" ] && kill -0 "$UPSTREAM_PROXY_PID" 2>/dev/null; then
   echo "♻️  upstream-proxy: sharing the proxy of this project's other running sandbox(es)"

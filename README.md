@@ -49,7 +49,7 @@ Two variables steer the tail of that sequence:
 - **`$AGENT_LAUNCH_CMD`** — how the agent binary is started; empty means the agent's own default
   (`claude`, `copilot`). An `agent-init.sh` may replace it with a wrapper.
 - **`$AGENT_PROMPT_FILE`** — a temp file plugins append to during the agent stage. Its contents
-  become the agent's initial prompt. Stage script stdout is *not* visible to the agent, so
+  are the agent's briefing (Claude: system prompt; Copilot: first message). Stage script stdout is *not* visible to the agent, so
   anything the agent must know has to go through this file.
 
 ## Agents
@@ -60,8 +60,8 @@ stay out of it; the image is tagged per agent, so switching back and forth doesn
 
 | Agent | CLI | Credentials | Launched as |
 |-------|-----|-------------|-------------|
-| `claude` | Claude Code (`@anthropic-ai/claude-code`, npm) | `CLAUDE_CODE_OAUTH_TOKEN`, or the `claude-home` plugin | `claude --dangerously-skip-permissions --effort ${CLAUDE_EFFORT:-low} [prompt]` |
-| `copilot` | GitHub Copilot CLI (`@github/copilot`, npm) | `COPILOT_GITHUB_TOKEN`, or the `copilot-home` plugin | `copilot --allow-all [-i prompt]` |
+| `claude` | Claude Code (`@anthropic-ai/claude-code`, npm) | `CLAUDE_CODE_OAUTH_TOKEN`, or the `claude-home` plugin | `claude --dangerously-skip-permissions --effort ${CLAUDE_EFFORT:-low} [--append-system-prompt briefing]` |
+| `copilot` | GitHub Copilot CLI (`@github/copilot`, npm) | `COPILOT_GITHUB_TOKEN`, or the `copilot-home` plugin | `copilot --allow-all [-i briefing]` |
 
 ### Anatomy of an agent
 
@@ -421,7 +421,7 @@ Recognised output:
 | Variable | Effect |
 |----------|--------|
 | `AGENT_LAUNCH_CMD` | replaces the agent's default binary in its `launch.sh`; word-split, so it may include flags up to the point the agent's own flags begin |
-| `AGENT_PROMPT_FILE` (appended to) | the joined contents become the agent's initial prompt |
+| `AGENT_PROMPT_FILE` (appended to) | the joined contents become the agent's briefing (system prompt for Claude, first message for Copilot) |
 | any `export` | inherited by the agent and by its hooks (this is how `branch-guard` sees `$AGENT_BRANCH`) |
 
 ```sh

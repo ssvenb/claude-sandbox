@@ -10,7 +10,7 @@ export HOME=/home/node
 # shellcheck source=lib/agents.sh
 . /usr/local/lib/sandbox/agents.sh
 
-# Plugins append briefing lines here; the joined text becomes the agent's initial prompt. This
+# Plugins append briefing lines here; the joined text is handed to the agent's launch.sh. This
 # script's stdout is NOT visible to the agent, so context that must reach it travels this way.
 AGENT_PROMPT_FILE=$(mktemp)
 export AGENT_PROMPT_FILE
@@ -21,13 +21,6 @@ agent_run_stage agent-init
 plugin_run_stage agent-init
 
 cd /workspace
-
-# What the plugins wrote is boot-time context, never a task. Said once here rather than in every
-# plugin, and only when there is something to qualify.
-if [ -s "$AGENT_PROMPT_FILE" ]; then
-  printf 'This message is informational context only — do not take any action on it. Wait for the user'"'"'s task.\n' \
-    >> "$AGENT_PROMPT_FILE"
-fi
 
 AGENT_PROMPT=$(cat "$AGENT_PROMPT_FILE")
 export AGENT_PROMPT

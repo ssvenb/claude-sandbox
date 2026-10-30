@@ -2,7 +2,8 @@
 # Launch stage (runs as 'node', last thing the boot sequence does). $AGENT_LAUNCH_CMD may have
 # been replaced by a plugin with a wrapper; unquoted on purpose so it
 # splits into words. The sandbox runs unattended on mostly mechanical work, so the effort level
-# defaults to the cheapest setting.
+# defaults to the cheapest setting. The briefing goes into the system prompt rather than a first
+# message, so it costs no turn, stays out of the transcript and survives /clear.
 # shellcheck disable=SC2086
 ${AGENT_LAUNCH_CMD:-claude} --dangerously-skip-permissions \
-  --effort "${CLAUDE_EFFORT:-low}" ${AGENT_PROMPT:+"$AGENT_PROMPT"}
+  --effort "${CLAUDE_EFFORT:-low}" ${AGENT_PROMPT:+--append-system-prompt "$AGENT_PROMPT"}

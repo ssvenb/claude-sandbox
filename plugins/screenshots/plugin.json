@@ -1,0 +1,10 @@
+{
+  "name": "screenshots",
+  "description": "Mounts the host's screenshot folder read-only and tells the agent where it is.",
+  "priority": 15,
+  "defaultEnabled": false,
+  "provides": ["screenshots"],
+  "requires": [],
+  "requiredEnv": [],
+  "secrets": []
+}

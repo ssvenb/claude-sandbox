@@ -85,6 +85,7 @@ its flag.
 | `netbird` | any | `mesh-network` | — | NetBird client install; enrols the container as its own peer (`sandbox-<RUN_ID>`) with a setup key, adding `NET_ADMIN` + `/dev/net/tun`; off by default |
 | `gcp-auth` | any | `gcp-credentials` | — | Google Cloud CLI install; mints 1h tokens for `$GCP_SERVICE_ACCOUNT` on the host (IAM Credentials API, your gcloud login) as the `gcp-token` credential, re-minted every 40 min; in the container `gcloud` reads that file (`CLOUDSDK_AUTH_ACCESS_TOKEN_FILE`) and a root-owned stand-in GCE metadata server (`root/metadata.py`, free loopback port via `GCE_METADATA_HOST`, answering only the container's own processes) serves it to the client libraries; off by default |
 | `ssh-credentials` | any | `ssh-credentials` | — | `openssh-client` install; writes the key + `~/.ssh/config` for the agent user; off by default |
+| `screenshots` | any | `screenshots` | — | bind-mounts the host's `~/Pictures/Screenshots` (or `$SCREENSHOTS_DIR`) read-only at `/home/node/Pictures/Screenshots` and tells the agent in its briefing; off by default |
 | `data-mounts` | any | `data-mounts` | — | bind-mounts extra host directories into the container, from `.plugins["data-mounts"].mounts` in the project config (`"host:container[:ro]"` strings, or a bare path, mounted at the same absolute path inside; `~` and repo-relative paths expanded). Nothing listed → does nothing |
 | `package-managers` | any | `package-managers` | — | `sudo` install; lets the agent install packages itself: `npm -g` and `pip` into its home (on PATH), `apt-get`/`apt` via a passwordless sudo rule limited to those binaries — which still amounts to root, so the agent could bypass its guardrails |
 | `project-deps` | any | `project-deps` | — | installs what the target repo needs, from the project config: `apt`/`npm`/`pip` package lists (root, at boot) and `setup` commands (agent user, in `/workspace`). Nothing configured → does nothing |
@@ -188,7 +189,7 @@ only required while that one is in use.
 | `CLAUDE_CODE_OAUTH_TOKEN` | agents/claude | Claude Code OAuth token for API auth (required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does) |
 | `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low` (default), `medium`, `high`, `xhigh`, `max` |
 | `COPILOT_GITHUB_TOKEN` | agents/copilot | Fine-grained PAT with the "Copilot Requests" permission (or a Copilot/`gh` OAuth token); required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_KVM` / `ENABLE_LIBVIRT` / `ENABLE_NETBIRD` / `ENABLE_GCP_AUTH` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_CA_CERTS` / `ENABLE_HOST_NETWORK` / `ENABLE_HERDR` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_PACKAGE_MANAGERS` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `gcp-auth`, `kvm`, `libvirt`, `netbird`, `ssh-credentials`); overridable per project |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_KVM` / `ENABLE_LIBVIRT` / `ENABLE_NETBIRD` / `ENABLE_SCREENSHOTS` / `ENABLE_GCP_AUTH` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_CA_CERTS` / `ENABLE_HOST_NETWORK` / `ENABLE_HERDR` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_PACKAGE_MANAGERS` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `gcp-auth`, `kvm`, `libvirt`, `netbird`, `screenshots`, `ssh-credentials`); overridable per project |
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Path to App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default: `github.com`) |
@@ -206,6 +207,7 @@ only required while that one is in use.
 | `NB_HOSTNAME` | netbird | Peer name in the dashboard (default: `sandbox-<RUN_ID>`) |
 | `GCP_SERVICE_ACCOUNT` | gcp-auth | Service account the sandbox acts as; your gcloud account needs `roles/iam.serviceAccountTokenCreator` on it |
 | `GCP_PROJECT` | gcp-auth | Default project for gcloud and the client libraries (default: the one in the service account's email) |
+| `SCREENSHOTS_DIR` | screenshots | Host dir mounted read-only at `/home/node/Pictures/Screenshots` (default: `$HOME/Pictures/Screenshots`) |
 | `SSH_PRIVATE_KEY_FILE` | ssh-credentials | Host path to the (passphrase-less) key installed for the agent |
 | `SSH_HOST_PATTERN` / `SSH_HOST_USER` / `SSH_HOST_SUFFIX` | ssh-credentials | `~/.ssh/config` stanza: hosts the key is offered for, login user, domain appended to bare names |
 | `SSH_KNOWN_HOSTS_FILE` | ssh-credentials | Host path to a known_hosts file to pin peers (default: `StrictHostKeyChecking=accept-new`) |

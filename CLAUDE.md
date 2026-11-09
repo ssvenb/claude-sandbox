@@ -43,7 +43,7 @@ the image, but only the selected one's `install.sh` runs at build time, and the 
 
 | Agent | CLI | Credentials | Launched as |
 |-------|-----|-------------|-------------|
-| `claude` | Claude Code (npm) | `CLAUDE_CODE_OAUTH_TOKEN`, or the `claude-home` plugin | `claude --dangerously-skip-permissions --effort ${CLAUDE_EFFORT:-low} [--append-system-prompt briefing]` |
+| `claude` | Claude Code (npm) | `CLAUDE_CODE_OAUTH_TOKEN`, or the `claude-home` plugin | `claude --dangerously-skip-permissions --effort ${CLAUDE_EFFORT:-medium} [--append-system-prompt briefing]` |
 | `copilot` | GitHub Copilot CLI (npm) | `COPILOT_GITHUB_TOKEN`, or the `copilot-home` plugin | `copilot --allow-all [-i briefing]` |
 
 `agents/<name>/` may contain:
@@ -187,7 +187,7 @@ only required while that one is in use.
 | `PROJECT_CONFIG_FILE` | core | Per-project configuration: `env` block, plugin sections, plugin `enabled` switches (default `$HOST_CWD/.claude-sandbox.json`; optional) |
 | `PROJECT_ENV_FILE` | core | The worked-on repo's `.env`, scanned for the sandbox settings and plugin settings it keeps there (default `$HOST_CWD/.env`; `/dev/null` loads nothing) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | agents/claude | Claude Code OAuth token for API auth (required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does) |
-| `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low` (default), `medium`, `high`, `xhigh`, `max` |
+| `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low`, `medium` (default), `high`, `xhigh`, `max` |
 | `COPILOT_GITHUB_TOKEN` | agents/copilot | Fine-grained PAT with the "Copilot Requests" permission (or a Copilot/`gh` OAuth token); required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
 | `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_KVM` / `ENABLE_LIBVIRT` / `ENABLE_NETBIRD` / `ENABLE_SCREENSHOTS` / `ENABLE_GCP_AUTH` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_CA_CERTS` / `ENABLE_HOST_NETWORK` / `ENABLE_HERDR` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_PACKAGE_MANAGERS` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `gcp-auth`, `kvm`, `libvirt`, `netbird`, `screenshots`, `ssh-credentials`); overridable per project |
 | `GH_APP_ID` | github-auth | GitHub App ID |

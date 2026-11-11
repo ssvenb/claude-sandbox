@@ -322,7 +322,7 @@ def _handler_for(route: _Route):
             }
             # The agent only ever knows the dummy localUrl, so anything it quotes back — a webhook
             # target, a Referer, an id in a JSON payload — has to be restored to the real endpoint.
-            if body and _rewritable(headers.get("Content-Type", "")):
+            if body and _rewritable(self.headers.get("Content-Type", "")):  # any spelling
                 body = route.to_upstream(body)
                 headers["Content-Length"] = str(len(body))
             for key in list(headers):

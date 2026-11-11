@@ -28,7 +28,7 @@ RESUME=0
 RUN_ID=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --resume) RESUME=1; RUN_ID="${2:-}"; shift 2 || true ;;
+    --resume) RESUME=1; RUN_ID="${2:-}"; shift; [ $# -eq 0 ] || shift ;;
     -h|--help) usage 0 ;;
     *) echo "Unknown argument: $1" >&2; usage ;;
   esac

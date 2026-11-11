@@ -1,0 +1,7 @@
+#!/bin/sh
+# Stands in for the GitHub CLI: logs each call (and the token piped to `auth login`).
+case "$1 $2" in
+  "auth login") echo "$* | $(cat)" >>/tmp/gh.log ;;
+  "pr view") echo "$*" >>/tmp/gh.log; echo "#7 https://github.com/e2e/repo/pull/7" ;;
+  *) echo "$*" >>/tmp/gh.log ;;
+esac

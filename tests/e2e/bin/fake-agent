@@ -1,0 +1,9 @@
+#!/bin/sh
+# Stands in for the agent CLI (AGENT_LAUNCH_CMD=fake-agent): reports how it was started and in
+# what environment, then runs the test's probe as the agent would — as node, after every stage.
+python3 - "$@" <<'EOF'
+import json, os, sys
+print("E2E-REPORT " + json.dumps({"argv": sys.argv[1:], "uid": os.getuid(), "groups": os.getgroups(),
+                                  "cwd": os.getcwd(), "env": dict(os.environ)}), flush=True)
+EOF
+[ -z "${E2E_PROBE:-}" ] || exec sh -c "$E2E_PROBE"

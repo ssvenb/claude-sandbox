@@ -1,0 +1,39 @@
+name: tests
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    name: Host-side and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"  # the image's python3, which runs the root helpers
+      - run: pip install pytest
+      - run: python -m pytest -q tests
+
+  image:
+    name: Image boot tests (${{ matrix.agent }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        agent: [claude, copilot]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install pytest
+      # No ENABLED_PLUGINS build arg: every plugin's install.sh runs, so each one is exercised.
+      - run: docker build -t claude-agent:${{ matrix.agent }} --build-arg AGENT=${{ matrix.agent }} .
+      - run: python -m pytest -q tests/e2e
+        env:
+          SANDBOX_E2E_IMAGE: claude-agent:${{ matrix.agent }}
+          SANDBOX_E2E_AGENT: ${{ matrix.agent }}

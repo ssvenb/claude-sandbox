@@ -1,0 +1,11 @@
+#!/bin/sh
+# Stands in for the NetBird client: the daemon is just its socket, `up` records its arguments and
+# succeeds unless E2E_NETBIRD_FAIL is set.
+case "$1" in
+  service)
+    exec python3 -c 'import socket, time
+s = socket.socket(socket.AF_UNIX); s.bind("/var/run/netbird.sock"); s.listen(); time.sleep(3600)' ;;
+  up)
+    echo "$*" >/var/log/netbird-up.args
+    [ -z "${E2E_NETBIRD_FAIL:-}" ] ;;
+esac

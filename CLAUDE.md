@@ -173,6 +173,21 @@ go any further.
 AGENT=copilot ./run.sh                # same sandbox, GitHub Copilot CLI instead
 ```
 
+## Tests
+
+```bash
+pip install pytest && python -m pytest tests     # host side, Python helpers, container stages
+docker build -t claude-agent:claude . && \
+  SANDBOX_E2E_IMAGE=claude-agent:claude SANDBOX_E2E_AGENT=claude python -m pytest tests/e2e
+```
+
+`tests/conftest.py` sources run.sh's libraries and plugin stages into isolated shells and reads
+back the `docker run` args they contribute; `tests/test_run.py` runs run.sh itself against a stub
+`docker`. `tests/e2e` (skipped unless `SANDBOX_E2E_IMAGE` is set) boots the real image, built with
+every plugin installed, behind a stand-in agent. `.github/workflows/tests.yml` runs both on every
+PR, the image tests for each agent. A known bug is pinned as a strict `xfail`, so fixing it flips
+the test to a failure until the marker goes. A new plugin or agent needs tests alongside it.
+
 ## Environment Variables
 
 All env variables must have an example in `.env.example` — that file doubles as the allowlist of

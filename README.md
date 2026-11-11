@@ -535,3 +535,4 @@ Volume mounts are contributed by plugins via `pass_mount`; the core `docker run`
 | [src/lib/agents.sh](src/lib/agents.sh) | container-side agent framework (manifest lookup, stage runner) |
 | [agents/](agents) | the agents themselves |
 | [plugins/](plugins) | the plugins themselves |
+| [tests/](tests) | pytest suite; `tests/e2e` boots the built image (see CLAUDE.md, Tests) |

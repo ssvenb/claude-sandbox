@@ -5,7 +5,10 @@
 
 export GH_HOST="${GH_HOST:-github.com}"
 GH_TOKEN_FILE=/run/credentials/github-token
+# gh's git credential helper reports the host's `user`; every login resets it to the App's bot.
+gh_set_user() { [ -z "${GH_USERNAME:-}" ] || gh config set -h "$GH_HOST" user "$GH_USERNAME" 2>/dev/null; }
 gh auth login --hostname "$GH_HOST" --with-token <"$GH_TOKEN_FILE"
+gh_set_user
 gh auth setup-git --hostname "$GH_HOST"
 echo "✅ GitHub CLI authenticated successfully for the Agent!"
 
@@ -14,7 +17,7 @@ echo "✅ GitHub CLI authenticated successfully for the Agent!"
   while sleep 60; do
     token=$(cat "$GH_TOKEN_FILE") || continue
     [ "$token" != "$last" ] || continue
-    printf '%s\n' "$token" | gh auth login --hostname "$GH_HOST" --with-token && last=$token
+    printf '%s\n' "$token" | gh auth login --hostname "$GH_HOST" --with-token && { last=$token; gh_set_user; }
   done
 ) </dev/null >/dev/null 2>&1 &
 unset GH_TOKEN_FILE

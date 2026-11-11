@@ -16,3 +16,4 @@ github_auth_mint() {
 register_credential github-token 2400 github_auth_mint
 
 pass_value GH_HOST "${GH_HOST:-github.com}"
+[ -z "${GH_USERNAME:-}" ] || pass_value GH_USERNAME "$GH_USERNAME"

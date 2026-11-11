@@ -185,8 +185,8 @@ docker build -t claude-agent:claude . && \
 back the `docker run` args they contribute; `tests/test_run.py` runs run.sh itself against a stub
 `docker`. `tests/e2e` (skipped unless `SANDBOX_E2E_IMAGE` is set) boots the real image, built with
 every plugin installed, behind a stand-in agent. `.github/workflows/tests.yml` runs both on every
-PR, the image tests for each agent. A known bug is pinned as a strict `xfail`, so fixing it flips
-the test to a failure until the marker goes. A new plugin or agent needs tests alongside it.
+PR, the image tests for each agent. Pin a bug found but not fixed as a strict `xfail`, so the fix
+flips the test to a failure until the marker goes. A new plugin or agent needs tests alongside it.
 
 ## Environment Variables
 

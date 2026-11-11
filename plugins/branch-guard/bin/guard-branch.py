@@ -32,7 +32,10 @@ if "git push" in cmd:
     # First positional token after `git push` (skipping flags and the remote) is the
     # refspec. A bare push has none and targets the current branch — always $branch,
     # since switching is blocked above — so it's allowed.
-    rest = shlex.split(cmd.split("git push", 1)[1])
+    try:
+        rest = shlex.split(cmd.split("git push", 1)[1])
+    except ValueError:  # fail closed: a crash exits 1, which Claude Code treats as non-blocking
+        block(f"Blocked: could not parse this git push; push {branch} with a simpler command.")
     ref = next((t for t in rest if not t.startswith("-") and t != "origin"), "")
     # An explicit ref must be this run's own branch, by resolved value or via the
     # $AGENT_BRANCH / <prefix>/$RUN_ID variable forms the agent is told to use. The prefix is

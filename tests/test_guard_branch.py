@@ -72,7 +72,8 @@ def test_without_git_workspace_it_falls_back_to_the_agent_name():
                  AGENT="copilot").returncode == 2
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: an unbalanced quote after `git push` crashes shlex; "
-                   "the hook exits 1, which Claude Code treats as non-blocking, so the push runs")
-def test_unparsable_push_command_is_still_blocked():
-    assert guard("git push origin main && echo it's done").returncode == 2
+def test_an_unparsable_push_is_blocked_not_waved_through():
+    """A crash would exit 1, which Claude Code treats as non-blocking: the push would run."""
+    done = guard("git push origin main && echo it's done")
+    assert done.returncode == 2
+    assert "could not parse" in done.stderr

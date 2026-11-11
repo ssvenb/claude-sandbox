@@ -76,19 +76,12 @@ def test_resume_reuses_the_run_id(sb, run_sh):
     (["--resume", "abc12"], 1, "Invalid RUN_ID"),
     (["--bogus"], 1, "Unknown argument: --bogus"),
     (["--help"], 0, "Usage:"),
+    (["--resume"], 1, "Invalid RUN_ID ''"),
 ])
 def test_command_line(run_sh, args, code, message):
-    done = run_sh(*args)
+    done = run_sh(*args, timeout=15)
     assert (done.returncode, done.calls) == (code, [])
     assert message in done.stderr
-
-
-@pytest.mark.xfail(strict=True, raises=subprocess.TimeoutExpired,
-                   reason="BUG: `--resume` without an id: `shift 2` fails, `|| true` swallows it, "
-                          "and the argument loop spins forever")
-def test_resume_without_an_id_is_refused(run_sh):
-    done = run_sh("--resume", timeout=5)
-    assert done.returncode == 1 and "Invalid RUN_ID" in done.stderr
 
 
 def test_the_agent_is_chosen_per_project(sb, run_sh):

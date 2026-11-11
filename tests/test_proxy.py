@@ -355,12 +355,12 @@ def test_binary_bodies_pass_byte_for_byte(start, upstream):
     assert data == upstream.url.encode()
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: the request body is only rewritten when the client "
-                   "spells the header 'Content-Type' exactly; Node's fetch sends 'content-type'")
 def test_request_body_rewrite_ignores_header_case(start, upstream):
-    p = start([api_route(upstream)], env={"API_KEY": "k"})
-    p.request("POST", "/echo", body='{"cb": "http://127.0.0.1:18080/hook"}',
-              headers={"content-type": "application/json"})
+    """Node's fetch sends lowercase header names; the rewritten body must still arrive whole."""
+    p = start([api_route(upstream, localUrl="http://api.local")], env={"API_KEY": "k"})
+    body = '{"cb": "http://api.local/hook"}'
+    p.request("POST", "/echo", body=body,
+              headers={"content-type": "application/json", "content-length": str(len(body))})
     assert json.loads(upstream.seen[0]["body"]) == {"cb": f"{upstream.url}/hook"}
 
 

@@ -83,6 +83,8 @@ def test_ca_certs_needs_certificates(sb):
     sb.plugin("ca-certs", CA_CERTS_DIR=sb.tmp / "none").dies("CA_CERTS_DIR not found")
     (sb.tmp / "empty").mkdir()
     sb.plugin("ca-certs", CA_CERTS_DIR=sb.tmp / "empty").dies("No certificates")
+    (sb.tmp / "empty/README").write_text("not a certificate")
+    sb.plugin("ca-certs", CA_CERTS_DIR=sb.tmp / "empty").dies("No certificates")
 
 
 @pytest.fixture
@@ -103,11 +105,11 @@ def test_ca_certs_mounts_and_bundles_pem_and_der(sb, ca_dir):
     assert run.builds["EXTRA_CA_CERTS"].count("-----BEGIN CERTIFICATE-----") == 2
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: a file openssl cannot read fails the command "
-                   "substitution, and set -e silently aborts run.sh (root-init.sh skips it instead)")
 def test_ca_certs_skips_files_that_are_not_certificates(sb, ca_dir):
     (ca_dir / "README").write_text("not a certificate")
-    sb.plugin("ca-certs", CA_CERTS_DIR=ca_dir).ok()
+    run = sb.plugin("ca-certs", CA_CERTS_DIR=ca_dir).ok()
+    assert f"skipping {ca_dir}/README" in run.err
+    assert run.builds["EXTRA_CA_CERTS"].count("-----BEGIN CERTIFICATE-----") == 2
 
 
 # --- cwd-workspace -------------------------------------------------------------------------

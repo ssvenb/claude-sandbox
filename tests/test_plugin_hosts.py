@@ -242,6 +242,25 @@ def test_gcp_auth_mint_runs_the_minter_with_the_account(sb):
     assert run.out.endswith(f"minted for {SA}\n")
 
 
+def test_gcp_auth_hands_the_credential_file_to_the_minter(sb):
+    sb.stub("gcloud", "exit 0\n")
+    cred = sb.tmp / "wif.json"
+    cred.write_text("{}")
+    fake = sb.tmp / "fake-plugin"
+    (fake / "host").mkdir(parents=True)
+    (fake / "host/mint-gcp-token.py").write_text('#!/bin/sh\necho "minted from $GCP_CREDENTIAL_FILE"\n')
+    (fake / "host/mint-gcp-token.py").chmod(0o755)
+    run = sb.bash(f"ENABLED_PLUGINS=gcp-auth\nplugins_host_stage\nGCP_AUTH_DIR={fake}\ngcp_auth_mint",
+                  GCP_SERVICE_ACCOUNT=SA, GCP_CREDENTIAL_FILE=str(cred)).ok()
+    assert run.out.endswith(f"minted from {cred}\n")
+    assert "GCP_CREDENTIAL_FILE" not in run.env
+
+
+def test_gcp_auth_unreadable_credential_file_fails(sb):
+    sb.stub("gcloud", "exit 0\n")
+    sb.plugin("gcp-auth", GCP_SERVICE_ACCOUNT=SA, GCP_CREDENTIAL_FILE="/nope.json").dies("not readable")
+
+
 @pytest.mark.parametrize("account, project, outcome", [
     ("me@gmail.com", None, "must be a service account email"),
     ("123-compute@developer.gserviceaccount.com", None, "set GCP_PROJECT"),

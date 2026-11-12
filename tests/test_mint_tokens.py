@@ -171,6 +171,23 @@ def test_gcp_without_a_host_login_says_how_to_log_in(gcloud):
     assert "gcloud auth login" in exc.value.code and "not logged in" in exc.value.code
 
 
+def test_gcp_credential_file_mints_through_gcloud_without_iam(gcloud, monkeypatch, capsys):
+    gcloud('[ "$*" = "auth print-access-token --quiet" ] && echo "fed-$CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"')
+    monkeypatch.setenv("GCP_CREDENTIAL_FILE", "/etc/wif.json")
+    api = FakeAPI(monkeypatch, {})
+    run(GCP_MINT)
+    assert capsys.readouterr().out == "fed-/etc/wif.json\n"
+    assert api.requests == []
+
+
+def test_gcp_credential_file_failure_names_the_file(gcloud, monkeypatch):
+    gcloud("echo 'mTLS handshake failed' >&2; exit 1")
+    monkeypatch.setenv("GCP_CREDENTIAL_FILE", "/etc/wif.json")
+    with pytest.raises(SystemExit) as exc:
+        run(GCP_MINT)
+    assert "/etc/wif.json" in exc.value.code and "mTLS handshake failed" in exc.value.code
+
+
 def test_gcp_missing_grant_names_the_role(gcloud, monkeypatch):
     gcloud("echo t")
     FakeAPI(monkeypatch, {("POST", IAM): (403, "denied")})

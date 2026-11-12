@@ -21,8 +21,8 @@
   .tally { color: var(--haze); margin: 0; font-size: 15px; }
   .tally.lit { color: var(--lamp); }
 
-  /* One band per project: who it is and what to start on top, what is going on in it below. */
-  section { padding: 24px 0 30px; border-top: 1px solid var(--rule); }
+  /* One panel per project, darker than the page: a lit window per project, rules only inside. */
+  section { margin-top: 16px; padding: 22px 26px 26px; background: var(--night); border-radius: 16px; }
   .head { display: flex; align-items: center; gap: 12px 24px; flex-wrap: wrap; }
   h2 { flex: 1 1 auto; font-size: 24px; font-weight: 650; letter-spacing: -.015em;
        line-height: 1.2; margin: 0; overflow-wrap: break-word; }
@@ -63,6 +63,7 @@
 
   @media (max-width: 900px) {
     body { padding: 24px 16px 48px; }
+    section { padding: 18px 16px 22px; border-radius: 12px; }
     .columns { grid-auto-flow: row; gap: 22px; }
   }
   @media (prefers-reduced-motion: reduce) { .lamp.lit { animation: none; } }

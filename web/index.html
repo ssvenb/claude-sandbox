@@ -148,10 +148,10 @@ function show(s) {
   if (w && fresh(w)) w.location.replace('/session#' + s.id);
 }
 
-async function start(project, kind, run_id) {
+async function start(project, kind, run_id, task) {
   const w = window.open('about:blank');  // its name is the session's id, which the server picks
   try {
-    const s = await post('/api/sessions', JSON.stringify({project, kind, run_id}));
+    const s = await post('/api/sessions', JSON.stringify({project, kind, run_id, task}));
     if (w) { w.name = 'session-' + s.id; opened[w.name] = w; w.location.replace('/session#' + s.id); }
     refresh();
   } catch (e) { w?.close(); alert(e.message); }
@@ -249,7 +249,10 @@ function render() {
               i.ref ? h('span', {className: 'num'}, i.ref) : '',
               i.note ? h('span', {className: 'draft'}, i.note + ': ') : '', i.title),
             s ? h('button', {onclick: () => show(s)}, 'Open')
-              : i.run_id ? resume(path, i.run_id) : '');
+              : i.run_id ? resume(path, i.run_id) : '',
+            // A new session on a task the plugin wrote for this item (an issue's Resolve).
+            i.start ? h('button', {onclick: () => start(path, 'run', undefined, i.start.task), title: i.start.task},
+                        i.start.label) : '');
         }, 'None open.'))));
     }));
   if (!state.projects.length)

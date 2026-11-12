@@ -97,6 +97,9 @@ async function copy(text) {
   }
 }
 term.attachCustomKeyEventHandler(e => {
+  // Ctrl+V pastes like Ctrl+Shift+V: left to the browser, whose paste the terminal takes in
+  // (bracketed and all), instead of going on to the program as ^V.
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.code === 'KeyV') return false;
   const c = (e.ctrlKey || e.metaKey) && !e.altKey && e.code === 'KeyC';
   if (e.type !== 'keydown' || !c || !(e.shiftKey || term.hasSelection())) return true;
   e.preventDefault();

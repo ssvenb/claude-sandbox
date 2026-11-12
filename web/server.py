@@ -75,19 +75,19 @@ def projects(file):
     return list(dict.fromkeys(found))  # a project listed twice shows once
 
 
-def command(kind, run_id):
+def command(kind, run_id, task=None):
     if kind == "shell":  # the project's terminal: your own shell, on this machine, in the project
         return [os.environ.get("SHELL", "/bin/sh")]
-    return [str(RUN_SH), "--resume" if kind == "resume" else "--run-id", run_id]
+    return [str(RUN_SH), "--resume" if kind == "resume" else "--run-id", run_id] + (["--task", task] if task else [])
 
 
 class Session:
-    def __init__(self, project, kind, run_id):
+    def __init__(self, project, kind, run_id, task=None):
         self.id = secrets.token_hex(4)
         self.project, self.kind, self.run_id = project, kind, run_id
         self.started, self.exit = time.time(), None
         self.buf, self.listeners = bytearray(), []
-        argv = command(kind, run_id)
+        argv = command(kind, run_id, task)
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
             try:
@@ -257,7 +257,9 @@ def drop(s):
         os.close(s.fd)
 
 
-def start(project, kind, run_id):
+def start(project, kind, run_id, task=None):
+    if task is not None and (kind != "run" or not isinstance(task, str) or not task.strip()):
+        raise ValueError("a task starts a new run, and is text")
     if kind == "run":
         run_id = secrets.token_hex(3)
     elif kind == "shell":
@@ -275,7 +277,7 @@ def start(project, kind, run_id):
                 return s
             if kind == "shell":
                 drop(s)
-        s = Session(project, kind, run_id)
+        s = Session(project, kind, run_id, task)
         sessions[s.id] = s
         return s
 
@@ -405,7 +407,7 @@ class Handler(BaseHTTPRequestHandler):
                 req = json.loads(body)
                 if req.get("project") not in projects(self.server.projects_file):
                     raise ValueError("not a configured project")
-                self.reply(200, start(req["project"], req.get("kind"), req.get("run_id")).json())
+                self.reply(200, start(req["project"], req.get("kind"), req.get("run_id"), req.get("task")).json())
             elif url.path == "/api/vscode":
                 # Only a folder this UI already knows: a session's checkout, as its plugins said.
                 with lock:

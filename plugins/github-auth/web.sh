@@ -38,4 +38,6 @@ github_ci='def ci:
 github_web_list "Pull requests" pr number,title,url,headRefName,isDraft,statusCheckRollup \
   "$github_ci"' {ref: "#\(.number)", title, url, branch: .headRefName}
     + (if .isDraft then {note: "Draft"} else {} end) + ci'
-github_web_list "Issues" issue number,title,url '{ref: "#\(.number)", title, url}'
+# Resolve: a session told to fix the issue, reading it in full itself (the title is all we send).
+github_web_list "Issues" issue number,title,url '{ref: "#\(.number)", title, url, start: {label: "Resolve",
+  task: "Resolve GitHub issue #\(.number): \(.title) (\(.url)). Read it in full first, with its comments: `gh issue view \(.number) --comments`. Then fix it: make the change, add or update tests and run them, commit, push your branch and open a pull request whose description says \"Closes #\(.number)\"."}}'

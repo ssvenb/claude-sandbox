@@ -101,7 +101,7 @@ Disable them all and the agent starts plain in an empty `/workspace` with no Git
 |------|---------|---------|
 | `plugin.json` | — | manifest: `priority`, `defaultEnabled`, `requiredAgent`, `provides`, `requires`, `conflicts`, `requiredEnv`, `secrets` |
 | `install.sh` | root, at image build | install the plugin's dependencies (e.g. `gh`); runs only when the plugin is enabled |
-| `web.sh` | you, on the host | what the web UI shows for a project, sourced by `run.sh --web` (plugins resolved as for a run, nothing validated or started): `web_list TITLE JSON_ARRAY` adds a column of `{title, url, ref?, note?, status?, status_text?, …}` links (`status`: `ok`/`fail`/`pending`, e.g. a PR's CI), `web_note TEXT` a line saying why there is none, `web_map_items JQ_FILTER` rewrites the items listed by lower-priority plugins (an item given a `run_id` gets Open/Resume), `web_checkout GLOB` says where a run's `/workspace` is on the host (`{run_id}` for the run) |
+| `web.sh` | you, on the host | what the web UI shows for a project, sourced by `run.sh --web` (plugins resolved as for a run, nothing validated or started): `web_list TITLE JSON_ARRAY` adds a column of `{title, url, ref?, note?, status?, status_text?, start?, …}` links (`status`: `ok`/`fail`/`pending`, e.g. a PR's CI; `start`: `{label, task}`, a button starting a session on `task`, e.g. an issue's Resolve), `web_note TEXT` a line saying why there is none, `web_map_items JQ_FILTER` rewrites the items listed by lower-priority plugins (an item given a `run_id` gets Open/Resume), `web_checkout GLOB` says where a run's `/workspace` is on the host (`{run_id}` for the run) |
 | `host.sh` | you, on the host | validate config; `register_credential NAME INTERVAL FUNCTION` for a short-lived credential minted on the host (see below); call `pass_env VAR` / `pass_value NAME VALUE` / `pass_mount HOST_PATH CONTAINER_PATH [OPTS]` / `pass_arg FLAG...` to add `docker run` args, `pass_build_arg NAME VALUE` for a `docker build` arg (never a secret — it lands in the image history); read per-project settings with `plugin_config FILTER [DEFAULT]` / `plugin_config_json FILTER [DEFAULT]` / `project_env NAME [DEFAULT]`; set `AGENT_AUTH_PROVIDED=1` if the plugin supplies the agent's credentials itself |
 | `root-init.sh` | root, in container | anything needing a secret that must enter the container as is (`secrets`); exports survive the `setpriv` handoff to `node` |
 | `agent-init.sh` | `node`, in container | agent-visible setup; append to `$AGENT_PROMPT_FILE` to brief the agent |
@@ -173,6 +173,7 @@ go any further.
 ./run.sh --resume <6-hex-char-id>     # resume an existing run: its branch and its agent conversation
 AGENT=copilot ./run.sh                # same sandbox, GitHub Copilot CLI instead
 ./run.sh --run-id <6-hex-char-id>     # fresh run under a caller-chosen id (what the web UI does)
+./run.sh --task "Fix issue #7 …"      # fresh run whose agent starts on that task (AGENT_TASK: its first message)
 ./run.sh --web                        # starts nothing: JSON of what the enabled plugins' web.sh show
 ./web/server.py                       # web UI on http://127.0.0.1:8787 (--bind 0.0.0.0: whole LAN, no login)
 ```

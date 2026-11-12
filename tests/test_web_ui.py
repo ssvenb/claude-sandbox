@@ -24,7 +24,7 @@ RUN = "abc123"  # the run the fixture's first pull request and checkout belong t
 RUN_SH = """#!/bin/sh
 case "$1" in
   --web) cat "$(dirname "$0")/web.json" ;;
-  *) echo "agent $2 at work"; read line; exit 4 ;;
+  *) echo "agent $2 at work${4:+ on: $4}"; read line; exit 4 ;;
 esac
 """
 DOCKER = "#!/bin/sh\n"
@@ -74,7 +74,8 @@ def board(tmp_path, browser):
             {"ref": "#3", "title": "Agent's work", "url": f"{elsewhere}/pr/3", "run_id": RUN,
              "status": "fail", "status_text": "CI: 1 of 2 checks failed"},
             {"ref": "#4", "title": "By hand", "url": f"{elsewhere}/pr/4", "status": "ok", "status_text": "CI: 2 checks passed"}]},
-        {"title": "Issues", "items": [{"ref": "#7", "title": "A bug", "url": f"{elsewhere}/issues/7"}]}]}))
+        {"title": "Issues", "items": [{"ref": "#7", "title": "A bug", "url": f"{elsewhere}/issues/7",
+                                       "start": {"label": "Resolve", "task": "Fix issue #7 now"}}]}]}))
 
     context = browser.new_context()
     page = context.new_page()
@@ -241,3 +242,23 @@ def test_shift_drag_selects_while_the_program_has_the_mouse(board):
     drag()
     term.keyboard.up("Shift")
     assert term.evaluate("term.hasSelection()")
+
+
+def test_resolve_starts_a_session_on_the_items_task(board):
+    session = opens_tab(board, lambda: board.click("button:has-text('Resolve')"))
+    session.wait_for_selector("text=on: Fix issue #7 now")  # run.sh --run-id <id> --task <task>
+    [s] = json.load(urllib.request.urlopen(board.base + "/api/state"))["sessions"]
+    assert s["kind"] == "run" and session.url.endswith("#" + s["id"])
+    board.wait_for_selector("button.session")
+
+
+@pytest.mark.parametrize("keys", ["Control+v", "Control+Shift+v"])
+def test_ctrl_v_pastes(board, keys):
+    board.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    term = opens_tab(board, lambda: board.click("button[aria-label='Terminal']"))
+    term.click(".xterm")
+    term.evaluate("navigator.clipboard.writeText('pasted-$((2+3))')")
+    term.keyboard.type("echo ")
+    term.keyboard.press(keys)
+    term.keyboard.type("\n")
+    term.wait_for_selector("text=pasted-5", timeout=5000)

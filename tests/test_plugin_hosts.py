@@ -572,7 +572,14 @@ def test_github_lists_pull_requests_and_issues_and_git_workspace_ties_them_to_ru
         {"ref": "#3", "title": "t", "url": "u3", "branch": "claude-code/20261112-09fc4c",
          "note": "Draft", "status": "pending", "status_text": "CI: 1 of 2 checks running", "run_id": "09fc4c"},
         {"ref": "#4", "title": "by hand", "url": "u4", "branch": "feature/login"}]}
-    assert issues == {"title": "Issues", "items": [{"ref": "#7", "title": "i", "url": "u7"}]}
+    [issue] = issues["items"]
+    assert issues["title"] == "Issues" and {k: issue[k] for k in ("ref", "title", "url")} == {
+        "ref": "#7", "title": "i", "url": "u7"}
+    # Resolve: a session whose agent is told to fix the issue, reading it in full itself.
+    assert issue["start"]["label"] == "Resolve"
+    task = issue["start"]["task"]
+    assert task.startswith("Resolve GitHub issue #7: i (u7).")
+    assert "gh issue view 7 --comments" in task and 'Closes #7' in task
     # Without git-workspace nobody claims the branch, so the page offers no resume.
     assert "run_id" not in described("github-auth")["lists"][0]["items"][0]
 

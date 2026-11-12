@@ -40,7 +40,10 @@ the front when it is already open. For a project whose
 `origin` is on GitHub it lists the open pull requests, with their CI status, and issues through the
 host's `gh` login, each a link to its GitHub page (one tab per item, brought to the front when it
 is already open); a PR on a per-run branch (`<prefix>/<date>-<RUN_ID>`) gets a **Resume** button,
-which is `run.sh --resume <RUN_ID>`; an ended session in the list has one too.
+which is `run.sh --resume <RUN_ID>`; an ended session in the list has one too. An issue's
+**Resolve** starts a new session whose agent begins on it straight away: its first message
+(`run.sh --task`) names the issue and tells it to read it with `gh issue view`, fix it with tests,
+push and open a pull request that closes it.
 
 What a project shows beyond its sessions comes from its enabled plugins, not from the web UI: the
 page draws what `run.sh --web` prints for the project, which is what each enabled plugin's `web.sh`
@@ -57,7 +60,7 @@ and removes its container, once no tab of it has come back for 10 seconds — so
 A project's terminal is kept instead: its button attaches to it again.
 
 In a terminal tab, **Ctrl+C** copies the selection (and interrupts as usual when nothing is
-selected), **Ctrl+Shift+C** always copies; where the program has taken the mouse, as the agent's
+selected), **Ctrl+Shift+C** always copies, **Ctrl+V** and **Ctrl+Shift+V** paste; where the program has taken the mouse, as the agent's
 interface does, select with **Shift+drag**.
 
 **Code** on a session opens VS Code in the browser on that run's checkout (the `agent-workspace`
@@ -339,7 +342,7 @@ calls describe.
 
 | Call | Puts on the project's band |
 |------|----------------------------|
-| `web_list TITLE JSON_ARRAY` | a column of links; each item is `{title, url}` plus optional `ref` (a short id shown first, `#12`), `note` (`Draft`), `status` (`ok`, `fail` or `pending`: a mark before it, e.g. CI) with its `status_text`, and any field a later plugin may read |
+| `web_list TITLE JSON_ARRAY` | a column of links; each item is `{title, url}` plus optional `ref` (a short id shown first, `#12`), `note` (`Draft`), `status` (`ok`, `fail` or `pending`: a mark before it, e.g. CI) with its `status_text`, `start` (`{label, task}`: a button starting a session on `task`, e.g. an issue's Resolve), and any field a later plugin may read |
 | `web_note TEXT` | one line saying why there is nothing to list |
 | `web_map_items JQ_FILTER` | rewrites every item listed so far (by plugins of a lower `priority`); an item given a `run_id` gets an **Open** or **Resume** button for that run |
 | `web_checkout GLOB` | where a run's `/workspace` is on this machine, `{run_id}` standing for the run; adds **Code** (VS Code) to its session |

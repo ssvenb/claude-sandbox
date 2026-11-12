@@ -83,6 +83,12 @@ def test_requests_that_must_not_start_anything(ui, body, headers, status):
 def test_sandbox_sessions_run_run_sh_under_an_id_the_ui_knows():
     assert web.command("run", "0a1b2c") == [str(REPO / "run.sh"), "--run-id", "0a1b2c"]
     assert web.command("resume", "0a1b2c") == [str(REPO / "run.sh"), "--resume", "0a1b2c"]
+    assert web.command("run", "0a1b2c", "Fix #7") == [str(REPO / "run.sh"), "--run-id", "0a1b2c",
+                                                       "--task", "Fix #7"]
+    for kind, run_id, task in (("shell", None, "x"), ("resume", "0a1b2c", "x"), ("run", None, 7),
+                               ("run", None, "  ")):
+        with pytest.raises(ValueError, match="a task starts a new run"):
+            web.start("/p", kind, run_id, task)
 
 
 def test_a_projects_line_may_be_a_glob(tmp_path):
@@ -238,7 +244,7 @@ def test_closing_a_sessions_last_tab_stops_it_and_a_reload_does_not(tmp_path, mo
     docker.write_text(f'#!/bin/sh\necho "$*" >>"{tmp_path}/docker-calls"\n')
     docker.chmod(0o755)
     monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
-    monkeypatch.setattr(web, "command", lambda kind, run_id: ["sleep", "30"])
+    monkeypatch.setattr(web, "command", lambda *_: ["sleep", "30"])
     monkeypatch.setattr(web, "KEEPALIVE", 0.2)
     monkeypatch.setattr(web, "TAB_GRACE", 1)
     (tmp_path / "projects").write_text(f"{tmp_path}\n")

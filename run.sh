@@ -23,9 +23,10 @@ cd "$(dirname "$0")"
 # shellcheck source=src/lib/host-settings.sh
 . src/lib/host-settings.sh
 
-usage() { echo "Usage: $0 [--resume <RUN_ID> | --run-id <RUN_ID> | --web]   (RUN_ID is 6 hex chars)" >&2; exit "${1:-1}"; }
+usage() { echo "Usage: $0 [--resume <RUN_ID> | --run-id <RUN_ID> | --web] [--task TEXT]   (RUN_ID is 6 hex chars)" >&2; exit "${1:-1}"; }
 RESUME=0
 WEB=0
+TASK=""
 GIVEN_ID=0
 RUN_ID=""
 while [ $# -gt 0 ]; do
@@ -36,10 +37,14 @@ while [ $# -gt 0 ]; do
       GIVEN_ID=1; RUN_ID="${2:-}"; shift; [ $# -eq 0 ] || shift ;;
     # Starts nothing: prints, as JSON, what the project's enabled plugins have for the web UI.
     --web) WEB=1; shift ;;
+    # The agent's first message, so it starts working without anyone typing (the web UI's Resolve).
+    --task) TASK="${2:-}"; shift; [ $# -eq 0 ] || shift
+      [ -n "$TASK" ] || { echo "--task needs the task's text." >&2; usage; } ;;
     -h|--help) usage 0 ;;
     *) echo "Unknown argument: $1" >&2; usage ;;
   esac
 done
+[ -z "$TASK" ] || [ "$RESUME" = 0 ] || { echo "--task starts a fresh run; it cannot resume one." >&2; usage; }
 if [ "$GIVEN_ID" = 1 ]; then
   case "$RUN_ID" in
     [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
@@ -101,6 +106,7 @@ docker run -it --rm \
   -e RESUME="$RESUME" \
   -e AGENT="$AGENT" \
   -e ENABLED_PLUGINS="$ENABLED_PLUGINS" \
+  ${TASK:+-e "AGENT_TASK=$TASK"} \
   ${DOCKER_ARGS[@]+"${DOCKER_ARGS[@]}"} \
   --name "sandbox-$RUN_ID" \
   "$IMAGE"

@@ -43,8 +43,8 @@ the image, but only the selected one's `install.sh` runs at build time, and the 
 
 | Agent | CLI | Credentials | Launched as |
 |-------|-----|-------------|-------------|
-| `claude` | Claude Code (npm) | `CLAUDE_CODE_OAUTH_TOKEN`, or the `claude-home` plugin | `claude --dangerously-skip-permissions --effort ${CLAUDE_EFFORT:-medium} [--append-system-prompt briefing]` |
-| `copilot` | GitHub Copilot CLI (npm) | `COPILOT_GITHUB_TOKEN`, or the `copilot-home` plugin | `copilot --allow-all [-i briefing]` |
+| `claude` | Claude Code (npm) | `CLAUDE_CODE_OAUTH_TOKEN`, or the `claude-home` plugin | `claude --dangerously-skip-permissions --session-id <uuid from RUN_ID> --effort ${CLAUDE_EFFORT:-medium} [--append-system-prompt briefing]`; on `--resume`, `--resume <that uuid>` when its transcript is in `~/.claude` |
+| `copilot` | GitHub Copilot CLI (npm) | `COPILOT_GITHUB_TOKEN`, or the `copilot-home` plugin | `copilot --allow-all --name=sandbox-<RUN_ID> [-i briefing]`; on `--resume`, `--resume=sandbox-<RUN_ID>`, falling back to a new session when none is saved |
 
 `agents/<name>/` may contain:
 
@@ -54,7 +54,7 @@ the image, but only the selected one's `install.sh` runs at build time, and the 
 | `install.sh` | root, at image build | install the CLI; runs only for the selected agent |
 | `host.sh` | you, on the host | validate credentials, `pass_env` them; runs **after** every plugin's `host.sh`, so it can honour `AGENT_AUTH_PROVIDED=1` |
 | `agent-init.sh` | `node` | seed the agent's own config for a non-interactive boot |
-| `launch.sh` | `node` | turn `$AGENT_PROMPT` into flags and start `${AGENT_LAUNCH_CMD:-<cli>}` |
+| `launch.sh` | `node` | turn `$AGENT_PROMPT` into flags and start `${AGENT_LAUNCH_CMD:-<cli>}`; key the conversation to `$RUN_ID` and continue it when `RESUME=1` |
 
 ## Plugins
 
@@ -169,9 +169,17 @@ go any further.
 
 ```bash
 ./run.sh                              # fresh run (generates RUN_ID), builds claude-agent:$AGENT
-./run.sh --resume <6-hex-char-id>     # resume an existing run's branch
+./run.sh --resume <6-hex-char-id>     # resume an existing run: its branch and its agent conversation
 AGENT=copilot ./run.sh                # same sandbox, GitHub Copilot CLI instead
+./run.sh --run-id <6-hex-char-id>     # fresh run under a caller-chosen id (what the web UI does)
+./web/server.py                       # web UI on http://127.0.0.1:8787
 ```
+
+`web/server.py` (stdlib only, host side) runs `run.sh` in a pty per session, with the project as
+cwd, and streams it to `web/index.html` (xterm.js): projects come from
+`~/.config/claude-sandbox/projects` (one directory per line, `--projects FILE` to override), open
+PRs from the host's `gh`, and a PR on a per-run branch resumes with `run.sh --resume`. It stops a
+session by removing the container `run.sh` names `sandbox-<RUN_ID>`.
 
 ## Tests
 

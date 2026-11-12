@@ -78,8 +78,23 @@ def test_claude_seeding_keeps_an_existing_config(sb):
 def test_claude_launch(sb, prompt, effort, tail):
     argv = stub_agent(sb)
     sb.sh("agent_run_stage launch", AGENT_LAUNCH_CMD="fake-agent --wrapped", AGENT_PROMPT=prompt,
-          CLAUDE_EFFORT=effort).ok()
-    assert argv() == ["--wrapped", "--dangerously-skip-permissions", *tail]
+          CLAUDE_EFFORT=effort, RUN_ID="0a1b2c").ok()
+    assert argv() == ["--wrapped", "--dangerously-skip-permissions",
+                      "--session-id", CLAUDE_SESSION, *tail]
+
+
+CLAUDE_SESSION = "5a4db0c0-0000-4000-8000-0000000a1b2c"
+
+
+@pytest.mark.parametrize("saved, flag", [(True, "--resume"), (False, "--session-id")])
+def test_claude_resume_continues_the_runs_conversation_when_it_was_kept(sb, saved, flag):
+    if saved:  # what claude-home's mounted ~/.claude holds after the run's first container
+        transcripts = sb.home / ".claude/projects/-workspace"
+        transcripts.mkdir(parents=True)
+        (transcripts / f"{CLAUDE_SESSION}.jsonl").write_text("{}\n")
+    argv = stub_agent(sb)
+    sb.sh("agent_run_stage launch", AGENT_LAUNCH_CMD="fake-agent", RUN_ID="0a1b2c", RESUME="1").ok()
+    assert argv()[1:3] == [flag, CLAUDE_SESSION]
 
 
 def test_copilot_is_prepared_for_an_unattended_boot(sb):
@@ -92,13 +107,29 @@ def test_copilot_is_prepared_for_an_unattended_boot(sb):
 @pytest.mark.parametrize("prompt", ["", "Context."])
 def test_copilot_launch(sb, prompt):
     argv = stub_agent(sb)
-    sb.sh("agent_run_stage launch", AGENT="copilot", AGENT_LAUNCH_CMD="fake-agent", AGENT_PROMPT=prompt).ok()
+    sb.sh("agent_run_stage launch", AGENT="copilot", AGENT_LAUNCH_CMD="fake-agent", AGENT_PROMPT=prompt,
+          RUN_ID="0a1b2c").ok()
     if not prompt:
-        assert argv() == ["--allow-all"]
+        assert argv() == ["--allow-all", "--name=sandbox-0a1b2c"]
     else:
-        flag, message = argv()[1:]
+        flag, message = argv()[2:]
         assert flag == "-i" and message.startswith("Context.\n")
         assert "do not take any action on it" in message
+
+
+@pytest.mark.parametrize("status, calls, code", [
+    (0, ["--allow-all --resume=sandbox-0a1b2c"], 0),                    # resumed, then quit
+    (2, ["--allow-all --resume=sandbox-0a1b2c", "--allow-all --name=sandbox-0a1b2c"], 0),  # none saved
+    (1, ["--allow-all --resume=sandbox-0a1b2c"], 1),                    # resumed session failed
+])
+def test_copilot_resume_falls_back_to_a_new_session_only_when_none_is_saved(sb, status, calls, code):
+    log = sb.tmp / "calls"
+    # The first call is the resume attempt and ends with `status`; the fallback succeeds.
+    sb.stub("fake-agent", f'echo "$*" >>"{log}"\n[ "$(wc -l <"{log}")" -gt 1 ] || exit {status}\n')
+    run = sb.sh("agent_run_stage launch", AGENT="copilot", AGENT_LAUNCH_CMD="fake-agent",
+                RUN_ID="0a1b2c", RESUME="1")
+    assert run.code == code
+    assert log.read_text().splitlines() == calls
 
 
 # --- plugin briefings and agent-user setup -------------------------------------------------

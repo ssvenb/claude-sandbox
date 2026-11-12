@@ -23,26 +23,30 @@ cd "$(dirname "$0")"
 # shellcheck source=src/lib/host-settings.sh
 . src/lib/host-settings.sh
 
-usage() { echo "Usage: $0 [--resume <RUN_ID>]   (RUN_ID is 6 hex chars)" >&2; exit "${1:-1}"; }
+usage() { echo "Usage: $0 [--resume <RUN_ID> | --run-id <RUN_ID>]   (RUN_ID is 6 hex chars)" >&2; exit "${1:-1}"; }
 RESUME=0
+GIVEN_ID=0
 RUN_ID=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --resume) RESUME=1; RUN_ID="${2:-}"; shift; [ $# -eq 0 ] || shift ;;
+    # --run-id starts a FRESH run under an id the caller picked (web/server.py does, to know which
+    # run a session is before the container says so); --resume re-attaches to an existing one.
+    --resume|--run-id) [ "$1" = --run-id ] || RESUME=1
+      GIVEN_ID=1; RUN_ID="${2:-}"; shift; [ $# -eq 0 ] || shift ;;
     -h|--help) usage 0 ;;
     *) echo "Unknown argument: $1" >&2; usage ;;
   esac
 done
-if [ "$RESUME" = 1 ]; then
+if [ "$GIVEN_ID" = 1 ]; then
   case "$RUN_ID" in
     [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
     *) echo "Invalid RUN_ID '$RUN_ID' (expected 6 lowercase hex chars)." >&2; usage ;;
   esac
 fi
 
-# One id and date key the run; --resume reuses the id. 6 lowercase hex chars, DNS-safe. Both are
+# One id and date key the run; --resume and --run-id bring their own. 6 lowercase hex chars, DNS-safe. Both are
 # core so any plugin's host stage can name its per-run artifacts the same way.
-[ "$RESUME" = 1 ] || RUN_ID=$(openssl rand -hex 3)
+[ "$GIVEN_ID" = 1 ] || RUN_ID=$(openssl rand -hex 3)
 RUN_DATE=$(date -u +%Y%m%d)
 export RUN_ID RUN_DATE
 
@@ -84,4 +88,5 @@ docker run -it --rm \
   -e AGENT="$AGENT" \
   -e ENABLED_PLUGINS="$ENABLED_PLUGINS" \
   ${DOCKER_ARGS[@]+"${DOCKER_ARGS[@]}"} \
+  --name "sandbox-$RUN_ID" \
   "$IMAGE"

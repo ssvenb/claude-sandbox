@@ -171,6 +171,7 @@ def vscode():
                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     start_new_session=True)  # a group of its own, to stop its children with it
             except FileNotFoundError:
+                os.rmdir(os.path.dirname(path))
                 raise ValueError("VS Code's `code` command is not installed on this machine") from None
             vscode_server = (proc, path)
         proc, path = vscode_server

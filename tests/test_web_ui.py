@@ -206,3 +206,38 @@ def test_stopping_from_the_session_tab_closes_it_and_the_rest_of_its_tabs(board)
     closes(session, board)
     closes(its_pr, board)  # the dashboard heard it on the `sandbox-tabs` channel
     board.wait_for_selector("button[aria-label='Remove session']")
+
+
+def test_ctrl_c_copies_a_selection_and_interrupts_without_one(board):
+    board.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    term = opens_tab(board, lambda: board.click("button[aria-label='Terminal']"))
+    term.click(".xterm")
+    term.keyboard.type("echo copy-me-$((40+2))\n")
+    term.wait_for_selector("text=copy-me-42")
+    term.evaluate("term.selectAll()")
+    term.keyboard.press("Control+c")
+    assert "copy-me-42" in term.evaluate("navigator.clipboard.readText()")
+    term.evaluate("navigator.clipboard.writeText('')")
+    term.keyboard.press("Control+Shift+c")  # nothing selected any more: copies nothing
+    term.keyboard.type("sleep 30\n")
+    term.wait_for_timeout(1000)  # the sleep is running, not the shell reading its line
+    term.keyboard.press("Control+c")  # nothing selected: an interrupt, as ever
+    term.keyboard.type("echo back-$((1+1))\n")
+    term.wait_for_selector("text=back-2", timeout=5000)  # the sleep was interrupted
+    assert term.evaluate("navigator.clipboard.readText()") == ""
+
+
+def test_shift_drag_selects_while_the_program_has_the_mouse(board):
+    term = opens_tab(board, lambda: board.click("button[aria-label='Terminal']"))
+    term.click(".xterm")
+    term.keyboard.type("printf '\\033[?1000h'; echo mouse-taken\n")  # what a TUI does
+    term.wait_for_selector("text=mouse-taken")
+    box = term.locator(".xterm-screen").bounding_box()
+    drag = lambda: (term.mouse.move(box["x"] + 5, box["y"] + 5), term.mouse.down(),  # noqa: E731
+                    term.mouse.move(box["x"] + 200, box["y"] + 40), term.mouse.up())
+    drag()
+    assert not term.evaluate("term.hasSelection()")  # the drag went to the program
+    term.keyboard.down("Shift")
+    drag()
+    term.keyboard.up("Shift")
+    assert term.evaluate("term.hasSelection()")

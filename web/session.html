@@ -81,6 +81,32 @@ async function flush() {
 }
 term.onData(d => { pending += d; flush(); });
 
+// Copy as in other terminals on the web: Ctrl+C copies when there is a selection (and interrupts
+// as usual without one), Ctrl+Shift+C always copies. When the program takes the mouse (an agent's
+// TUI does), Shift+drag still selects.
+async function copy(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {  // no Clipboard API off localhost over plain http: the old way, through a textarea
+    const area = h('textarea', {value: text});
+    document.body.append(area);
+    area.select();
+    document.execCommand('copy');
+    area.remove();
+    term.focus();
+  }
+}
+term.attachCustomKeyEventHandler(e => {
+  const c = (e.ctrlKey || e.metaKey) && !e.altKey && e.code === 'KeyC';
+  if (e.type !== 'keydown' || !c || !(e.shiftKey || term.hasSelection())) return true;
+  e.preventDefault();
+  if (term.hasSelection()) {  // copied, then let go: the next Ctrl+C is an interrupt again
+    copy(term.getSelection());
+    term.clearSelection();
+  }
+  return false;  // not to the program
+});
+
 function resize() {
   fit.fit();
   fetch(`/api/sessions/${id}/resize?cols=${term.cols}&rows=${term.rows}`, {method: 'POST'});

@@ -56,6 +56,10 @@ not been reloaded). It works the other way round as well: closing a session's ta
 and removes its container, once no tab of it has come back for 10 seconds — so a reload keeps it.
 A project's terminal is kept instead: its button attaches to it again.
 
+In a terminal tab, **Ctrl+C** copies the selection (and interrupts as usual when nothing is
+selected), **Ctrl+Shift+C** always copies; where the program has taken the mouse, as the agent's
+interface does, select with **Shift+drag**.
+
 **Code** on a session opens VS Code in the browser on that run's checkout (the `agent-workspace`
 mirror of `/workspace`), again one tab per run. It needs VS Code on the host (`code` on the PATH:
 the .deb/.rpm or snap install, or the standalone CLI): the first click starts one `code serve-web`,

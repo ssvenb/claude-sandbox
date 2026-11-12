@@ -33,12 +33,14 @@ printf '%s\n' ~/code/my-repo ~/code/other-repo > ~/.config/claude-sandbox/projec
 ./web/server.py           # http://127.0.0.1:8787  (--port N, --projects FILE)
 ```
 
-The home page is a status board of all your sandboxes: every listed project with its sessions, a
-**New session** button (`run.sh` in that directory) and a plain host **Shell** in the project. For
-a project whose `origin` is on GitHub it lists the open pull requests and issues through the host's
-`gh` login, each a link to its GitHub page; a PR on a per-run branch (`<prefix>/<date>-<RUN_ID>`)
-gets a **Resume** button, which is `run.sh --resume <RUN_ID>`; an ended session in the list has one
-too.
+The home page is a dashboard of all your sandboxes: totals across them, then every listed project
+with its sessions, a **+** button for a new session (`run.sh` in that directory) and a terminal
+button (**>_**) for a shell on this machine in the project — one per project, its tab brought to
+the front when it is already open. For a project whose
+`origin` is on GitHub it lists the open pull requests, with their CI status, and issues through the
+host's `gh` login, each a link to its GitHub page (one tab per item, brought to the front when it
+is already open); a PR on a per-run branch (`<prefix>/<date>-<RUN_ID>`) gets a **Resume** button,
+which is `run.sh --resume <RUN_ID>`; an ended session in the list has one too.
 
 What a project shows beyond its sessions comes from its enabled plugins, not from the web UI: the
 page draws what `run.sh --web` prints for the project, which is what each enabled plugin's `web.sh`
@@ -48,12 +50,17 @@ project and its part of the page goes with it.
 
 A session opens in a browser tab of its own — the agent's own TUI, so its slash commands and
 suggestions work as they do in your terminal. Clicking a session whose tab is already open brings
-that tab to the front instead of opening a second one.
+that tab to the front instead of opening a second one. Stopping a session closes its tabs too: its
+terminal, VS Code and its pull request (the last two only while the dashboard that opened them has
+not been reloaded).
 
 **Code** on a session opens VS Code in the browser on that run's checkout (the `agent-workspace`
-mirror of `/workspace`), again one tab per run. It needs VS Code's `code` command on the host: the first click starts one
-`code serve-web`, accepting the VS Code Server license terms on your behalf, and it stops with the
-web UI. It listens on a unix socket only your user can reach and is served under `/vscode/` of the
+mirror of `/workspace`), again one tab per run. It needs VS Code on the host (`code` on the PATH:
+the .deb/.rpm or snap install, or the standalone CLI): the first click starts one `code serve-web`,
+accepting the VS Code Server license terms on your behalf, and it stops with the web UI. Its data
+(extensions, settings) lives in `~/.local/share/claude-sandbox/vscode`, with Copilot's chat
+switched off (`chat.disableAIFeatures`) — the agent works in the sandbox. The first folder a
+browser opens may still show the empty chat pane; close it once and VS Code keeps it closed. It listens on a unix socket only your user can reach and is served under `/vscode/` of the
 web UI itself, so there is no second port to open or to forward over an SSH tunnel.
 
 Resuming brings back the agent's conversation as well as the branch: each run's conversation is
@@ -326,7 +333,7 @@ calls describe.
 
 | Call | Puts on the project's band |
 |------|----------------------------|
-| `web_list TITLE JSON_ARRAY` | a column of links; each item is `{title, url}` plus optional `ref` (a short id shown first, `#12`), `note` (`Draft`) and any field a later plugin may read |
+| `web_list TITLE JSON_ARRAY` | a column of links; each item is `{title, url}` plus optional `ref` (a short id shown first, `#12`), `note` (`Draft`), `status` (`ok`, `fail` or `pending`: a mark before it, e.g. CI) with its `status_text`, and any field a later plugin may read |
 | `web_note TEXT` | one line saying why there is nothing to list |
 | `web_map_items JQ_FILTER` | rewrites every item listed so far (by plugins of a lower `priority`); an item given a `run_id` gets an **Open** or **Resume** button for that run |
 | `web_checkout GLOB` | where a run's `/workspace` is on this machine, `{run_id}` standing for the run; adds **Code** (VS Code) to its session |

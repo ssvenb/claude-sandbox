@@ -101,7 +101,7 @@ Disable them all and the agent starts plain in an empty `/workspace` with no Git
 |------|---------|---------|
 | `plugin.json` | — | manifest: `priority`, `defaultEnabled`, `requiredAgent`, `provides`, `requires`, `conflicts`, `requiredEnv`, `secrets` |
 | `install.sh` | root, at image build | install the plugin's dependencies (e.g. `gh`); runs only when the plugin is enabled |
-| `web.sh` | you, on the host | what the web UI shows for a project, sourced by `run.sh --web` (plugins resolved as for a run, nothing validated or started): `web_list TITLE JSON_ARRAY` adds a column of `{title, url, ref?, note?, …}` links, `web_note TEXT` a line saying why there is none, `web_map_items JQ_FILTER` rewrites the items listed by lower-priority plugins (an item given a `run_id` gets Open/Resume), `web_checkout GLOB` says where a run's `/workspace` is on the host (`{run_id}` for the run) |
+| `web.sh` | you, on the host | what the web UI shows for a project, sourced by `run.sh --web` (plugins resolved as for a run, nothing validated or started): `web_list TITLE JSON_ARRAY` adds a column of `{title, url, ref?, note?, status?, status_text?, …}` links (`status`: `ok`/`fail`/`pending`, e.g. a PR's CI), `web_note TEXT` a line saying why there is none, `web_map_items JQ_FILTER` rewrites the items listed by lower-priority plugins (an item given a `run_id` gets Open/Resume), `web_checkout GLOB` says where a run's `/workspace` is on the host (`{run_id}` for the run) |
 | `host.sh` | you, on the host | validate config; `register_credential NAME INTERVAL FUNCTION` for a short-lived credential minted on the host (see below); call `pass_env VAR` / `pass_value NAME VALUE` / `pass_mount HOST_PATH CONTAINER_PATH [OPTS]` / `pass_arg FLAG...` to add `docker run` args, `pass_build_arg NAME VALUE` for a `docker build` arg (never a secret — it lands in the image history); read per-project settings with `plugin_config FILTER [DEFAULT]` / `plugin_config_json FILTER [DEFAULT]` / `project_env NAME [DEFAULT]`; set `AGENT_AUTH_PROVIDED=1` if the plugin supplies the agent's credentials itself |
 | `root-init.sh` | root, in container | anything needing a secret that must enter the container as is (`secrets`); exports survive the `setpriv` handoff to `node` |
 | `agent-init.sh` | `node`, in container | agent-visible setup; append to `$AGENT_PROMPT_FILE` to brief the agent |
@@ -185,7 +185,10 @@ directory or glob per line, `~/code/*/.git` for just the git repos; `--projects 
 `agent-workspace` says where a run's checkout is) — the server and the page know none of that
 themselves, so a new plugin shows up on the page by adding a `web.sh`, not by editing `web/`. A session's
 terminal is `web/session.html` (xterm.js) in a browser tab named after the session, so a second
-click focuses it. `POST /api/vscode` starts one `code serve-web` on first use, on a unix socket in
+click focuses it; a project's terminal (a host `$SHELL` in its directory) is a session too
+(`kind: shell`), one live one per project, an ended one kept until the next replaces it. Stopping a
+session closes its tabs: terminal pages close themselves when told on the `sandbox-tabs`
+BroadcastChannel, the rest (VS Code, the run's PR) through the dashboard's handles. `POST /api/vscode` starts one `code serve-web` on first use, on a unix socket in
 a 0700 directory; the server tunnels `/vscode/` to it behind the same Host/Origin guard, and the
 page opens it there on a session's checkout (`web_checkout`). It stops a session by removing the container `run.sh` names
 `sandbox-<RUN_ID>`.
@@ -193,12 +196,14 @@ page opens it there on a session's checkout (`web_checkout`). It stops a session
 ## Tests
 
 ```bash
-pip install pytest && python -m pytest tests     # host side, Python helpers, container stages
+pip install pytest playwright && python -m playwright install chromium && python -m pytest tests  # host side, helpers, stages, web UI
 docker build -t claude-agent:claude . && \
   SANDBOX_E2E_IMAGE=claude-agent:claude SANDBOX_E2E_AGENT=claude python -m pytest tests/e2e
 ```
 
-`tests/conftest.py` sources run.sh's libraries and plugin stages into isolated shells and reads
+`tests/test_web_ui.py` drives the web UI's pages in Chromium through Playwright (skipped without it:
+`pip install playwright && python -m playwright install --with-deps chromium`), against a copy of
+`web/` next to a stub `run.sh`. `tests/conftest.py` sources run.sh's libraries and plugin stages into isolated shells and reads
 back the `docker run` args they contribute; `tests/test_run.py` runs run.sh itself against a stub
 `docker`. `tests/e2e` (skipped unless `SANDBOX_E2E_IMAGE` is set) boots the real image, built with
 every plugin installed, behind a stand-in agent. `.github/workflows/tests.yml` runs both on every

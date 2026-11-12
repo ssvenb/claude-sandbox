@@ -540,8 +540,11 @@ def test_upstream_proxy_on_docker_desktop_forwards_per_container(proxy_sb):
 # --- web stages: what plugins put on the web UI's status page ------------------------------
 
 GH_STUB = """case $1 in
-  pr) echo '[{"number": 3, "title": "t", "url": "u3", "headRefName": "claude-code/20261112-09fc4c", "isDraft": true},
-             {"number": 4, "title": "by hand", "url": "u4", "headRefName": "feature/login", "isDraft": false}]' ;;
+  pr) echo '[{"number": 3, "title": "t", "url": "u3", "headRefName": "claude-code/20261112-09fc4c", "isDraft": true,
+              "statusCheckRollup": [{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SUCCESS"},
+                                    {"__typename": "CheckRun", "status": "IN_PROGRESS", "conclusion": ""}]},
+             {"number": 4, "title": "by hand", "url": "u4", "headRefName": "feature/login", "isDraft": false,
+              "statusCheckRollup": []}]' ;;
   issue) echo '[{"number": 7, "title": "i", "url": "u7"}]' ;;
 esac
 """
@@ -567,7 +570,7 @@ def test_github_lists_pull_requests_and_issues_and_git_workspace_ties_them_to_ru
     prs, issues = described("github-auth git-workspace")["lists"]
     assert prs == {"title": "Pull requests", "items": [
         {"ref": "#3", "title": "t", "url": "u3", "branch": "claude-code/20261112-09fc4c",
-         "note": "Draft", "run_id": "09fc4c"},
+         "note": "Draft", "status": "pending", "status_text": "CI: 1 of 2 checks running", "run_id": "09fc4c"},
         {"ref": "#4", "title": "by hand", "url": "u4", "branch": "feature/login"}]}
     assert issues == {"title": "Issues", "items": [{"ref": "#7", "title": "i", "url": "u7"}]}
     # Without git-workspace nobody claims the branch, so the page offers no resume.
@@ -586,3 +589,22 @@ def test_agent_workspace_tells_the_page_where_a_runs_checkout_is(sb, described):
     assert described("agent-workspace")["checkout"] == f"{sb.home}/.agent-workspaces/*-{{run_id}}"
     sb.dotenv("AGENT_WORKSPACE_DIR=/srv/mirrors\n")  # the project's own setting, as for a run
     assert described("agent-workspace")["checkout"] == "/srv/mirrors/*-{run_id}"
+
+
+@pytest.mark.parametrize("rollup, status", [
+    ([], None),
+    ([{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SUCCESS"},
+      {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SKIPPED"},
+      {"__typename": "StatusContext", "state": "SUCCESS"}], ("ok", "CI: 3 checks passed")),
+    ([{"__typename": "CheckRun", "status": "QUEUED", "conclusion": ""},
+      {"__typename": "StatusContext", "state": "FAILURE"}], ("fail", "CI: 1 of 2 checks failed")),
+    ([{"__typename": "StatusContext", "state": "PENDING"},
+      {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "NEUTRAL"}], ("pending", "CI: 1 of 2 checks running")),
+])
+def test_a_pull_requests_ci_status(sb, described, rollup, status):
+    subprocess.run(["git", "init", "-q", sb.cwd], check=True)
+    subprocess.run(["git", "-C", sb.cwd, "remote", "add", "origin", "https://github.com/o/r"], check=True)
+    pr = {"number": 1, "title": "t", "url": "u", "headRefName": "b", "isDraft": False, "statusCheckRollup": rollup}
+    sb.stub("gh", f"[ $1 = pr ] && echo '{json.dumps([pr])}' || echo '[]'\n")
+    [item] = described("github-auth")["lists"][0]["items"]
+    assert (item.get("status"), item.get("status_text")) == (status or (None, None))

@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sandboxes</title>
+<title>Session</title>
+<link id="icon" rel="icon">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&display=swap">
@@ -54,9 +55,13 @@ const api = async (path, opts) => {
 };
 const post = (path, body) => api(path, {method: 'POST', body});
 const name = path => path.replace(/\/+$/, '').split('/').pop();
-const label = s => s.kind === 'shell' ? 'shell' : s.run_id + (s.kind === 'resume' ? ' (resumed)' : '');
+const label = s => s.kind === 'shell' ? 'terminal' : s.run_id + (s.kind === 'resume' ? ' (resumed)' : '');
 
 const id = location.hash.slice(1);
+// The tab's icon says what it is: the project's terminal, or the agent's lamp, lit while it runs.
+const icons = {shell: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231b1d36'/%3E%3Cpath d='M8 10l6 6-6 6' fill='none' stroke='%23f2b84b' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M17 23h7' stroke='%23e6e4f2' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E",
+               lit: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231b1d36'/%3E%3Ccircle cx='16' cy='16' r='8' fill='%23f2b84b'/%3E%3C/svg%3E",
+               unlit: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231b1d36'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%238c8fb3' stroke-width='3'/%3E%3C/svg%3E"};
 const term = new Terminal({fontSize: 13, cursorBlink: true, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
   theme: {background: '#0f1123', foreground: '#e6e4f2', cursor: '#f2b84b', selectionBackground: '#9aa5ff55'}});
 const fit = new FitAddon.FitAddon();
@@ -89,23 +94,37 @@ es.onmessage = e => term.write(Uint8Array.from(atob(e.data), c => c.charCodeAt(0
 es.addEventListener('exit', () => { es.close(); refresh(); });
 term.focus();
 
+// Closing a session closes every tab of it: this one, and (told on `tabs`) the dashboard's
+// handles on the rest.
+const tabs = new BroadcastChannel('sandbox-tabs');
+tabs.onmessage = e => {
+  if (e.data.id === id) window.close();
+};
+
 async function end(s) {
-  if (s.exit === null && !confirm(`Stop ${label(s)} in ${name(s.project)}?`)) return;
+  const what = s.kind === 'shell' ? 'Close this terminal?' : `Stop ${label(s)} in ${name(s.project)}? Its tabs close too.`;
+  if (s.exit === null && !confirm(what)) return;
   await post(`/api/sessions/${s.id}/close`);
-  if (s.exit !== null) window.close();  // removed: nothing left to show in this tab
-  refresh();
+  tabs.postMessage(s);
+  window.close();
+  refresh();  // still here: this tab was not opened by the status page, so it may not close itself
 }
 
 async function refresh() {
   const s = (await api('/api/state')).sessions.find(s => s.id === id);
   $('empty').hidden = !!s;
-  if (!s) { es.close(); return $('bar').replaceChildren(h('span', {className: 'what'}, 'No session')); }
+  if (!s) {  // removed: nothing left to show
+    es.close();
+    window.close();
+    return $('bar').replaceChildren(h('span', {className: 'what'}, 'No session'));
+  }
   document.title = `${name(s.project)} ${label(s)}`;
+  $('icon').href = icons[s.kind === 'shell' ? 'shell' : s.exit === null ? 'lit' : 'unlit'];
   $('bar').replaceChildren(
     h('strong', {}, name(s.project)),
     h('span', {className: 'what' + (s.exit === null ? ' lit' : '')},
       label(s) + (s.exit === null ? ', running' : `, exited ${s.exit}`)),
-    h('button', {onclick: () => end(s)}, s.exit === null ? 'Stop session' : 'Remove'));
+    h('button', {onclick: () => end(s)}, s.kind === 'shell' ? 'Close terminal' : s.exit === null ? 'Stop session' : 'Remove'));
 }
 refresh();
 setInterval(refresh, 3000);

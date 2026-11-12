@@ -4,11 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Dashboard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231b1d36'/%3E%3Crect x='6' y='6' width='9' height='9' rx='2' fill='%23f2b84b'/%3E%3Crect x='17' y='6' width='9' height='9' rx='2' fill='%233a3e6e'/%3E%3Crect x='6' y='17' width='9' height='9' rx='2' fill='%233a3e6e'/%3E%3Crect x='17' y='17' width='9' height='9' rx='2' fill='%23f2b84b'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&display=swap">
 <style>
   :root { --dusk: #1b1d36; --night: #0f1123; --rule: #2e3158; --paper: #e6e4f2; --haze: #8c8fb3;
-          --lamp: #f2b84b; --link: #9aa5ff; color-scheme: dark; }
+          --lamp: #f2b84b; --link: #9aa5ff; --ok: #6fd3a2; --fail: #ff7b8a; color-scheme: dark; }
   * { box-sizing: border-box; }
   button { font: inherit; font-size: 14px; color: var(--paper); background: transparent;
            border: 1px solid var(--rule); border-radius: 999px; padding: 3px 12px; cursor: pointer; }
@@ -50,6 +51,9 @@
 
   button.primary { color: var(--night); background: var(--lamp); border-color: var(--lamp); font-weight: 600; }
   button.primary:hover { filter: brightness(1.1); }
+  /* Round icon buttons on a project's row: + starts a session, >_ opens its terminal. */
+  button.glyph { width: 34px; height: 34px; padding: 0; display: inline-grid; place-items: center; }
+  button.glyph svg { width: 18px; height: 18px; }
   button.icon { border-color: transparent; color: var(--haze); padding: 3px 8px; }
   button.icon:hover { color: var(--paper); }
   /* A session is a window in the dark: lit while its agent is at work. */
@@ -65,6 +69,11 @@
   a:hover { color: var(--link); }
   a .num { color: var(--link); font-variant-numeric: tabular-nums; margin-right: 8px; }
   a .draft { color: var(--haze); }
+  /* An item's status (a pull request's CI): a mark ahead of its number, the details on hover. */
+  .status { display: inline-block; width: 14px; margin-right: 6px; text-align: center; font-weight: 700; }
+  .status.ok { color: var(--ok); }
+  .status.fail { color: var(--fail); }
+  .status.pending { color: var(--lamp); }
 
   @media (max-width: 900px) {
     body { padding: 24px 16px 48px; }
@@ -94,18 +103,45 @@ const api = async (path, opts) => {
 };
 const post = (path, body) => api(path, {method: 'POST', body});
 const name = path => path.replace(/\/+$/, '').split('/').pop();
-const label = s => s.kind === 'shell' ? 'shell' : s.run_id + (s.kind === 'resume' ? ' (resumed)' : '');
+const label = s => s.kind === 'shell' ? 'terminal' : s.run_id + (s.kind === 'resume' ? ' (resumed)' : '');
 
 let state = {projects: [], sessions: []}, plugins = {}, drawn = '';
+
+// The tabs this page opened, by name, so closing a session can close them too. Terminal tabs also
+// close themselves when told on `tabs` (they keep doing so after this page reloads); a VS Code tab
+// is not ours to script, so only this page's handle on it closes it.
+// shortcut: a VS Code tab opened before this page last reloaded stays open; keep the names in
+// sessionStorage and look them up with window.open if that matters.
+const opened = {}, tabs = new BroadcastChannel('sandbox-tabs');
+// A session's tabs: its terminal, VS Code on its checkout, and any item (its pull request) a
+// plugin tied to its run.
+const tabNames = s => ['session-' + s.id, 'code-' + s.workspace,
+  ...Object.values(plugins).flatMap(said => said.lists.flatMap(list => list.items))
+    .filter(i => s.run_id && i.run_id === s.run_id).map(i => 'item-' + i.url)];
+const closeTabs = s => tabNames(s).forEach(n => opened[n]?.close());
+tabs.onmessage = e => closeTabs(e.data);
 
 // A tab per thing, found again by its name: opened once, brought to the front after that. Always
 // called inside the click, before any await, or the popup blocker eats the new tab.
 function tab(tabName) {
   const w = window.open('', tabName);
   w?.focus();
+  if (w) opened[tabName] = w;
   return w;
 }
-const fresh = w => w.location.href === 'about:blank';  // still empty, so ours to fill
+// Still empty, so ours to fill. Reading another site's tab (GitHub) throws: it is long filled.
+const fresh = w => { try { return w.location.href === 'about:blank'; } catch { return false; } };
+
+// One tab per listed item (a pull request, an issue). A plain click only: ctrl/middle-click still
+// open a tab of their own, as on any link.
+function item(e, i) {
+  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  e.preventDefault();
+  const w = tab('item-' + i.url);
+  // The tab keeps its opener (this page): cut off, Chromium moves it out of reach of both the
+  // lookup by name and close(). GitHub could navigate this tab through it; it is your own login.
+  if (w && fresh(w)) w.location.replace(i.url);
+}
 
 function show(s) {
   const w = tab('session-' + s.id);
@@ -116,10 +152,31 @@ async function start(project, kind, run_id) {
   const w = window.open('about:blank');  // its name is the session's id, which the server picks
   try {
     const s = await post('/api/sessions', JSON.stringify({project, kind, run_id}));
-    if (w) { w.name = 'session-' + s.id; w.location.replace('/session#' + s.id); }
+    if (w) { w.name = 'session-' + s.id; opened[w.name] = w; w.location.replace('/session#' + s.id); }
     refresh();
   } catch (e) { w?.close(); alert(e.message); }
 }
+
+// One terminal per project, a shell on this machine in its directory: brought to the front when
+// its tab is open, and the server hands back the live one when the tab was closed.
+async function terminal(project) {
+  const w = tab('terminal-' + project);
+  if (!w || !fresh(w)) return;
+  try {
+    const t = await post('/api/sessions', JSON.stringify({project, kind: 'shell'}));
+    w.location.replace('/session#' + t.id);
+  } catch (e) { w.close(); alert(e.message); }
+}
+
+// Icon buttons' glyphs: drawn, so they keep the button's colour.
+const svg = (d, extra = '') => {
+  const e = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  e.setAttribute('viewBox', '0 0 20 20');
+  e.setAttribute('aria-hidden', 'true');
+  e.innerHTML = `<path d="${d}" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>${extra}`;
+  return e;
+};
+const PLUS = 'M10 4v12M4 10h12', PROMPT = 'M4 6l4 4-4 4M10 15h6';
 
 async function code(s) {
   const w = tab('code-' + s.workspace);
@@ -130,9 +187,11 @@ async function code(s) {
   } catch (e) { w.close(); alert(e.message); }
 }
 
-async function close(s) {
-  if (s.exit === null && !confirm(`Stop ${label(s)} in ${name(s.project)}?`)) return;
+async function end(s) {
+  if (s.exit === null && !confirm(`Stop ${label(s)} in ${name(s.project)}? Its tabs close too.`)) return;
   await post(`/api/sessions/${s.id}/close`);
+  closeTabs(s);
+  tabs.postMessage(s);
   refresh();
 }
 
@@ -147,8 +206,9 @@ function render() {
   if (sig === drawn) return;
   drawn = sig;
   const live = id => state.sessions.find(s => s.run_id === id && s.exit === null);
-  const running = state.sessions.some(s => s.exit === null);
-  const totals = new Map([['Sessions', state.sessions.length]]);
+  const agents = state.sessions.filter(s => s.kind !== 'shell');  // terminals are not sessions
+  const running = agents.some(s => s.exit === null);
+  const totals = new Map([['Sessions', agents.length]]);
   for (const said of Object.values(plugins))
     for (const list of said.lists) totals.set(list.title, (totals.get(list.title) || 0) + list.items.length);
 
@@ -157,13 +217,15 @@ function render() {
     h('div', {className: 'totals'}, ...[...totals].map(([title, n]) => h('div', {className: 'total'},
       h('b', {className: title === 'Sessions' && running ? 'lit' : ''}, String(n)), h('span', {}, title)))),
     ...state.projects.map(path => {
-      const mine = state.sessions.filter(s => s.project === path), said = plugins[path];
+      const mine = agents.filter(s => s.project === path), said = plugins[path];
       return h('section', {},
         h('div', {className: 'head'},
           h('h2', {title: path}, name(path)),
           h('div', {className: 'actions'},
-            h('button', {className: 'primary', onclick: () => start(path, 'run')}, 'New session'),
-            h('button', {onclick: () => start(path, 'shell'), title: 'A shell on this machine, in the project directory'}, 'Open shell'))),
+            h('button', {className: 'glyph', onclick: () => terminal(path), title: 'Terminal on this machine, in the project',
+                         ariaLabel: 'Terminal'}, svg(PROMPT)),
+            h('button', {className: 'glyph primary', onclick: () => start(path, 'run'), title: 'New session',
+                         ariaLabel: 'New session'}, svg(PLUS)))),
         h('div', {className: 'notes'},
           ...(said ? said.notes.map(note => h('p', {}, note)) : [h('p', {}, 'Reading the project…')])),
         h('div', {className: 'columns'},
@@ -173,14 +235,17 @@ function render() {
             label(s) + (s.exit === null ? '' : `, exited ${s.exit}`)),
           s.workspace ? h('button', {onclick: () => code(s), title: `VS Code on this run's checkout, ${s.workspace}`}, 'Code') : '',
           s.exit !== null && s.run_id && !live(s.run_id) ? resume(path, s.run_id) : '',
-          h('button', {className: 'icon', onclick: () => close(s), ariaLabel: s.exit === null ? 'Stop session' : 'Remove session'}, '✕')),
+          h('button', {className: 'icon', onclick: () => end(s), ariaLabel: s.exit === null ? 'Stop session' : 'Remove session'}, '✕')),
           'Nobody at work.', mine.some(s => s.exit === null)),
         // What the project's plugins list (pull requests, issues, …): the page only draws it. An
         // item a plugin tied to a run opens that run's session, or resumes it.
         ...(said ? said.lists : []).map(list => column(list.title, list.items, i => {
           const s = i.run_id && live(i.run_id);
           return h('li', {},
-            h('a', {href: i.url, target: '_blank', rel: 'noopener', title: i.title + (i.branch ? ` (${i.branch})` : '')},
+            h('a', {href: i.url, target: '_blank', rel: 'noopener', onclick: e => item(e, i),
+                    title: [i.title + (i.branch ? ` (${i.branch})` : ''), i.status_text].filter(Boolean).join('\n')},
+              i.status ? h('span', {className: 'status ' + i.status, ariaLabel: i.status_text || i.status},
+                {ok: '✓', fail: '✕', pending: '●'}[i.status] || '') : '',
               i.ref ? h('span', {className: 'num'}, i.ref) : '',
               i.note ? h('span', {className: 'draft'}, i.note + ': ') : '', i.title),
             s ? h('button', {onclick: () => show(s)}, 'Open')

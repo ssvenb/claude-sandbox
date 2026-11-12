@@ -74,7 +74,7 @@ def projects(file):
 
 
 def command(kind, run_id):
-    if kind == "shell":
+    if kind == "shell":  # the project's terminal: your own shell, on this machine, in the project
         return [os.environ.get("SHELL", "/bin/sh")]
     return [str(RUN_SH), "--resume" if kind == "resume" else "--run-id", run_id]
 
@@ -128,12 +128,13 @@ class Session:
             os.killpg(self.pid, signal.SIGHUP)  # pty.fork made the child a session leader
         except ProcessLookupError:
             pass
-        if self.kind != "shell":
-            # The docker client forwards SIGHUP rather than dying of it, and what the container
-            # does with it is the agent's business — so remove the container by the name run.sh
-            # gave it. Before `docker run` there is none yet, and this is a no-op.
-            subprocess.Popen(["docker", "rm", "-f", f"sandbox-{self.run_id}"],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if self.kind == "shell":
+            return
+        # The docker client forwards SIGHUP rather than dying of it, and what the container does
+        # with it is the agent's business — so remove the container by the name run.sh gave it.
+        # Before `docker run` there is none yet, and this is a no-op.
+        subprocess.Popen(["docker", "rm", "-f", f"sandbox-{self.run_id}"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def json(self):
         return {**{k: getattr(self, k) for k in ("id", "project", "kind", "run_id", "started", "exit")},
@@ -181,6 +182,28 @@ def vscode_cli():
     return code  # the standalone CLI (code.visualstudio.com/#alt-downloads) is `code` itself
 
 
+# Machine settings every VS Code tab gets. Copilot's chat pane has no place here: the agent works
+# in the sandbox, VS Code is for reading and editing what it did.
+VSCODE_SETTINGS = {"chat.disableAIFeatures": True}
+
+
+def vscode_data():
+    """VS Code's data directory (extensions, machine settings), with VSCODE_SETTINGS applied over
+    what is already there: settings changed in VS Code itself, under "Remote", are kept."""
+    data = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "claude-sandbox/vscode"
+    file = data / "data/Machine/settings.json"
+    file.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        settings = json.loads(file.read_text())
+    except FileNotFoundError:
+        settings = {}
+    except ValueError:  # edited in VS Code, with comments: not ours to rewrite
+        return data
+    if settings | VSCODE_SETTINGS != settings:
+        file.write_text(json.dumps(settings | VSCODE_SETTINGS, indent=2) + "\n")
+    return data
+
+
 def vscode():
     """The socket of the one `code serve-web` every editor tab talks to, started on first use.
     It serves any folder (`?folder=`), so one is enough for all projects and runs."""
@@ -190,7 +213,7 @@ def vscode():
             if vscode_server:  # it died: its socket and log go with it
                 shutil.rmtree(os.path.dirname(vscode_server[1]), ignore_errors=True)
                 vscode_server = None
-            cli = vscode_cli()
+            cli, data = vscode_cli(), vscode_data()
             # VS Code in a browser is a shell on your account. A socket in a 0700 directory keeps
             # other local users out, and the only way in for a browser is Handler.tunnel, behind
             # the same guard as the terminals — so it needs no connection token of its own (one
@@ -201,7 +224,8 @@ def vscode():
             with open(run_dir + "/log", "wb") as log:
                 proc = subprocess.Popen(
                     [cli, "serve-web", "--socket-path", path, "--without-connection-token",
-                     "--server-base-path", "/vscode", "--accept-server-license-terms"],
+                     "--server-base-path", "/vscode", "--server-data-dir", str(data),
+                     "--accept-server-license-terms"],
                     stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                     start_new_session=True)  # a group of its own, to stop its children with it
             vscode_server = (proc, path)
@@ -217,6 +241,12 @@ def vscode():
         raise ValueError("`code serve-web` did not start listening")
 
 
+def drop(s):
+    """Forget an ended session. Caller holds `lock`."""
+    if sessions.pop(s.id, None):
+        os.close(s.fd)
+
+
 def start(project, kind, run_id):
     if kind == "run":
         run_id = secrets.token_hex(3)
@@ -225,10 +255,16 @@ def start(project, kind, run_id):
     elif kind != "resume" or not RUN_ID.fullmatch(run_id or ""):
         raise ValueError("kind must be run, shell, or resume with a 6-hex-char run_id")
     with lock:
-        for s in sessions.values():
-            # Two containers on one branch would push over each other: hand back the live one.
-            if run_id and s.exit is None and (s.project, s.run_id) == (project, run_id):
+        for s in list(sessions.values()):
+            if (s.project, s.run_id, s.kind == "shell") != (project, run_id, kind == "shell"):
+                continue
+            # Two containers on one branch would push over each other, and one terminal per
+            # project is enough: hand back the live one. An ended terminal stays (its tab shows
+            # why it ended) until the next one of its project replaces it.
+            if s.exit is None:
                 return s
+            if kind == "shell":
+                drop(s)
         s = Session(project, kind, run_id)
         sessions[s.id] = s
         return s
@@ -381,8 +417,7 @@ class Handler(BaseHTTPRequestHandler):
                     s.stop()
                 else:  # closing an ended session drops it from the list
                     with lock:
-                        sessions.pop(s.id, None)
-                    os.close(s.fd)
+                        drop(s)
                 self.reply(200, {})
             else:
                 self.reply(404, {"error": "not found"})

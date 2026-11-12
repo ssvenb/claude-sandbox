@@ -20,6 +20,22 @@ github_web_list() {
   rm -f "$err"
 }
 
-github_web_list "Pull requests" pr number,title,url,headRefName,isDraft \
-  '{ref: "#\(.number)", title, url, branch: .headRefName} + (if .isDraft then {note: "Draft"} else {} end)'
+# A pull request's CI, from its checks (CheckRun: status + conclusion) and commit statuses
+# (StatusContext: state): failing if any failed, else running if any is unfinished, else passing.
+# Nothing when it has no checks at all.
+# shellcheck disable=SC2016  # jq, not shell
+github_ci='def ci:
+  [(.statusCheckRollup // [])[] | if .__typename == "StatusContext" then .state
+     elif .status != "COMPLETED" then "PENDING" else .conclusion end] as $s
+  | ($s | length) as $n
+  | ([$s[] | select(IN("FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"))] | length) as $failed
+  | ([$s[] | select(IN("PENDING", "EXPECTED"))] | length) as $running
+  | if $n == 0 then {}
+    elif $failed > 0 then {status: "fail", status_text: "CI: \($failed) of \($n) checks failed"}
+    elif $running > 0 then {status: "pending", status_text: "CI: \($running) of \($n) checks running"}
+    else {status: "ok", status_text: "CI: \($n) checks passed"} end;'
+
+github_web_list "Pull requests" pr number,title,url,headRefName,isDraft,statusCheckRollup \
+  "$github_ci"' {ref: "#\(.number)", title, url, branch: .headRefName}
+    + (if .isDraft then {note: "Draft"} else {} end) + ci'
 github_web_list "Issues" issue number,title,url '{ref: "#\(.number)", title, url}'

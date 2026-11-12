@@ -87,8 +87,9 @@ trap plugins_run_exit_hooks EXIT
 WEB_JSON='{"lists":[],"notes":[]}'
 
 # web_list <title> <json-array>: a column of links on the project's band. Each item is
-# {title, url} plus optional `ref` (a short id shown first, "#12"), `note` ("Draft") and anything
-# a later plugin may want to read, such as the `branch` of a pull request.
+# {title, url} plus optional `ref` (a short id shown first, "#12"), `note` ("Draft"), `status`
+# ("ok", "fail" or "pending", e.g. a pull request's CI) with its `status_text`, and anything a
+# later plugin may want to read, such as the `branch` of a pull request.
 web_list() {
   WEB_JSON=$(jq -c --arg title "$1" --argjson items "$2" \
     '.lists += [{title: $title, items: $items}]' <<<"$WEB_JSON")

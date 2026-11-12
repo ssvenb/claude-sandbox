@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -39,9 +40,11 @@ def ui(tmp_path):
     proc.wait(5)
 
 
-def test_a_shell_session_runs_in_the_project_and_streams_its_output(ui):
+def test_a_projects_terminal_runs_there_streams_and_is_one_per_project(ui):
     assert json.load(ui("/api/state"))["projects"] == [ui.project]
-    s = json.load(ui("/api/sessions", json.dumps({"project": ui.project, "kind": "shell"}).encode()))
+    ask = {"project": ui.project, "kind": "shell"}
+    s = json.load(ui("/api/sessions", json.dumps(ask).encode()))
+    assert json.load(ui("/api/sessions", json.dumps(ask).encode()))["id"] == s["id"]  # one per project
     assert ui(f"/api/sessions/{s['id']}/resize?cols=100&rows=30", b"").status == 200
     ui(f"/api/sessions/{s['id']}/input", b"echo $(basename $PWD)-$((40+2)); exit 3\n")
     seen, events = b"", ui(f"/api/sessions/{s['id']}/stream")
@@ -51,9 +54,16 @@ def test_a_shell_session_runs_in_the_project_and_streams_its_output(ui):
         if line.startswith(b"event: exit"):
             break
     assert b"proj-42" in seen
-    [ended] = json.load(ui("/api/state"))["sessions"]
-    assert ended["exit"] == 3
-    ui(f"/api/sessions/{s['id']}/close", b"")
+    [ended] = json.load(ui("/api/state"))["sessions"]  # kept, so its tab can show how it ended
+    assert (ended["id"], ended["exit"]) == (s["id"], 3)
+    again = json.load(ui("/api/sessions", json.dumps(ask).encode()))  # the next one replaces it
+    assert [x["id"] for x in json.load(ui("/api/state"))["sessions"]] == [again["id"]] != [s["id"]]
+    ui(f"/api/sessions/{again['id']}/close", b"")  # stops it
+    for _ in range(50):
+        if json.load(ui("/api/state"))["sessions"][0]["exit"] is not None:
+            break
+        time.sleep(0.1)
+    ui(f"/api/sessions/{again['id']}/close", b"")  # and, ended, removes it
     assert json.load(ui("/api/state"))["sessions"] == []
 
 
@@ -104,7 +114,7 @@ def test_the_session_page_is_served_next_to_the_status_page(ui):
 FAKE_CODE = r"""#!/usr/bin/env python3
 import socket, sys
 args = sys.argv[1:]
-assert args[0] == "serve-web" and "--without-connection-token" in args
+assert args[0] == "serve-web" and "--without-connection-token" in args and "--server-data-dir" in args
 s = socket.socket(socket.AF_UNIX)
 s.bind(args[args.index("--socket-path") + 1])
 s.listen()
@@ -144,8 +154,6 @@ def test_vscode_opens_only_a_sessions_checkout_through_the_guarded_tunnel(ui):
     assert ui("/vscode/", Host="evil.example").status == 403
     assert ui("/vscodex").status == 404
 
-    shell = json.load(ui("/api/sessions", json.dumps({"project": ui.project, "kind": "shell"}).encode()))
-    assert shell["workspace"] is None and ask(shell["id"]).status == 400  # a shell has no checkout
     assert ask("nosuchid").status == 400
     assert ui("/api/vscode", json.dumps({"project": ui.project}).encode()).status == 400  # projects: no
 
@@ -200,6 +208,7 @@ def test_vscode_that_will_not_start_says_what_it_printed(tmp_path, monkeypatch):
     code.write_text("#!/bin/sh\necho starting\necho 'error: no such option --socket-path' >&2\nexit 2\n")
     code.chmod(0o755)
     monkeypatch.setenv("PATH", str(code.parent))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     monkeypatch.setattr(web, "vscode_server", None)
     with pytest.raises(ValueError, match=r"exited with 2: error: no such option --socket-path"):
         web.vscode()
@@ -208,3 +217,16 @@ def test_vscode_that_will_not_start_says_what_it_printed(tmp_path, monkeypatch):
         web.vscode()
     assert not os.path.exists(run_dir)
     shutil.rmtree(os.path.dirname(web.vscode_server[1]))
+
+
+def test_vscode_settings_are_applied_over_the_ones_already_there(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    file = tmp_path / "claude-sandbox/vscode/data/Machine/settings.json"
+    assert web.vscode_data() == tmp_path / "claude-sandbox/vscode"
+    assert json.loads(file.read_text()) == {"chat.disableAIFeatures": True}
+    file.write_text('{"editor.fontSize": 15, "chat.disableAIFeatures": false}')
+    web.vscode_data()
+    assert json.loads(file.read_text()) == {"editor.fontSize": 15, "chat.disableAIFeatures": True}
+    file.write_text('{\n  // mine\n  "editor.fontSize": 15\n}')
+    web.vscode_data()  # with comments it is left as it is
+    assert "// mine" in file.read_text()

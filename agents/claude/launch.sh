@@ -10,6 +10,8 @@
 # project directory and `--continue` would grab whichever run was last, not this one. The
 # transcript only outlives the container when ~/.claude is mounted (claude-home); without it a
 # resumed run starts a fresh conversation under the same id.
+#
+# $AGENT_TASK (run.sh --task) is the conversation's first message: the agent starts on it at once.
 session="5a4db0c0-0000-4000-8000-000000${RUN_ID:?}"
 if [ "${RESUME:-0}" = 1 ] && [ -f "$HOME/.claude/projects/-workspace/$session.jsonl" ]; then
   set -- --resume "$session"
@@ -18,4 +20,5 @@ else
 fi
 # shellcheck disable=SC2086
 ${AGENT_LAUNCH_CMD:-claude} --dangerously-skip-permissions "$@" \
-  --effort "${CLAUDE_EFFORT:-medium}" ${AGENT_PROMPT:+--append-system-prompt "$AGENT_PROMPT"}
+  --effort "${CLAUDE_EFFORT:-medium}" ${AGENT_PROMPT:+--append-system-prompt "$AGENT_PROMPT"} \
+  ${AGENT_TASK:+"$AGENT_TASK"}

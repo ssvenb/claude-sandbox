@@ -101,6 +101,7 @@ Disable them all and the agent starts plain in an empty `/workspace` with no Git
 |------|---------|---------|
 | `plugin.json` | — | manifest: `priority`, `defaultEnabled`, `requiredAgent`, `provides`, `requires`, `conflicts`, `requiredEnv`, `secrets` |
 | `install.sh` | root, at image build | install the plugin's dependencies (e.g. `gh`); runs only when the plugin is enabled |
+| `web.sh` | you, on the host | what the web UI shows for a project, sourced by `run.sh --web` (plugins resolved as for a run, nothing validated or started): `web_list TITLE JSON_ARRAY` adds a column of `{title, url, ref?, note?, status?, status_text?, start?, …}` links (`status`: `ok`/`fail`/`pending`, e.g. a PR's CI; `start`: `{label, task}`, a button starting a session on `task`, e.g. an issue's Resolve), `web_note TEXT` a line saying why there is none, `web_map_items JQ_FILTER` rewrites the items listed by lower-priority plugins (an item given a `run_id` gets Open/Resume), `web_checkout GLOB` says where a run's `/workspace` is on the host (`{run_id}` for the run) |
 | `host.sh` | you, on the host | validate config; `register_credential NAME INTERVAL FUNCTION` for a short-lived credential minted on the host (see below); call `pass_env VAR` / `pass_value NAME VALUE` / `pass_mount HOST_PATH CONTAINER_PATH [OPTS]` / `pass_arg FLAG...` to add `docker run` args, `pass_build_arg NAME VALUE` for a `docker build` arg (never a secret — it lands in the image history); read per-project settings with `plugin_config FILTER [DEFAULT]` / `plugin_config_json FILTER [DEFAULT]` / `project_env NAME [DEFAULT]`; set `AGENT_AUTH_PROVIDED=1` if the plugin supplies the agent's credentials itself |
 | `root-init.sh` | root, in container | anything needing a secret that must enter the container as is (`secrets`); exports survive the `setpriv` handoff to `node` |
 | `agent-init.sh` | `node`, in container | agent-visible setup; append to `$AGENT_PROMPT_FILE` to brief the agent |
@@ -172,24 +173,40 @@ go any further.
 ./run.sh --resume <6-hex-char-id>     # resume an existing run: its branch and its agent conversation
 AGENT=copilot ./run.sh                # same sandbox, GitHub Copilot CLI instead
 ./run.sh --run-id <6-hex-char-id>     # fresh run under a caller-chosen id (what the web UI does)
+./run.sh --task "Fix issue #7 …"      # fresh run whose agent starts on that task (AGENT_TASK: its first message)
+./run.sh --web                        # starts nothing: JSON of what the enabled plugins' web.sh show
 ./web/server.py                       # web UI on http://127.0.0.1:8787 (--bind 0.0.0.0: whole LAN, no login)
 ```
 
 `web/server.py` (stdlib only, host side) runs `run.sh` in a pty per session, with the project as
-cwd, and streams it to `web/index.html` (xterm.js): projects come from
-`~/.config/claude-sandbox/projects` (one directory or glob per line, `~/code/*/.git` for just the git repos; `--projects FILE` to override), open
-PRs from the host's `gh`, and a PR on a per-run branch resumes with `run.sh --resume`. It stops a
-session by removing the container `run.sh` names `sandbox-<RUN_ID>`.
+cwd. `web/index.html` is the status board: projects from `~/.config/claude-sandbox/projects` (one
+directory or glob per line, `~/code/*/.git` for just the git repos; `--projects FILE` to override), each with its sessions and whatever its enabled plugins' `web.sh` describe
+(`run.sh --web` per project: `github-auth` lists open PRs and issues from the host's `gh`,
+`git-workspace` ties a PR on a per-run branch to its run so it resumes with `run.sh --resume`,
+`agent-workspace` says where a run's checkout is) — the server and the page know none of that
+themselves, so a new plugin shows up on the page by adding a `web.sh`, not by editing `web/`. A session's
+terminal is `web/session.html` (xterm.js) in a browser tab named after the session, so a second
+click focuses it; a project's terminal (a host `$SHELL` in its directory) is a session too
+(`kind: shell`), one live one per project, an ended one kept until the next replaces it. Stopping a
+session closes its tabs: terminal pages close themselves when told on the `sandbox-tabs`
+BroadcastChannel, the rest (VS Code, the run's PR) through the dashboard's handles. A session
+whose last terminal stream disconnects (its tab closed; noticed at the next `KEEPALIVE`) is stopped
+after `TAB_GRACE` seconds unless a stream comes back (a reload); terminals are exempt. `POST /api/vscode` starts one `code serve-web` on first use, on a unix socket in
+a 0700 directory; the server tunnels `/vscode/` to it behind the same Host/Origin guard, and the
+page opens it there on a session's checkout (`web_checkout`). It stops a session by removing the container `run.sh` names
+`sandbox-<RUN_ID>`.
 
 ## Tests
 
 ```bash
-pip install pytest && python -m pytest tests     # host side, Python helpers, container stages
+pip install pytest playwright && python -m playwright install chromium && python -m pytest tests  # host side, helpers, stages, web UI
 docker build -t claude-agent:claude . && \
   SANDBOX_E2E_IMAGE=claude-agent:claude SANDBOX_E2E_AGENT=claude python -m pytest tests/e2e
 ```
 
-`tests/conftest.py` sources run.sh's libraries and plugin stages into isolated shells and reads
+`tests/test_web_ui.py` drives the web UI's pages in Chromium through Playwright (skipped without it:
+`pip install playwright && python -m playwright install --with-deps chromium`), against a copy of
+`web/` next to a stub `run.sh`. `tests/conftest.py` sources run.sh's libraries and plugin stages into isolated shells and reads
 back the `docker run` args they contribute; `tests/test_run.py` runs run.sh itself against a stub
 `docker`. `tests/e2e` (skipped unless `SANDBOX_E2E_IMAGE` is set) boots the real image, built with
 every plugin installed, behind a stand-in agent. `.github/workflows/tests.yml` runs both on every

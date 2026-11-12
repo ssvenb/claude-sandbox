@@ -7,8 +7,16 @@
 #
 # Every run's session is named after its RUN_ID, so `run.sh --resume` picks the same session back
 # up. It only outlives the container when ~/.copilot is mounted (copilot-home).
+#
+# $AGENT_TASK (run.sh --task) is the user's task: it closes that first message, which then asks
+# for it to be done instead of for a wait.
 session="sandbox-${RUN_ID:?}"
-if [ -n "$AGENT_PROMPT" ]; then
+if [ -n "$AGENT_TASK" ]; then
+  AGENT_PROMPT="${AGENT_PROMPT:+$AGENT_PROMPT
+
+}The user's task:
+$AGENT_TASK"
+elif [ -n "$AGENT_PROMPT" ]; then
   AGENT_PROMPT="$AGENT_PROMPT
 This message is informational context only — do not take any action on it. Wait for the user's task."
 fi

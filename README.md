@@ -33,12 +33,44 @@ printf '%s\n' ~/code/my-repo ~/code/other-repo > ~/.config/claude-sandbox/projec
 ./web/server.py           # http://127.0.0.1:8787  (--port N, --projects FILE)
 ```
 
-One page for all your sandboxes: every listed project with its running sessions, a **New session**
-button (`run.sh` in that directory), a terminal per session — the agent's own TUI, so its slash
-commands and suggestions work as they do in your terminal — and a plain host **Shell** in the
-project. For a project whose `origin` is on GitHub it lists the open pull requests through the
-host's `gh` login; a PR on a per-run branch (`<prefix>/<date>-<RUN_ID>`) gets a **Resume** button,
-which is `run.sh --resume <RUN_ID>`; an ended session in the list has one too.
+The home page is a dashboard of all your sandboxes: totals across them, then every listed project
+with its sessions, a **+** button for a new session (`run.sh` in that directory) and a terminal
+button (**>_**) for a shell on this machine in the project — one per project, its tab brought to
+the front when it is already open. For a project whose
+`origin` is on GitHub it lists the open pull requests, with their CI status, and issues through the
+host's `gh` login, each a link to its GitHub page (one tab per item, brought to the front when it
+is already open); a PR on a per-run branch (`<prefix>/<date>-<RUN_ID>`) gets a **Resume** button,
+which is `run.sh --resume <RUN_ID>`; an ended session in the list has one too. An issue's
+**Resolve** starts a new session whose agent begins on it straight away: its first message
+(`run.sh --task`) names the issue and tells it to read it with `gh issue view`, fix it with tests,
+push and open a pull request that closes it.
+
+What a project shows beyond its sessions comes from its enabled plugins, not from the web UI: the
+page draws what `run.sh --web` prints for the project, which is what each enabled plugin's `web.sh`
+described. `github-auth` lists the pull requests and issues, `git-workspace` recognises its per-run
+branches among them, `agent-workspace` says where a run's checkout is — switch one off for a
+project and its part of the page goes with it.
+
+A session opens in a browser tab of its own — the agent's own TUI, so its slash commands and
+suggestions work as they do in your terminal. Clicking a session whose tab is already open brings
+that tab to the front instead of opening a second one. Stopping a session closes its tabs too: its
+terminal, VS Code and its pull request (the last two only while the dashboard that opened them has
+not been reloaded). It works the other way round as well: closing a session's tab stops the session
+and removes its container, once no tab of it has come back for 10 seconds — so a reload keeps it.
+A project's terminal is kept instead: its button attaches to it again.
+
+In a terminal tab, **Ctrl+C** copies the selection (and interrupts as usual when nothing is
+selected), **Ctrl+Shift+C** always copies, **Ctrl+V** and **Ctrl+Shift+V** paste; where the program has taken the mouse, as the agent's
+interface does, select with **Shift+drag**.
+
+**Code** on a session opens VS Code in the browser on that run's checkout (the `agent-workspace`
+mirror of `/workspace`), again one tab per run. It needs VS Code on the host (`code` on the PATH:
+the .deb/.rpm or snap install, or the standalone CLI): the first click starts one `code serve-web`,
+accepting the VS Code Server license terms on your behalf, and it stops with the web UI. Its data
+(extensions, settings) lives in `~/.local/share/claude-sandbox/vscode`, with Copilot's chat
+switched off (`chat.disableAIFeatures`) — the agent works in the sandbox. The first folder a
+browser opens may still show the empty chat pane; close it once and VS Code keeps it closed. It listens on a unix socket only your user can reach and is served under `/vscode/` of the
+web UI itself, so there is no second port to open or to forward over an SSH tunnel.
 
 Resuming brings back the agent's conversation as well as the branch: each run's conversation is
 keyed to its RUN_ID (Claude Code `--session-id`, Copilot `--name`). The transcript lives in the
@@ -172,6 +204,7 @@ executed), so their `export`s survive into the rest of the boot sequence.
 | `plugin.json` | — | read on the host before anything else |
 | `install.sh` | root | image build, only if the plugin is enabled |
 | `host.sh` | you | on the host, before `docker run` |
+| `web.sh` | you | on the host, by `run.sh --web`, whenever the web UI draws the project |
 | `root-init.sh` | root | in the container, while secrets are still present |
 | `agent-init.sh` | `node` | in the container, just before Claude starts |
 | `settings.json` | — | merged into the managed policy at boot |
@@ -298,6 +331,27 @@ it, and `src/lib/host-credentials.sh` does the rest for every plugin alike.
 
 Pick an interval comfortably inside the credential's lifetime (GitHub's 1h tokens: 40 minutes), so
 a few failed attempts in a row still don't let it lapse.
+
+### `web.sh` — web stage (your user)
+
+Sourced by `run.sh --web`, which the web UI runs in a project to learn what to draw for it. The
+agent and the plugins are resolved exactly as for a run — same project settings, same `ENABLE_*`
+switches — but nothing is validated, built or started, so keep it quick and never `die` over
+something a run would need. The web UI itself knows nothing about any plugin: it draws what these
+calls describe.
+
+| Call | Puts on the project's band |
+|------|----------------------------|
+| `web_list TITLE JSON_ARRAY` | a column of links; each item is `{title, url}` plus optional `ref` (a short id shown first, `#12`), `note` (`Draft`), `status` (`ok`, `fail` or `pending`: a mark before it, e.g. CI) with its `status_text`, `start` (`{label, task}`: a button starting a session on `task`, e.g. an issue's Resolve), and any field a later plugin may read |
+| `web_note TEXT` | one line saying why there is nothing to list |
+| `web_map_items JQ_FILTER` | rewrites every item listed so far (by plugins of a lower `priority`); an item given a `run_id` gets an **Open** or **Resume** button for that run |
+| `web_checkout GLOB` | where a run's `/workspace` is on this machine, `{run_id}` standing for the run; adds **Code** (VS Code) to its session |
+
+```bash
+# plugins/github-auth/web.sh lists the pull requests with their `branch`;
+# plugins/git-workspace/web.sh, which owns the branch naming, then claims its own:
+web_map_items 'if (.branch // "") | test("^.+/[0-9]{8}-[0-9a-f]{6}$") then .run_id = .branch[-6:] else . end'
+```
 
 ### Project configuration — `.claude-sandbox.json`
 
@@ -548,7 +602,7 @@ Volume mounts are contributed by plugins via `pass_mount`; the core `docker run`
 | Path | Purpose |
 |------|---------|
 | [run.sh](run.sh) | host entry point: config, agent + plugin resolution, build, `docker run` |
-| [web/](web) | web UI over `run.sh`: `server.py` (sessions in ptys, PR list) and its one page |
+| [web/](web) | web UI over `run.sh`: `server.py` (sessions in ptys, PRs and issues, a tunnel to `code serve-web`), the status page `index.html` and the per-session terminal `session.html` |
 | [Dockerfile](Dockerfile) | image: base tools, agent install stage, plugin install stage, permissions |
 | [settings-base.json](settings-base.json) | empty policy base plugin fragments merge into |
 | [src/entrypoint.sh](src/entrypoint.sh) | container root stage and privilege handoff |

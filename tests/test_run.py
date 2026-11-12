@@ -85,6 +85,8 @@ def test_run_id_starts_a_fresh_run_under_the_given_id(sb, run_sh):
     (["--bogus"], 1, "Unknown argument: --bogus"),
     (["--help"], 0, "Usage:"),
     (["--resume"], 1, "Invalid RUN_ID ''"),
+    (["--task"], 1, "--task needs the task's text."),
+    (["--resume", "0a1b2c", "--task", "Fix it"], 1, "--task starts a fresh run"),
 ])
 def test_command_line(run_sh, args, code, message):
     done = run_sh(*args, timeout=15)
@@ -135,3 +137,21 @@ def test_host_proxy_runs_exactly_as_long_as_the_container(sb, run_sh, short_tmp)
     assert "UPSTREAM_PROXY_ATTEST_DIR=/run/upstream-proxy-attest" in run  # host-network is on
     [proxy_dir] = glob.glob(f"{short_tmp}/upstream-proxy-*")
     assert os.listdir(proxy_dir) == ["lock"], "the proxy outlived run.sh"
+
+
+def test_web_describes_the_project_and_starts_nothing(sb, run_sh):
+    sb.dotenv("CLAUDE_EFFORT=high\n")  # announced on a normal run: must not leak into the JSON
+    done = run_sh("--web")
+    assert done.returncode == 0, done.stderr
+    said = json.loads(done.stdout)
+    assert said["agent"] == "claude" and "cwd-workspace" in said["plugins"]
+    assert said["lists"] == [] and "checkout" not in said  # agent-workspace is off in BASE
+    assert done.calls == []
+
+
+def test_a_task_reaches_the_agent_as_agent_task(sb, run_sh):
+    done = run_sh("--run-id", "0a1b2c", "--task", "Fix #7: it's \"broken\"", CLAUDE_CODE_OAUTH_TOKEN="t")
+    [run] = calls(done, "run")
+    assert "AGENT_TASK=Fix #7: it's \"broken\"" in run
+    run = calls(run_sh("--run-id", "0a1b2c", CLAUDE_CODE_OAUTH_TOKEN="t"), "run")[-1]  # the log is shared
+    assert not any(arg.startswith("AGENT_TASK=") for arg in run)  # no task, no variable

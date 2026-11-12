@@ -206,3 +206,20 @@ def test_upstream_proxy_lists_the_proxied_endpoints(sb):
     prompt = stage(sb, "upstream-proxy", UPSTREAM_PROXY_PORTS="api:8081 gcs:8083").prompt
     assert "- `api` at http://127.0.0.1:8081\n- `gcs` at http://127.0.0.1:8083\n" in prompt
     assert "placeholder keys" in prompt
+
+
+def test_claude_starts_on_its_task_as_the_first_message(sb):
+    argv = stub_agent(sb)
+    sb.sh("agent_run_stage launch", AGENT_LAUNCH_CMD="fake-agent", AGENT_PROMPT="Context.",
+          AGENT_TASK="Fix issue #7.", RUN_ID="0a1b2c").ok()
+    assert argv()[-3:] == ["--append-system-prompt", "Context.", "Fix issue #7."]
+
+
+@pytest.mark.parametrize("prompt", ["", "Context."])
+def test_copilot_is_given_its_task_instead_of_told_to_wait(sb, prompt):
+    argv = stub_agent(sb)
+    sb.sh("agent_run_stage launch", AGENT="copilot", AGENT_LAUNCH_CMD="fake-agent", AGENT_PROMPT=prompt,
+          AGENT_TASK="Fix issue #7.", RUN_ID="0a1b2c").ok()
+    flag, message = argv()[2:]
+    assert flag == "-i" and message.endswith("The user's task:\nFix issue #7.")
+    assert message.startswith(prompt) and "do not take any action" not in message

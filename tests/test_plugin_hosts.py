@@ -1,5 +1,6 @@
 """Each plugin's host.sh, and each agent's: what they validate and what they hand `docker run`."""
 import glob
+import json
 import os
 import shutil
 import signal
@@ -534,3 +535,83 @@ def test_upstream_proxy_on_docker_desktop_forwards_per_container(proxy_sb):
     [proxy_dir] = proxy_dirs(proxy_sb)
     assert f"{proxy_dir}/sockets:/run/upstream-proxy" in run.mounts
     assert "UPSTREAM_PROXY_ATTEST_DIR" not in run.env
+
+
+# --- web stages: what plugins put on the web UI's status page ------------------------------
+
+GH_STUB = """case $1 in
+  pr) echo '[{"number": 3, "title": "t", "url": "u3", "headRefName": "claude-code/20261112-09fc4c", "isDraft": true,
+              "statusCheckRollup": [{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SUCCESS"},
+                                    {"__typename": "CheckRun", "status": "IN_PROGRESS", "conclusion": ""}]},
+             {"number": 4, "title": "by hand", "url": "u4", "headRefName": "feature/login", "isDraft": false,
+              "statusCheckRollup": []}]' ;;
+  issue) echo '[{"number": 7, "title": "i", "url": "u7"}]' ;;
+esac
+"""
+
+
+@pytest.fixture
+def described(sb):
+    """Run the web stage of the given plugins; the JSON they describe the project with."""
+    def run(plugins, **env):
+        out = sb.tmp / "web.json"
+        sb.bash("project_config_load\nproject_env_load\nproject_settings_apply\n"
+                f"ENABLED_PLUGINS='{plugins}'\nplugins_web_stage\nprintf '%s' \"$WEB_JSON\" >'{out}'",
+                **env).ok()
+        return json.loads(out.read_text())
+    return run
+
+
+def test_github_lists_pull_requests_and_issues_and_git_workspace_ties_them_to_runs(sb, described):
+    subprocess.run(["git", "init", "-q", sb.cwd], check=True)
+    assert described("github-auth git-workspace")["lists"] == []  # no origin: nothing to ask GitHub
+    subprocess.run(["git", "-C", sb.cwd, "remote", "add", "origin", "https://github.com/o/r"], check=True)
+    sb.stub("gh", GH_STUB)
+    prs, issues = described("github-auth git-workspace")["lists"]
+    assert prs == {"title": "Pull requests", "items": [
+        {"ref": "#3", "title": "t", "url": "u3", "branch": "claude-code/20261112-09fc4c",
+         "note": "Draft", "status": "pending", "status_text": "CI: 1 of 2 checks running", "run_id": "09fc4c"},
+        {"ref": "#4", "title": "by hand", "url": "u4", "branch": "feature/login"}]}
+    [issue] = issues["items"]
+    assert issues["title"] == "Issues" and {k: issue[k] for k in ("ref", "title", "url")} == {
+        "ref": "#7", "title": "i", "url": "u7"}
+    # Resolve: a session whose agent is told to fix the issue, reading it in full itself.
+    assert issue["start"]["label"] == "Resolve"
+    task = issue["start"]["task"]
+    assert task.startswith("Resolve GitHub issue #7: i (u7).")
+    assert "gh issue view 7 --comments" in task and 'Closes #7' in task
+    # Without git-workspace nobody claims the branch, so the page offers no resume.
+    assert "run_id" not in described("github-auth")["lists"][0]["items"][0]
+
+
+def test_a_failing_gh_becomes_a_note_on_the_page(sb, described):
+    subprocess.run(["git", "init", "-q", sb.cwd], check=True)
+    subprocess.run(["git", "-C", sb.cwd, "remote", "add", "origin", "https://github.com/o/r"], check=True)
+    sb.stub("gh", "echo 'gh: not logged in' >&2; exit 4\n")
+    said = described("github-auth")
+    assert said["lists"] == [] and said["notes"] == ["gh pr list: gh: not logged in", "gh issue list: gh: not logged in"]
+
+
+def test_agent_workspace_tells_the_page_where_a_runs_checkout_is(sb, described):
+    assert described("agent-workspace")["checkout"] == f"{sb.home}/.agent-workspaces/*-{{run_id}}"
+    sb.dotenv("AGENT_WORKSPACE_DIR=/srv/mirrors\n")  # the project's own setting, as for a run
+    assert described("agent-workspace")["checkout"] == "/srv/mirrors/*-{run_id}"
+
+
+@pytest.mark.parametrize("rollup, status", [
+    ([], None),
+    ([{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SUCCESS"},
+      {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SKIPPED"},
+      {"__typename": "StatusContext", "state": "SUCCESS"}], ("ok", "CI: 3 checks passed")),
+    ([{"__typename": "CheckRun", "status": "QUEUED", "conclusion": ""},
+      {"__typename": "StatusContext", "state": "FAILURE"}], ("fail", "CI: 1 of 2 checks failed")),
+    ([{"__typename": "StatusContext", "state": "PENDING"},
+      {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "NEUTRAL"}], ("pending", "CI: 1 of 2 checks running")),
+])
+def test_a_pull_requests_ci_status(sb, described, rollup, status):
+    subprocess.run(["git", "init", "-q", sb.cwd], check=True)
+    subprocess.run(["git", "-C", sb.cwd, "remote", "add", "origin", "https://github.com/o/r"], check=True)
+    pr = {"number": 1, "title": "t", "url": "u", "headRefName": "b", "isDraft": False, "statusCheckRollup": rollup}
+    sb.stub("gh", f"[ $1 = pr ] && echo '{json.dumps([pr])}' || echo '[]'\n")
+    [item] = described("github-auth")["lists"][0]["items"]
+    assert (item.get("status"), item.get("status_text")) == (status or (None, None))

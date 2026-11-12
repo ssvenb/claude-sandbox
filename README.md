@@ -52,7 +52,9 @@ A session opens in a browser tab of its own — the agent's own TUI, so its slas
 suggestions work as they do in your terminal. Clicking a session whose tab is already open brings
 that tab to the front instead of opening a second one. Stopping a session closes its tabs too: its
 terminal, VS Code and its pull request (the last two only while the dashboard that opened them has
-not been reloaded).
+not been reloaded). It works the other way round as well: closing a session's tab stops the session
+and removes its container, once no tab of it has come back for 10 seconds — so a reload keeps it.
+A project's terminal is kept instead: its button attaches to it again.
 
 **Code** on a session opens VS Code in the browser on that run's checkout (the `agent-workspace`
 mirror of `/workspace`), again one tab per run. It needs VS Code on the host (`code` on the PATH:

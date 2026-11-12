@@ -188,7 +188,9 @@ terminal is `web/session.html` (xterm.js) in a browser tab named after the sessi
 click focuses it; a project's terminal (a host `$SHELL` in its directory) is a session too
 (`kind: shell`), one live one per project, an ended one kept until the next replaces it. Stopping a
 session closes its tabs: terminal pages close themselves when told on the `sandbox-tabs`
-BroadcastChannel, the rest (VS Code, the run's PR) through the dashboard's handles. `POST /api/vscode` starts one `code serve-web` on first use, on a unix socket in
+BroadcastChannel, the rest (VS Code, the run's PR) through the dashboard's handles. A session
+whose last terminal stream disconnects (its tab closed; noticed at the next `KEEPALIVE`) is stopped
+after `TAB_GRACE` seconds unless a stream comes back (a reload); terminals are exempt. `POST /api/vscode` starts one `code serve-web` on first use, on a unix socket in
 a 0700 directory; the server tunnels `/vscode/` to it behind the same Host/Origin guard, and the
 page opens it there on a session's checkout (`web_checkout`). It stops a session by removing the container `run.sh` names
 `sandbox-<RUN_ID>`.

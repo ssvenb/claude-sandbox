@@ -43,6 +43,8 @@ HERE = Path(__file__).resolve().parent
 RUN_SH = HERE.parent / "run.sh"
 RUN_ID = re.compile(r"[0-9a-f]{6}")
 SCROLLBACK = 256 * 1024  # bytes replayed to a browser that (re)opens a terminal
+KEEPALIVE = 5  # seconds between keepalives on a terminal's stream: how soon a closed tab is noticed
+TAB_GRACE = 10  # seconds a session outlives its last tab, so a reload does not stop it
 
 sessions = {}
 described = {}  # project → what describe() last said about it
@@ -239,6 +241,14 @@ def vscode():
                 return path
             time.sleep(0.1)
         raise ValueError("`code serve-web` did not start listening")
+
+
+def stop_if_orphaned(s):
+    """Its last tab closed: stop the session, container and all, unless a tab came back."""
+    with lock:
+        orphaned = s.exit is None and not s.listeners
+    if orphaned:
+        s.stop()
 
 
 def drop(s):
@@ -439,7 +449,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             while True:
                 try:
-                    data = q.get(timeout=15)
+                    data = q.get(timeout=KEEPALIVE)
                 except queue.Empty:
                     self.wfile.write(b": keepalive\n\n")  # also how a closed tab is noticed
                     self.wfile.flush()
@@ -456,6 +466,9 @@ class Handler(BaseHTTPRequestHandler):
             with lock:
                 if q in s.listeners:
                     s.listeners.remove(q)
+                orphaned = s.kind != "shell" and s.exit is None and not s.listeners
+            if orphaned:  # a terminal is kept: the next click on its button attaches to it again
+                threading.Timer(TAB_GRACE, stop_if_orphaned, [s]).start()
 
 
 def local_names(bind):

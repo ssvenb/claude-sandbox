@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -230,3 +231,42 @@ def test_vscode_settings_are_applied_over_the_ones_already_there(tmp_path, monke
     file.write_text('{\n  // mine\n  "editor.fontSize": 15\n}')
     web.vscode_data()  # with comments it is left as it is
     assert "// mine" in file.read_text()
+
+
+def test_closing_a_sessions_last_tab_stops_it_and_a_reload_does_not(tmp_path, monkeypatch):
+    docker = tmp_path / "docker"
+    docker.write_text(f'#!/bin/sh\necho "$*" >>"{tmp_path}/docker-calls"\n')
+    docker.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
+    monkeypatch.setattr(web, "command", lambda kind, run_id: ["sleep", "30"])
+    monkeypatch.setattr(web, "KEEPALIVE", 0.2)
+    monkeypatch.setattr(web, "TAB_GRACE", 1)
+    (tmp_path / "projects").write_text(f"{tmp_path}\n")
+    server = web.serve(0, tmp_path / "projects")
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    agent = web.start(str(tmp_path), "resume", "0a1b2c")
+    terminal = web.start(str(tmp_path), "shell", None)
+    try:
+        def tab(s):  # a browser tab on the session: its stream, open until closed
+            return urllib.request.urlopen(f"{base}/api/sessions/{s.id}/stream", timeout=5)
+
+        tab(agent).close()
+        reloaded = tab(agent)  # back well within the grace: a reload, the session keeps running
+        time.sleep(1.5)
+        assert agent.exit is None
+        reloaded.close()
+        tab(terminal).close()
+        calls = tmp_path / "docker-calls"
+        for _ in range(50):  # noticed at the next keepalive, stopped after the grace
+            if agent.exit is not None and calls.exists():
+                break
+            time.sleep(0.1)
+        assert agent.exit is not None
+        assert calls.read_text() == "rm -f sandbox-0a1b2c\n"  # the container goes with it
+        assert terminal.exit is None  # the project's terminal waits to be attached again
+    finally:
+        agent.stop()
+        terminal.stop()
+        server.shutdown()
+        web.sessions.clear()

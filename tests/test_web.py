@@ -1,6 +1,8 @@
 """web/server.py: sessions in ptys, streamed to the page; only our own page may drive it."""
 import base64
 import json
+import os
+import shutil
 import subprocess
 import sys
 import urllib.error
@@ -167,3 +169,42 @@ def test_a_project_run_sh_cannot_describe_says_why(tmp_path):
     (tmp_path / ".claude-sandbox.json").write_text("{not json")
     [note] = web.describe(str(tmp_path))["notes"]
     assert ".claude-sandbox.json" in note
+
+
+def test_vscode_skips_the_desktop_launcher_for_the_cli_it_bundles(tmp_path, monkeypatch):
+    def exe(path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/bin/sh\n")
+        path.chmod(0o755)
+        return path
+    monkeypatch.setenv("PATH", str(tmp_path / "bin"))
+    with pytest.raises(ValueError, match="not installed"):
+        web.vscode_cli()
+    standalone = exe(tmp_path / "bin/code")
+    assert web.vscode_cli() == str(standalone)  # the standalone CLI serves itself
+    # .deb/.rpm: /usr/bin/code links to /usr/share/code/bin/code, next to the bundled CLI
+    standalone.unlink()
+    (tmp_path / "bin/code").symlink_to(exe(tmp_path / "share/code/bin/code"))
+    bundled = exe(tmp_path / "share/code/bin/code-tunnel")
+    assert web.vscode_cli() == str(bundled)
+    # snap: <snap>/bin/code links to /usr/bin/snap; the CLI is in the snap's own tree
+    (tmp_path / "bin/code").unlink()
+    (tmp_path / "bin/code").symlink_to(exe(tmp_path / "usr/bin/snap"))
+    bundled = exe(tmp_path / "code/current/usr/share/code/bin/code-tunnel")
+    assert web.vscode_cli() == str(bundled)
+
+
+def test_vscode_that_will_not_start_says_what_it_printed(tmp_path, monkeypatch):
+    code = tmp_path / "bin/code"
+    code.parent.mkdir()
+    code.write_text("#!/bin/sh\necho starting\necho 'error: no such option --socket-path' >&2\nexit 2\n")
+    code.chmod(0o755)
+    monkeypatch.setenv("PATH", str(code.parent))
+    monkeypatch.setattr(web, "vscode_server", None)
+    with pytest.raises(ValueError, match=r"exited with 2: error: no such option --socket-path"):
+        web.vscode()
+    run_dir = os.path.dirname(web.vscode_server[1])
+    with pytest.raises(ValueError):  # a second try starts afresh, and clears the failed one away
+        web.vscode()
+    assert not os.path.exists(run_dir)
+    shutil.rmtree(os.path.dirname(web.vscode_server[1]))

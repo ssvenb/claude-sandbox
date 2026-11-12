@@ -167,32 +167,50 @@ vscode_lock = threading.Lock()
 vscode_server = None  # (process, path of the unix socket it listens on)
 
 
+def vscode_cli():
+    """The VS Code CLI that can `serve-web`. Not the desktop `code` launcher where there is one:
+    it only passes the command on to the CLI it bundles, and the snap's launcher (which puts
+    `--no-sandbox` first) exits 0 without serving at all, so go to that bundled CLI directly."""
+    code = shutil.which("code")
+    if not code:
+        raise ValueError("VS Code's `code` command is not installed on this machine")
+    for cli in (Path(os.path.realpath(code)).with_name("code-tunnel"),  # .deb/.rpm: /usr/share/code/bin
+                Path(code).parent.parent / "code/current/usr/share/code/bin/code-tunnel"):  # snap
+        if os.access(cli, os.X_OK):
+            return str(cli)
+    return code  # the standalone CLI (code.visualstudio.com/#alt-downloads) is `code` itself
+
+
 def vscode():
     """The socket of the one `code serve-web` every editor tab talks to, started on first use.
     It serves any folder (`?folder=`), so one is enough for all projects and runs."""
     global vscode_server
     with vscode_lock:
         if vscode_server is None or vscode_server[0].poll() is not None:
+            if vscode_server:  # it died: its socket and log go with it
+                shutil.rmtree(os.path.dirname(vscode_server[1]), ignore_errors=True)
+                vscode_server = None
+            cli = vscode_cli()
             # VS Code in a browser is a shell on your account. A socket in a 0700 directory keeps
             # other local users out, and the only way in for a browser is Handler.tunnel, behind
             # the same guard as the terminals — so it needs no connection token of its own (one
             # would not survive anyway: the server refuses its token cookie on any navigation
             # another origin started, which every link from our page to a second port is).
-            path = tempfile.mkdtemp(prefix="sandbox-vscode-") + "/socket"
-            try:
+            run_dir = tempfile.mkdtemp(prefix="sandbox-vscode-")
+            path = run_dir + "/socket"
+            with open(run_dir + "/log", "wb") as log:
                 proc = subprocess.Popen(
-                    ["code", "serve-web", "--socket-path", path, "--without-connection-token",
+                    [cli, "serve-web", "--socket-path", path, "--without-connection-token",
                      "--server-base-path", "/vscode", "--accept-server-license-terms"],
-                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                     start_new_session=True)  # a group of its own, to stop its children with it
-            except FileNotFoundError:
-                os.rmdir(os.path.dirname(path))
-                raise ValueError("VS Code's `code` command is not installed on this machine") from None
             vscode_server = (proc, path)
         proc, path = vscode_server
         for _ in range(100):  # the first tab would otherwise load before it listens
             if proc.poll() is not None:
-                raise ValueError(f"`code serve-web` exited with {proc.returncode}")
+                said = Path(os.path.dirname(path), "log").read_text(errors="replace").strip()
+                raise ValueError(f"`{proc.args[0]} serve-web` exited with {proc.returncode}"
+                                 + (f": {said.splitlines()[-1]}" if said else ""))
             if os.path.exists(path):
                 return path
             time.sleep(0.1)

@@ -615,3 +615,20 @@ def test_a_pull_requests_ci_status(sb, described, rollup, status):
     sb.stub("gh", f"[ $1 = pr ] && echo '{json.dumps([pr])}' || echo '[]'\n")
     [item] = described("github-auth")["lists"][0]["items"]
     assert (item.get("status"), item.get("status_text")) == (status or (None, None))
+
+
+def test_github_lists_as_the_projects_gh_username(sb, described):
+    subprocess.run(["git", "init", "-q", sb.cwd], check=True)
+    subprocess.run(["git", "-C", sb.cwd, "remote", "add", "origin", "https://github.com/o/r"], check=True)
+    # Two accounts logged in on the host; gh's active one is not the project's.
+    sb.stub("gh", """if [ "$1 $2" = "auth token" ]; then
+  case "$*" in *"--user alice"*) echo tok-alice ;; *) exit 1 ;; esac; exit 0
+fi
+echo "[{\\"number\\": 1, \\"title\\": \\"${GH_TOKEN:-active}\\", \\"url\\": \\"u\\"}]"
+""")
+    assert described("github-auth")["lists"][0]["items"][0]["title"] == "active"  # no GH_USERNAME: gh's active account
+    sb.config({"env": {"GH_USERNAME": "alice"}})
+    assert described("github-auth")["lists"][0]["items"][0]["title"] == "tok-alice"
+    sb.config({"env": {"GH_USERNAME": "bob"}})  # not logged in on this host
+    said = described("github-auth")
+    assert said["lists"] == [] and said["notes"] == ["gh is not logged in as bob on github.com (gh auth login)"]

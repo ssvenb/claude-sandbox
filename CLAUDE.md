@@ -181,7 +181,8 @@ AGENT=copilot ./run.sh                # same sandbox, GitHub Copilot CLI instead
 `web/server.py` (stdlib only, host side) runs `run.sh` in a pty per session, with the project as
 cwd. `web/index.html` is the status board: projects from `~/.config/claude-sandbox/projects` (one
 directory or glob per line, `~/code/*/.git` for just the git repos; `--projects FILE` to override), each with its sessions and whatever its enabled plugins' `web.sh` describe
-(`run.sh --web` per project: `github-auth` lists open PRs and issues from the host's `gh`,
+(`run.sh --web` per project: `github-auth` lists open PRs and issues from the host's `gh`, as the
+project's `GH_USERNAME` when it sets one (`gh auth token --user`), else gh's active account,
 `git-workspace` ties a PR on a per-run branch to its run so it resumes with `run.sh --resume`,
 `agent-workspace` says where a run's checkout is) — the server and the page know none of that
 themselves, so a new plugin shows up on the page by adding a `web.sh`, not by editing `web/`. A session's
@@ -233,7 +234,7 @@ only required while that one is in use.
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Path to App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default: `github.com`) |
-| `GH_USERNAME` | github-auth | Username git and `gh` authenticate as with the installation token (default: the App's bot login) |
+| `GH_USERNAME` | github-auth | Username git and `gh` authenticate as with the installation token (default: the App's bot login); the web UI also lists the project's PRs and issues as this account of the host's `gh` login |
 | `BRANCH_PREFIX` | git-workspace | Leading segment of the per-run branch name, read from the **worked-on repo's** `$HOST_CWD/.env` (not the sandbox's); `.plugins["git-workspace"].branchPrefix` in its `.claude-sandbox.json` wins over it, and with neither it defaults to the agent manifest's `branchPrefix`, else the agent's directory name. When set explicitly it also becomes the run's git identity (`user.name`, and `user.email` as `<prefix>@sandbox.local`), replacing the manifest's `userName`/`userEmail` |
 | `BASE_BRANCH` | git-workspace | Branch to cut from (default: the repo's own default branch, via `origin/HEAD`) |
 | `HOST_WORKSPACE_DIR` | cwd-workspace | Host dir mounted at `/workspace` (default: run.sh's cwd) |

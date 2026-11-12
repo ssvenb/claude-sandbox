@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sandboxes</title>
+<title>Dashboard</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&display=swap">
 <style>
@@ -14,12 +14,17 @@
            border: 1px solid var(--rule); border-radius: 999px; padding: 3px 12px; cursor: pointer; }
   button:hover { border-color: var(--haze); }
   button:focus-visible, a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
-  body { margin: 0 auto; max-width: 1360px; padding: 36px 32px 64px; background: var(--dusk);
+  body { margin: 0; padding: 36px 32px 64px; background: var(--dusk);
          color: var(--paper); font: 15px/1.45 "Bricolage Grotesque", system-ui, sans-serif; }
   .top { display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap; margin-bottom: 28px; }
   h1 { font-size: 40px; font-weight: 700; letter-spacing: -.025em; line-height: 1; margin: 0; }
-  .tally { color: var(--haze); margin: 0; font-size: 15px; }
-  .tally.lit { color: var(--lamp); }
+  /* Totals over every project, one per column the projects show, in the same order. */
+  .totals { display: flex; flex-wrap: wrap; gap: 12px 44px; margin: -6px 0 26px; }
+  .total { display: flex; align-items: baseline; gap: 8px; }
+  .total b { font-size: 30px; font-weight: 650; letter-spacing: -.02em; line-height: 1;
+             font-variant-numeric: tabular-nums; }
+  .total b.lit { color: var(--lamp); }
+  .total span { color: var(--haze); }
 
   /* One panel per project, darker than the page: a lit window per project, rules only inside. */
   section { margin-top: 16px; padding: 22px 26px 26px; background: var(--night); border-radius: 16px; }
@@ -64,6 +69,9 @@
   @media (max-width: 900px) {
     body { padding: 24px 16px 48px; }
     section { padding: 18px 16px 22px; border-radius: 12px; }
+    .totals { gap: 8px 22px; }
+    .total b { font-size: 24px; }
+    .total { gap: 6px; }
     .columns { grid-auto-flow: row; gap: 22px; }
   }
   @media (prefers-reduced-motion: reduce) { .lamp.lit { animation: none; } }
@@ -139,13 +147,15 @@ function render() {
   if (sig === drawn) return;
   drawn = sig;
   const live = id => state.sessions.find(s => s.run_id === id && s.exit === null);
-  const running = state.sessions.filter(s => s.exit === null).length;
+  const running = state.sessions.some(s => s.exit === null);
+  const totals = new Map([['Sessions', state.sessions.length]]);
+  for (const said of Object.values(plugins))
+    for (const list of said.lists) totals.set(list.title, (totals.get(list.title) || 0) + list.items.length);
 
   $('board').replaceChildren(
-    h('div', {className: 'top'},
-      h('h1', {}, 'Sandboxes'),
-      h('p', {className: 'tally' + (running ? ' lit' : '')},
-        running ? `${running} session${running > 1 ? 's' : ''} running` : 'All quiet')),
+    h('div', {className: 'top'}, h('h1', {}, 'Dashboard')),
+    h('div', {className: 'totals'}, ...[...totals].map(([title, n]) => h('div', {className: 'total'},
+      h('b', {className: title === 'Sessions' && running ? 'lit' : ''}, String(n)), h('span', {}, title)))),
     ...state.projects.map(path => {
       const mine = state.sessions.filter(s => s.project === path), said = plugins[path];
       return h('section', {},

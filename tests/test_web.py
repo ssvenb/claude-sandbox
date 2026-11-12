@@ -71,3 +71,10 @@ def test_sandbox_sessions_run_run_sh_under_an_id_the_ui_knows():
     assert web.command("resume", "0a1b2c") == [str(REPO / "run.sh"), "--resume", "0a1b2c"]
     assert web.RUN_BRANCH.fullmatch("claude-code/20261112-09fc4c")[1] == "09fc4c"
     assert not web.RUN_BRANCH.fullmatch("feature/login")
+
+
+def test_a_network_bind_admits_this_machines_own_names_only():
+    names = web.local_names("0.0.0.0")
+    assert {"127.0.0.1", "localhost", web.socket.gethostname()} <= names
+    assert "evil.example" not in names
+    assert web.local_names("127.0.0.1") == {"127.0.0.1", "localhost"}

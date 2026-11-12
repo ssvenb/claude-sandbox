@@ -172,7 +172,7 @@ go any further.
 ./run.sh --resume <6-hex-char-id>     # resume an existing run: its branch and its agent conversation
 AGENT=copilot ./run.sh                # same sandbox, GitHub Copilot CLI instead
 ./run.sh --run-id <6-hex-char-id>     # fresh run under a caller-chosen id (what the web UI does)
-./web/server.py                       # web UI on http://127.0.0.1:8787
+./web/server.py                       # web UI on http://127.0.0.1:8787 (--bind 0.0.0.0: whole LAN, no login)
 ```
 
 `web/server.py` (stdlib only, host side) runs `run.sh` in a pty per session, with the project as

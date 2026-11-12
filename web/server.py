@@ -6,7 +6,7 @@ Runs on the HOST, as you, next to run.sh — a session is `run.sh` in a pty with
 cwd, exactly what you would type yourself. Standard library only; the page loads xterm.js from a
 CDN. Terminal output goes out as server-sent events, keystrokes come back as POSTs.
 
-    web/server.py [--port 8787] [--projects FILE]
+    web/server.py [--port 8787] [--bind 127.0.0.1] [--projects FILE]
 
 FILE lists one project directory per line (default ~/.config/claude-sandbox/projects) and is
 re-read on every request. Sessions belong to this process: stopping the server stops them.
@@ -21,6 +21,7 @@ import queue
 import re
 import secrets
 import signal
+import socket
 import struct
 import subprocess
 import termios
@@ -271,12 +272,28 @@ class Handler(BaseHTTPRequestHandler):
                     s.listeners.remove(q)
 
 
-def serve(port, projects_file):
-    # Loopback only: there is no login. Reach it from elsewhere through an SSH tunnel.
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+def local_names(bind):
+    """Names this machine answers to on `bind`, as a browser would put them in the Host header."""
+    if bind in ("127.0.0.1", "localhost"):
+        return {"127.0.0.1", "localhost"}
+    names = {"127.0.0.1", "localhost", socket.gethostname(), f"{socket.gethostname()}.local"}
+    if bind not in ("0.0.0.0", ""):
+        return names | {bind}
+    try:
+        out = subprocess.run(["hostname", "-I"], capture_output=True, text=True, timeout=5).stdout
+    except OSError:
+        out = ""
+    return names | {a for a in out.split() if ":" not in a}  # 0.0.0.0 is IPv4 only
+
+
+def serve(port, projects_file, bind="127.0.0.1"):
+    # Loopback by default: there is no login, so anyone who can reach the port can start
+    # sandboxes as you. --bind 0.0.0.0 opens it to your network; the Host allowlist still
+    # names only this machine's own addresses, so DNS rebinding stays blocked.
+    server = ThreadingHTTPServer((bind, port), Handler)
     server.daemon_threads = True
     port = server.server_address[1]
-    server.hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+    server.hosts = {f"{name}:{port}" for name in local_names(bind)}
     server.projects_file = projects_file
     return server
 
@@ -284,13 +301,18 @@ def serve(port, projects_file):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--port", type=int, default=8787)
+    parser.add_argument("--bind", default="127.0.0.1",
+                        help="address to listen on; 0.0.0.0 for every interface (default: %(default)s)")
     parser.add_argument("--projects", type=Path,
                         default=Path.home() / ".config/claude-sandbox/projects",
                         help="file listing one project directory per line (default: %(default)s)")
     args = parser.parse_args()
-    server = serve(args.port, args.projects)
+    server = serve(args.port, args.projects, args.bind)
     print(f"Sandboxes: http://127.0.0.1:{server.server_address[1]}  (projects: {args.projects})",
           flush=True)
+    if args.bind not in ("127.0.0.1", "localhost"):
+        print("  also on: " + ", ".join(sorted(h for h in server.hosts if not h.startswith(("127.", "localhost")))),
+              "  (no login: anyone who can reach it can start sandboxes as you)", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

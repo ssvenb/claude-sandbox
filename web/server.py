@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Web UI to orchestrate sandboxes: a status page listing the configured projects with their
-sessions, open pull requests and open issues; a terminal page per session, each in its own tab;
-and VS Code in the browser (`code serve-web`) on a project or on a run's checkout.
+sessions and whatever their enabled plugins have to show (`run.sh --web`: open pull requests and
+issues, say); a terminal page per session, each in its own tab; and VS Code in the browser
+(`code serve-web`) on a project or on a run's checkout.
 
 Runs on the HOST, as you, next to run.sh — a session is `run.sh` in a pty with the project as its
 cwd, exactly what you would type yourself. Standard library only; the page loads xterm.js from a
@@ -41,11 +42,10 @@ from urllib.parse import parse_qs, urlparse
 HERE = Path(__file__).resolve().parent
 RUN_SH = HERE.parent / "run.sh"
 RUN_ID = re.compile(r"[0-9a-f]{6}")
-# git-workspace's per-run branch, <prefix>/<yyyymmdd>-<RUN_ID>: what makes a PR resumable.
-RUN_BRANCH = re.compile(r".+/\d{8}-([0-9a-f]{6})")
 SCROLLBACK = 256 * 1024  # bytes replayed to a browser that (re)opens a terminal
 
 sessions = {}
+described = {}  # project → what describe() last said about it
 lock = threading.Lock()  # guards `sessions` and every session's buf/listeners/exit
 
 
@@ -137,15 +137,30 @@ class Session:
 
     def json(self):
         return {**{k: getattr(self, k) for k in ("id", "project", "kind", "run_id", "started", "exit")},
-                "workspace": mirror(self.run_id)}
+                "workspace": checkout(self.project, self.run_id)}
 
 
-def mirror(run_id):
-    """Where agent-workspace mirrors a run's /workspace on this machine; None when it doesn't."""
-    # shortcut: sees AGENT_WORKSPACE_DIR only from this server's own environment, not one set in a
-    # project's .env or .claude-sandbox.json; resolve it per project if someone sets it there.
-    base = Path(os.environ.get("AGENT_WORKSPACE_DIR") or Path.home() / ".agent-workspaces")
-    return next(map(str, base.glob(f"*-{run_id}")), None) if run_id else None
+def describe(project):
+    """What the project's enabled plugins have for the page: `run.sh --web`, run in the project
+    like a session would be. The page draws it without knowing which plugin said what."""
+    try:
+        done = subprocess.run([str(RUN_SH), "--web"], cwd=project, capture_output=True, text=True,
+                              timeout=120)
+        if done.returncode:  # run.sh's own complaint, e.g. about the project's .claude-sandbox.json
+            raise ValueError(done.stderr.strip().splitlines()[-1] if done.stderr.strip() else "run.sh --web failed")
+        found = json.loads(done.stdout)
+    except (OSError, ValueError, subprocess.TimeoutExpired) as e:
+        found = {"lists": [], "notes": [str(e)]}
+    described[project] = found
+    return found
+
+
+def checkout(project, run_id):
+    """A run's /workspace on this machine, where a plugin of the project says it keeps one."""
+    pattern = described.get(project, {}).get("checkout")
+    if not pattern or not run_id:
+        return None
+    return next(iter(sorted(glob.glob(pattern.replace("{run_id}", run_id)))), None)
 
 
 vscode_lock = threading.Lock()
@@ -199,31 +214,6 @@ def start(project, kind, run_id):
         s = Session(project, kind, run_id)
         sessions[s.id] = s
         return s
-
-
-def github(project):
-    """Open PRs and issues of a project, through the host's own `gh` login. {} when it has no
-    origin."""
-    if subprocess.run(["git", "-C", project, "remote", "get-url", "origin"],
-                      capture_output=True).returncode:
-        return {}
-    found = {}
-    for key, what, fields in (("prs", "pr", "number,title,url,headRefName,isDraft"),
-                              ("issues", "issue", "number,title,url")):
-        try:
-            done = subprocess.run(["gh", what, "list", "--limit", "50", "--json", fields],
-                                  cwd=project, capture_output=True, text=True, timeout=30)
-        except FileNotFoundError:
-            return {"error": "the gh CLI is not installed on this machine"}
-        except subprocess.TimeoutExpired:
-            return {"error": f"gh {what} list timed out"}
-        if done.returncode:
-            return {"error": done.stderr.strip() or f"gh {what} list failed"}
-        found[key] = json.loads(done.stdout)
-    for pr in found["prs"]:
-        match = RUN_BRANCH.fullmatch(pr["headRefName"])
-        pr["run_id"] = match and match[1]
-    return found
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -332,8 +322,8 @@ class Handler(BaseHTTPRequestHandler):
                 live = [s.json() for s in sessions.values()]
             self.reply(200, {"projects": known, "projects_file": str(self.server.projects_file),
                              "sessions": live})
-        elif url.path == "/api/github" and query.get("project") in known:
-            self.reply(200, github(query["project"]))
+        elif url.path == "/api/project" and query.get("project") in known:
+            self.reply(200, describe(query["project"]))
         elif m := re.fullmatch(r"/api/sessions/(\w+)/stream", url.path):
             if s := self.session(m[1]):
                 self.stream(s)
@@ -359,7 +349,7 @@ class Handler(BaseHTTPRequestHandler):
                 if "session" in req:
                     with lock:
                         s = sessions.get(req["session"])
-                    folder = s and mirror(s.run_id)
+                    folder = s and checkout(s.project, s.run_id)
                 elif folder not in projects(self.server.projects_file):
                     folder = None
                 if not folder:

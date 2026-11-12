@@ -23,8 +23,9 @@ cd "$(dirname "$0")"
 # shellcheck source=src/lib/host-settings.sh
 . src/lib/host-settings.sh
 
-usage() { echo "Usage: $0 [--resume <RUN_ID> | --run-id <RUN_ID>]   (RUN_ID is 6 hex chars)" >&2; exit "${1:-1}"; }
+usage() { echo "Usage: $0 [--resume <RUN_ID> | --run-id <RUN_ID> | --web]   (RUN_ID is 6 hex chars)" >&2; exit "${1:-1}"; }
 RESUME=0
+WEB=0
 GIVEN_ID=0
 RUN_ID=""
 while [ $# -gt 0 ]; do
@@ -33,6 +34,8 @@ while [ $# -gt 0 ]; do
     # run a session is before the container says so); --resume re-attaches to an existing one.
     --resume|--run-id) [ "$1" = --run-id ] || RESUME=1
       GIVEN_ID=1; RUN_ID="${2:-}"; shift; [ $# -eq 0 ] || shift ;;
+    # Starts nothing: prints, as JSON, what the project's enabled plugins have for the web UI.
+    --web) WEB=1; shift ;;
     -h|--help) usage 0 ;;
     *) echo "Unknown argument: $1" >&2; usage ;;
   esac
@@ -50,6 +53,9 @@ fi
 RUN_DATE=$(date -u +%Y%m%d)
 export RUN_ID RUN_DATE
 
+# --web answers with one JSON document on stdout, so everything else said on the way goes to stderr.
+[ "$WEB" = 0 ] || exec 3>&1 >&2
+
 # The worked-on repo's own files overlay .env before anything reads it, so even AGENT and the
 # plugin mix are per-project.
 project_config_load
@@ -63,6 +69,14 @@ agent_resolve
 # (AGENT_AUTH_PROVIDED=1) is already accounted for.
 plugins_discover
 plugins_resolve
+if [ "$WEB" = 1 ]; then
+  # Resolved exactly as a run would be, but not validated: a project that cannot start yet (no
+  # App key, say) still has pull requests to show.
+  plugins_web_stage
+  jq -c --arg agent "$AGENT" --arg plugins "$ENABLED_PLUGINS" \
+    '. + {agent: $agent, plugins: ($plugins | split(" "))}' <<<"$WEB_JSON" >&3
+  exit 0
+fi
 plugins_validate
 plugins_host_stage
 agent_host_stage

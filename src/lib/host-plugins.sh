@@ -4,6 +4,7 @@
 # A plugin is a directory under plugins/ with a plugin.json manifest and optional lifecycle
 # scripts, one per privilege stage:
 #   host.sh        sourced here, on the host — validates config, appends to DOCKER_ARGS
+#   web.sh         sourced here, on the host, by `run.sh --web` — what the web UI shows for a project
 #   root-init.sh   sourced by entrypoint.sh as root, where secrets live
 #   agent-init.sh  sourced by agent-setup.sh as the unprivileged 'node' user
 #
@@ -77,6 +78,32 @@ plugins_run_exit_hooks() {
   for hook in ${PLUGIN_EXIT_HOOKS[@]+"${PLUGIN_EXIT_HOOKS[@]}"}; do eval "$hook"; done
 }
 trap plugins_run_exit_hooks EXIT
+
+# --- helpers available to plugin web.sh scripts --------------------------------------------
+#
+# The web UI knows nothing about GitHub, branches or mirrors: it draws what the enabled plugins of
+# a project describe here. WEB_JSON is that description, printed by `run.sh --web`.
+
+WEB_JSON='{"lists":[],"notes":[]}'
+
+# web_list <title> <json-array>: a column of links on the project's band. Each item is
+# {title, url} plus optional `ref` (a short id shown first, "#12"), `note` ("Draft") and anything
+# a later plugin may want to read, such as the `branch` of a pull request.
+web_list() {
+  WEB_JSON=$(jq -c --arg title "$1" --argjson items "$2" \
+    '.lists += [{title: $title, items: $items}]' <<<"$WEB_JSON")
+}
+
+# web_note <text>: one line shown with the project, for what kept a plugin from listing anything.
+web_note() { WEB_JSON=$(jq -c --arg note "$1" '.notes += [$note]' <<<"$WEB_JSON"); }
+
+# web_map_items <jq-filter>: rewrite every item listed so far, by plugins of a lower priority. An
+# item given a `run_id` belongs to that run: the page offers to open or resume it.
+web_map_items() { WEB_JSON=$(jq -c ".lists[].items[] |= ($1)" <<<"$WEB_JSON"); }
+
+# web_checkout <glob>: where a run's /workspace is on this machine, `{run_id}` standing for the
+# run. The page offers to open the directory it matches in VS Code.
+web_checkout() { WEB_JSON=$(jq -c --arg glob "$1" '.checkout = $glob' <<<"$WEB_JSON"); }
 
 # --- framework -----------------------------------------------------------------------------
 
@@ -166,6 +193,20 @@ plugins_host_stage() {
     if [ -f "$PLUGIN_DIR/host.sh" ]; then
       # shellcheck disable=SC1091  # path resolved at runtime
       . "$PLUGIN_DIR/host.sh"
+    fi
+  done
+  unset PLUGIN_NAME PLUGIN_DIR
+}
+
+# Source each enabled plugin's web.sh, in priority order, so it can describe its part of the page.
+plugins_web_stage() {
+  local name
+  for name in $ENABLED_PLUGINS; do
+    PLUGIN_NAME="$name"
+    PLUGIN_DIR="$PLUGIN_ROOT/$name"
+    if [ -f "$PLUGIN_DIR/web.sh" ]; then
+      # shellcheck disable=SC1091  # path resolved at runtime
+      . "$PLUGIN_DIR/web.sh"
     fi
   done
   unset PLUGIN_NAME PLUGIN_DIR

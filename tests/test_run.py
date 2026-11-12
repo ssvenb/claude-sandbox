@@ -135,3 +135,13 @@ def test_host_proxy_runs_exactly_as_long_as_the_container(sb, run_sh, short_tmp)
     assert "UPSTREAM_PROXY_ATTEST_DIR=/run/upstream-proxy-attest" in run  # host-network is on
     [proxy_dir] = glob.glob(f"{short_tmp}/upstream-proxy-*")
     assert os.listdir(proxy_dir) == ["lock"], "the proxy outlived run.sh"
+
+
+def test_web_describes_the_project_and_starts_nothing(sb, run_sh):
+    sb.dotenv("CLAUDE_EFFORT=high\n")  # announced on a normal run: must not leak into the JSON
+    done = run_sh("--web")
+    assert done.returncode == 0, done.stderr
+    said = json.loads(done.stdout)
+    assert said["agent"] == "claude" and "cwd-workspace" in said["plugins"]
+    assert said["lists"] == [] and "checkout" not in said  # agent-workspace is off in BASE
+    assert done.calls == []

@@ -40,6 +40,12 @@ a project whose `origin` is on GitHub it lists the open pull requests and issues
 gets a **Resume** button, which is `run.sh --resume <RUN_ID>`; an ended session in the list has one
 too.
 
+What a project shows beyond its sessions comes from its enabled plugins, not from the web UI: the
+page draws what `run.sh --web` prints for the project, which is what each enabled plugin's `web.sh`
+described. `github-auth` lists the pull requests and issues, `git-workspace` recognises its per-run
+branches among them, `agent-workspace` says where a run's checkout is — switch one off for a
+project and its part of the page goes with it.
+
 A session opens in a browser tab of its own — the agent's own TUI, so its slash commands and
 suggestions work as they do in your terminal. Clicking a session whose tab is already open brings
 that tab to the front instead of opening a second one.
@@ -183,6 +189,7 @@ executed), so their `export`s survive into the rest of the boot sequence.
 | `plugin.json` | — | read on the host before anything else |
 | `install.sh` | root | image build, only if the plugin is enabled |
 | `host.sh` | you | on the host, before `docker run` |
+| `web.sh` | you | on the host, by `run.sh --web`, whenever the web UI draws the project |
 | `root-init.sh` | root | in the container, while secrets are still present |
 | `agent-init.sh` | `node` | in the container, just before Claude starts |
 | `settings.json` | — | merged into the managed policy at boot |
@@ -309,6 +316,27 @@ it, and `src/lib/host-credentials.sh` does the rest for every plugin alike.
 
 Pick an interval comfortably inside the credential's lifetime (GitHub's 1h tokens: 40 minutes), so
 a few failed attempts in a row still don't let it lapse.
+
+### `web.sh` — web stage (your user)
+
+Sourced by `run.sh --web`, which the web UI runs in a project to learn what to draw for it. The
+agent and the plugins are resolved exactly as for a run — same project settings, same `ENABLE_*`
+switches — but nothing is validated, built or started, so keep it quick and never `die` over
+something a run would need. The web UI itself knows nothing about any plugin: it draws what these
+calls describe.
+
+| Call | Puts on the project's band |
+|------|----------------------------|
+| `web_list TITLE JSON_ARRAY` | a column of links; each item is `{title, url}` plus optional `ref` (a short id shown first, `#12`), `note` (`Draft`) and any field a later plugin may read |
+| `web_note TEXT` | one line saying why there is nothing to list |
+| `web_map_items JQ_FILTER` | rewrites every item listed so far (by plugins of a lower `priority`); an item given a `run_id` gets an **Open** or **Resume** button for that run |
+| `web_checkout GLOB` | where a run's `/workspace` is on this machine, `{run_id}` standing for the run; adds **Code** (VS Code) to its session |
+
+```bash
+# plugins/github-auth/web.sh lists the pull requests with their `branch`;
+# plugins/git-workspace/web.sh, which owns the branch naming, then claims its own:
+web_map_items 'if (.branch // "") | test("^.+/[0-9]{8}-[0-9a-f]{6}$") then .run_id = .branch[-6:] else . end'
+```
 
 ### Project configuration — `.claude-sandbox.json`
 

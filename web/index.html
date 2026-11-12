@@ -22,11 +22,12 @@
   .tally.lit { color: var(--lamp); }
 
   /* One band per project: who it is on the left, what is going on in it across the rest. */
-  section { display: grid; grid-template-columns: 220px repeat(3, minmax(0, 1fr)); gap: 12px 36px;
+  section { display: grid; grid-template-columns: 220px; grid-auto-flow: column;
+            grid-auto-columns: minmax(0, 1fr); gap: 12px 36px;
             padding: 24px 0 28px; border-top: 1px solid var(--rule); }
   h2 { font-size: 22px; font-weight: 650; letter-spacing: -.015em; line-height: 1.2; margin: 0 0 12px;
        overflow-wrap: anywhere; }
-  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
   h3 { font-size: 13px; font-weight: 400; color: var(--haze); margin: 6px 0 8px; }
   ul { list-style: none; margin: 0; padding: 0; }
   li { display: flex; align-items: center; gap: 6px; min-height: 32px; }
@@ -54,7 +55,7 @@
 
   @media (max-width: 900px) {
     body { padding: 24px 16px 48px; }
-    section { grid-template-columns: minmax(0, 1fr); }
+    section { grid-template-columns: minmax(0, 1fr); grid-auto-flow: row; }
   }
   @media (prefers-reduced-motion: reduce) { .lamp.lit { animation: none; } }
 </style>
@@ -78,7 +79,7 @@ const post = (path, body) => api(path, {method: 'POST', body});
 const name = path => path.replace(/\/+$/, '').split('/').pop();
 const label = s => s.kind === 'shell' ? 'shell' : s.run_id + (s.kind === 'resume' ? ' (resumed)' : '');
 
-let state = {projects: [], sessions: []}, github = {}, drawn = '';
+let state = {projects: [], sessions: []}, plugins = {}, drawn = '';
 
 // A tab per thing, found again by its name: opened once, brought to the front after that. Always
 // called inside the click, before any await, or the popup blocker eats the new tab.
@@ -125,7 +126,7 @@ const resume = (path, run_id) =>
   h('button', {onclick: () => start(path, 'resume', run_id), title: 'Same branch, same conversation'}, 'Resume');
 
 function render() {
-  const sig = JSON.stringify([state, github]);
+  const sig = JSON.stringify([state, plugins]);
   if (sig === drawn) return;
   drawn = sig;
   const live = id => state.sessions.find(s => s.run_id === id && s.exit === null);
@@ -137,14 +138,15 @@ function render() {
       h('p', {className: 'tally' + (running ? ' lit' : '')},
         running ? `${running} session${running > 1 ? 's' : ''} running` : 'All quiet')),
     ...state.projects.map(path => {
-      const mine = state.sessions.filter(s => s.project === path), gh = github[path];
+      const mine = state.sessions.filter(s => s.project === path), said = plugins[path];
       return h('section', {},
         h('div', {},
           h('h2', {title: path}, name(path)),
           h('div', {className: 'actions'},
             h('button', {className: 'primary', onclick: () => start(path, 'run')}, 'New session'),
             h('button', {onclick: () => start(path, 'shell'), title: 'A shell on this machine, in the project directory'}, 'Open shell'),
-            h('button', {onclick: () => code(path, {project: path}), title: `VS Code in the browser, on ${path}`}, 'Open in VS Code'))),
+            h('button', {onclick: () => code(path, {project: path}), title: `VS Code in the browser, on ${path}`}, 'Open in VS Code')),
+          ...(said ? said.notes.map(note => h('p', {}, note)) : [h('p', {}, 'Reading the project…')])),
         column('Sessions', mine, s => h('li', {},
           h('button', {className: 'session' + (s.exit === null ? '' : ' ended'), onclick: () => show(s), title: 'Open its terminal in a tab'},
             h('span', {className: 'lamp' + (s.exit === null ? ' lit' : '')}),
@@ -153,21 +155,17 @@ function render() {
           s.exit !== null && s.run_id && !live(s.run_id) ? resume(path, s.run_id) : '',
           h('button', {className: 'icon', onclick: () => close(s), ariaLabel: s.exit === null ? 'Stop session' : 'Remove session'}, '✕')),
           'Nobody at work.'),
-        ...(!gh ? [h('div', {}, h('p', {}, 'Asking GitHub…'))]
-          : gh.error ? [h('div', {}, h('h3', {}, 'GitHub'), h('p', {}, gh.error))]
-          : !gh.prs ? [h('div', {}, h('h3', {}, 'GitHub'), h('p', {}, 'This project has no origin remote.'))]
-          : [column('Pull requests', gh.prs, p => {
-               const s = p.run_id && live(p.run_id);
-               return h('li', {},
-                 h('a', {href: p.url, target: '_blank', rel: 'noopener', title: `${p.title} (${p.headRefName})`},
-                   h('span', {className: 'num'}, `#${p.number}`),
-                   p.isDraft ? h('span', {className: 'draft'}, 'Draft: ') : '', p.title),
-                 s ? h('button', {onclick: () => show(s)}, 'Open')
-                   : p.run_id ? resume(path, p.run_id) : '');
-             }, 'None open.'),
-             column('Issues', gh.issues, i => h('li', {},
-               h('a', {href: i.url, target: '_blank', rel: 'noopener', title: i.title},
-                 h('span', {className: 'num'}, `#${i.number}`), i.title)), 'None open.')]));
+        // What the project's plugins list (pull requests, issues, …): the page only draws it. An
+        // item a plugin tied to a run opens that run's session, or resumes it.
+        ...(said ? said.lists : []).map(list => column(list.title, list.items, i => {
+          const s = i.run_id && live(i.run_id);
+          return h('li', {},
+            h('a', {href: i.url, target: '_blank', rel: 'noopener', title: i.title + (i.branch ? ` (${i.branch})` : '')},
+              i.ref ? h('span', {className: 'num'}, i.ref) : '',
+              i.note ? h('span', {className: 'draft'}, i.note + ': ') : '', i.title),
+            s ? h('button', {onclick: () => show(s)}, 'Open')
+              : i.run_id ? resume(path, i.run_id) : '');
+        }, 'None open.')));
     }));
   if (!state.projects.length)
     $('board').append(h('p', {},
@@ -175,7 +173,7 @@ function render() {
 }
 
 async function load(path) {
-  github[path] = await api('/api/github?project=' + encodeURIComponent(path)).catch(e => ({error: e.message}));
+  plugins[path] = await api('/api/project?project=' + encodeURIComponent(path)).catch(e => ({lists: [], notes: [e.message]}));
   render();
 }
 

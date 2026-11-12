@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sandboxes</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+<style>
+  :root { --bg: #0d1117; --panel: #161b22; --line: #30363d; --text: #e6edf3; --dim: #8b949e;
+          --accent: #58a6ff; --ok: #3fb950; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100vh; display: flex; background: var(--bg); color: var(--text);
+         font: 14px/1.4 system-ui, sans-serif; }
+  aside { width: 340px; flex: none; overflow-y: auto; background: var(--panel);
+          border-right: 1px solid var(--line); padding: 12px; }
+  main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 12px; padding: 8px 12px; min-height: 44px;
+           border-bottom: 1px solid var(--line); }
+  header span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #term { flex: 1; min-height: 0; padding: 6px; }
+  section { margin-bottom: 20px; }
+  h2 { font-size: 15px; margin: 0 0 6px; display: flex; align-items: center; gap: 6px; }
+  h2 span { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim);
+       margin: 10px 0 4px; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+  li > :first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                      white-space: nowrap; text-align: left; }
+  button { font: inherit; color: var(--text); background: #21262d; border: 1px solid var(--line);
+           border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+  button:hover { border-color: var(--dim); }
+  button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button.session { background: none; border-color: transparent; padding: 4px 6px; }
+  button.session[aria-current=true] { background: #1f6feb33; border-color: var(--accent); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px;
+         background: var(--dim); }
+  .dot.live { background: var(--ok); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .dim { color: var(--dim); font-size: 12px; }
+</style>
+</head>
+<body>
+<aside id="side" aria-label="Projects"></aside>
+<main>
+  <header id="bar"></header>
+  <div id="term"></div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+// Everything is built with textContent, never innerHTML: PR titles are other people's text.
+const h = (tag, props = {}, ...kids) => {
+  const e = Object.assign(document.createElement(tag), props);
+  e.append(...kids);
+  return e;
+};
+const api = async (path, opts) => {
+  const r = await fetch(path, opts), j = await r.json();
+  if (!r.ok) throw new Error(j.error);
+  return j;
+};
+const post = (path, body) => api(path, {method: 'POST', body});
+const name = path => path.replace(/\/+$/, '').split('/').pop();
+const label = s => s.kind === 'shell' ? 'shell' : s.run_id + (s.kind === 'resume' ? ' (resumed)' : '');
+
+let state = {projects: [], sessions: []}, prs = {}, current = null, es = null, drawn = '';
+
+const term = new Terminal({fontSize: 13, cursorBlink: true, theme: {background: '#0d1117'}});
+const fit = new FitAddon.FitAddon();
+term.loadAddon(fit);
+term.open($('term'));
+
+// One POST at a time, batching what was typed meanwhile: parallel requests could arrive reordered.
+let pending = '', busy = false;
+async function flush() {
+  if (busy || !pending || !current) return;
+  busy = true;
+  const data = pending;
+  pending = '';
+  try { await fetch(`/api/sessions/${current}/input`, {method: 'POST', body: data}); } catch {}
+  busy = false;
+  flush();
+}
+term.onData(d => { pending += d; flush(); });
+
+function resize() {
+  fit.fit();
+  if (current) fetch(`/api/sessions/${current}/resize?cols=${term.cols}&rows=${term.rows}`, {method: 'POST'});
+}
+new ResizeObserver(resize).observe($('term'));
+
+function attach(id) {
+  es?.close();
+  current = id;
+  pending = '';
+  location.hash = id || '';
+  term.reset();
+  if (id) {
+    es = new EventSource(`/api/sessions/${id}/stream`);
+    // The stream starts with the scrollback again after a reconnect, so start clean each time.
+    es.onopen = () => { term.reset(); resize(); };
+    es.onmessage = e => term.write(Uint8Array.from(atob(e.data), c => c.charCodeAt(0)));
+    es.addEventListener('exit', () => { es.close(); refresh(); });
+    term.focus();
+  }
+  render();
+}
+
+async function start(project, kind, run_id) {
+  try {
+    const s = await post('/api/sessions', JSON.stringify({project, kind, run_id}));
+    await refresh();
+    attach(s.id);
+  } catch (e) { alert(e.message); }
+}
+
+async function close(s) {
+  if (s.exit === null && !confirm(`Stop ${label(s)} in ${name(s.project)}?`)) return;
+  await post(`/api/sessions/${s.id}/close`);
+  if (s.exit !== null && current === s.id) attach(null);
+  refresh();
+}
+
+function render() {
+  const sig = JSON.stringify([state, prs, current]);
+  if (sig === drawn) return;
+  drawn = sig;
+  const live = id => state.sessions.find(s => s.run_id === id && s.exit === null);
+
+  $('side').replaceChildren(...state.projects.map(path => {
+    const mine = state.sessions.filter(s => s.project === path), pr = prs[path] || {};
+    return h('section', {},
+      h('h2', {}, h('span', {title: path}, name(path)),
+        h('button', {onclick: () => start(path, 'run')}, 'New session'),
+        h('button', {onclick: () => start(path, 'shell'), title: 'A shell on this machine, in the project directory'}, 'Shell')),
+      h('ul', {}, ...mine.map(s => h('li', {},
+        h('button', {className: 'session', ariaCurrent: String(s.id === current), onclick: () => attach(s.id)},
+          h('span', {className: 'dot' + (s.exit === null ? ' live' : '')}),
+          label(s) + (s.exit === null ? '' : ` — exited ${s.exit}`)),
+        h('button', {onclick: () => close(s), ariaLabel: s.exit === null ? 'Stop session' : 'Remove session'}, '✕')))),
+      ...(pr.prs || pr.error ? [
+        h('h3', {}, 'Open pull requests ',
+          h('button', {onclick: () => loadPrs(path), ariaLabel: 'Reload pull requests'}, '⟳')),
+        pr.error ? h('p', {className: 'dim'}, pr.error)
+          : pr.prs.length ? h('ul', {}, ...pr.prs.map(p => {
+              const s = p.run_id && live(p.run_id);
+              return h('li', {},
+                h('a', {href: p.url, target: '_blank', rel: 'noopener', title: `${p.title} — ${p.headRefName}`},
+                  `#${p.number} ${p.isDraft ? '[draft] ' : ''}${p.title}`),
+                s ? h('button', {onclick: () => attach(s.id)}, 'Open')
+                  : p.run_id ? h('button', {onclick: () => start(path, 'resume', p.run_id)}, 'Resume') : '');
+            }))
+          : h('p', {className: 'dim'}, 'None.')] : []));
+  }));
+  if (!state.projects.length)
+    $('side').append(h('p', {className: 'dim'},
+      `No projects yet. List their directories, one per line, in ${state.projects_file}`));
+
+  const s = state.sessions.find(s => s.id === current);
+  $('bar').replaceChildren(...(s
+    ? [h('span', {}, `${name(s.project)} · ${label(s)}` + (s.exit === null ? '' : ` — exited ${s.exit}`)),
+       h('button', {onclick: () => close(s)}, s.exit === null ? 'Stop' : 'Remove')]
+    : [h('span', {className: 'dim'}, 'Start a session, or pick one on the left.')]));
+}
+
+async function loadPrs(path) {
+  prs[path] = await api('/api/prs?project=' + encodeURIComponent(path)).catch(e => ({error: e.message}));
+  render();
+}
+
+async function refresh() {
+  const before = state.projects.join();
+  state = await api('/api/state');
+  if (state.projects.join() !== before) state.projects.forEach(loadPrs);
+  render();
+}
+
+refresh().then(() => {
+  const id = location.hash.slice(1);
+  if (state.sessions.some(s => s.id === id)) attach(id); else render();
+});
+setInterval(refresh, 3000);
+setInterval(() => state.projects.forEach(loadPrs), 60000);
+</script>
+</body>
+</html>

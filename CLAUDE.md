@@ -171,7 +171,15 @@ go any further.
 ./run.sh                              # fresh run (generates RUN_ID), builds claude-agent:$AGENT
 ./run.sh --resume <6-hex-char-id>     # resume an existing run's branch
 AGENT=copilot ./run.sh                # same sandbox, GitHub Copilot CLI instead
+./run.sh --run-id <6-hex-char-id>     # fresh run under a caller-chosen id (what the web UI does)
+./web/server.py                       # web UI on http://127.0.0.1:8787
 ```
+
+`web/server.py` (stdlib only, host side) runs `run.sh` in a pty per session, with the project as
+cwd, and streams it to `web/index.html` (xterm.js): projects come from
+`~/.config/claude-sandbox/projects` (one directory per line, `--projects FILE` to override), open
+PRs from the host's `gh`, and a PR on a per-run branch resumes with `run.sh --resume`. It stops a
+session by removing the container `run.sh` names `sandbox-<RUN_ID>`.
 
 ## Tests
 

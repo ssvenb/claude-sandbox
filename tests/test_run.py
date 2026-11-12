@@ -71,7 +71,15 @@ def test_resume_reuses_the_run_id(sb, run_sh):
     assert "RUN_ID=0a1b2c" in run and "RESUME=1" in run
 
 
+def test_run_id_starts_a_fresh_run_under_the_given_id(sb, run_sh):
+    done = run_sh("--run-id", "0a1b2c", CLAUDE_CODE_OAUTH_TOKEN="t")
+    [run] = calls(done, "run")
+    assert "RUN_ID=0a1b2c" in run and "RESUME=0" in run
+    assert run[-3:-1] == ["--name", "sandbox-0a1b2c"]
+
+
 @pytest.mark.parametrize("args, code, message", [
+    (["--run-id", "nothex"], 1, "Invalid RUN_ID 'nothex'"),
     (["--resume", "ABC123"], 1, "Invalid RUN_ID 'ABC123'"),
     (["--resume", "abc12"], 1, "Invalid RUN_ID"),
     (["--bogus"], 1, "Unknown argument: --bogus"),

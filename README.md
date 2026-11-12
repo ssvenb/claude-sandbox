@@ -25,6 +25,25 @@ cd ~/code/my-repo
 a manual `docker build -t claude-agent:claude --build-arg AGENT=claude .` is only needed if you
 want to build without running.
 
+## Web UI
+
+```bash
+mkdir -p ~/.config/claude-sandbox
+printf '%s\n' ~/code/my-repo ~/code/other-repo > ~/.config/claude-sandbox/projects
+./web/server.py           # http://127.0.0.1:8787  (--port N, --projects FILE)
+```
+
+One page for all your sandboxes: every listed project with its running sessions, a **New session**
+button (`run.sh` in that directory), a terminal per session — the agent's own TUI, so its slash
+commands and suggestions work as they do in your terminal — and a plain host **Shell** in the
+project. For a project whose `origin` is on GitHub it lists the open pull requests through the
+host's `gh` login; a PR on a per-run branch (`<prefix>/<date>-<RUN_ID>`) gets a **Resume** button,
+which is `run.sh --resume <RUN_ID>`.
+
+Needs only `python3` on the host (and `gh` for the PR list); the page loads xterm.js from a CDN.
+It listens on loopback only and has no login — use an SSH tunnel to reach it from elsewhere.
+Sessions belong to the server process: stopping it stops them.
+
 ## How a run boots
 
 ```
@@ -523,6 +542,7 @@ Volume mounts are contributed by plugins via `pass_mount`; the core `docker run`
 | Path | Purpose |
 |------|---------|
 | [run.sh](run.sh) | host entry point: config, agent + plugin resolution, build, `docker run` |
+| [web/](web) | web UI over `run.sh`: `server.py` (sessions in ptys, PR list) and its one page |
 | [Dockerfile](Dockerfile) | image: base tools, agent install stage, plugin install stage, permissions |
 | [settings-base.json](settings-base.json) | empty policy base plugin fragments merge into |
 | [src/entrypoint.sh](src/entrypoint.sh) | container root stage and privilege handoff |

@@ -176,10 +176,14 @@ AGENT=copilot ./run.sh                # same sandbox, GitHub Copilot CLI instead
 ```
 
 `web/server.py` (stdlib only, host side) runs `run.sh` in a pty per session, with the project as
-cwd, and streams it to `web/index.html` (xterm.js): projects come from
-`~/.config/claude-sandbox/projects` (one directory or glob per line, `~/code/*/.git` for just the git repos; `--projects FILE` to override), open
-PRs from the host's `gh`, and a PR on a per-run branch resumes with `run.sh --resume`. It stops a
-session by removing the container `run.sh` names `sandbox-<RUN_ID>`.
+cwd. `web/index.html` is the status board: projects from `~/.config/claude-sandbox/projects` (one
+directory or glob per line, `~/code/*/.git` for just the git repos; `--projects FILE` to override), each with its sessions and its open PRs and
+issues from the host's `gh`; a PR on a per-run branch resumes with `run.sh --resume`. A session's
+terminal is `web/session.html` (xterm.js) in a browser tab named after the session, so a second
+click focuses it. `POST /api/vscode` starts one `code serve-web` on first use, on a unix socket in
+a 0700 directory; the server tunnels `/vscode/` to it behind the same Host/Origin guard, and the
+page opens it there on a project directory or on a run's `agent-workspace` mirror. It stops a session by removing the container `run.sh` names
+`sandbox-<RUN_ID>`.
 
 ## Tests
 

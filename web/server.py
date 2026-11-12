@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Web UI to orchestrate sandboxes: one page listing the configured projects, their running
-sessions and open pull requests, with a terminal for each session.
+"""Web UI to orchestrate sandboxes: a status page listing the configured projects with their
+sessions, open pull requests and open issues; a terminal page per session, each in its own tab;
+and VS Code in the browser (`code serve-web`) on a project or on a run's checkout.
 
 Runs on the HOST, as you, next to run.sh — a session is `run.sh` in a pty with the project as its
 cwd, exactly what you would type yourself. Standard library only; the page loads xterm.js from a
@@ -27,6 +28,9 @@ import signal
 import socket
 import struct
 import subprocess
+import sys
+import shutil
+import tempfile
 import termios
 import threading
 import time
@@ -132,7 +136,51 @@ class Session:
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def json(self):
-        return {k: getattr(self, k) for k in ("id", "project", "kind", "run_id", "started", "exit")}
+        return {**{k: getattr(self, k) for k in ("id", "project", "kind", "run_id", "started", "exit")},
+                "workspace": mirror(self.run_id)}
+
+
+def mirror(run_id):
+    """Where agent-workspace mirrors a run's /workspace on this machine; None when it doesn't."""
+    # shortcut: sees AGENT_WORKSPACE_DIR only from this server's own environment, not one set in a
+    # project's .env or .claude-sandbox.json; resolve it per project if someone sets it there.
+    base = Path(os.environ.get("AGENT_WORKSPACE_DIR") or Path.home() / ".agent-workspaces")
+    return next(map(str, base.glob(f"*-{run_id}")), None) if run_id else None
+
+
+vscode_lock = threading.Lock()
+vscode_server = None  # (process, path of the unix socket it listens on)
+
+
+def vscode():
+    """The socket of the one `code serve-web` every editor tab talks to, started on first use.
+    It serves any folder (`?folder=`), so one is enough for all projects and runs."""
+    global vscode_server
+    with vscode_lock:
+        if vscode_server is None or vscode_server[0].poll() is not None:
+            # VS Code in a browser is a shell on your account. A socket in a 0700 directory keeps
+            # other local users out, and the only way in for a browser is Handler.tunnel, behind
+            # the same guard as the terminals — so it needs no connection token of its own (one
+            # would not survive anyway: the server refuses its token cookie on any navigation
+            # another origin started, which every link from our page to a second port is).
+            path = tempfile.mkdtemp(prefix="sandbox-vscode-") + "/socket"
+            try:
+                proc = subprocess.Popen(
+                    ["code", "serve-web", "--socket-path", path, "--without-connection-token",
+                     "--server-base-path", "/vscode", "--accept-server-license-terms"],
+                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    start_new_session=True)  # a group of its own, to stop its children with it
+            except FileNotFoundError:
+                raise ValueError("VS Code's `code` command is not installed on this machine") from None
+            vscode_server = (proc, path)
+        proc, path = vscode_server
+        for _ in range(100):  # the first tab would otherwise load before it listens
+            if proc.poll() is not None:
+                raise ValueError(f"`code serve-web` exited with {proc.returncode}")
+            if os.path.exists(path):
+                return path
+            time.sleep(0.1)
+        raise ValueError("`code serve-web` did not start listening")
 
 
 def start(project, kind, run_id):
@@ -152,26 +200,29 @@ def start(project, kind, run_id):
         return s
 
 
-def pull_requests(project):
-    """Open PRs of a project, through the host's own `gh` login. {} when it has no origin."""
+def github(project):
+    """Open PRs and issues of a project, through the host's own `gh` login. {} when it has no
+    origin."""
     if subprocess.run(["git", "-C", project, "remote", "get-url", "origin"],
                       capture_output=True).returncode:
         return {}
-    try:
-        done = subprocess.run(
-            ["gh", "pr", "list", "--limit", "50", "--json", "number,title,url,headRefName,isDraft"],
-            cwd=project, capture_output=True, text=True, timeout=30)
-    except FileNotFoundError:
-        return {"error": "the gh CLI is not installed on this machine"}
-    except subprocess.TimeoutExpired:
-        return {"error": "gh pr list timed out"}
-    if done.returncode:
-        return {"error": done.stderr.strip() or "gh pr list failed"}
-    prs = json.loads(done.stdout)
-    for pr in prs:
+    found = {}
+    for key, what, fields in (("prs", "pr", "number,title,url,headRefName,isDraft"),
+                              ("issues", "issue", "number,title,url")):
+        try:
+            done = subprocess.run(["gh", what, "list", "--limit", "50", "--json", fields],
+                                  cwd=project, capture_output=True, text=True, timeout=30)
+        except FileNotFoundError:
+            return {"error": "the gh CLI is not installed on this machine"}
+        except subprocess.TimeoutExpired:
+            return {"error": f"gh {what} list timed out"}
+        if done.returncode:
+            return {"error": done.stderr.strip() or f"gh {what} list failed"}
+        found[key] = json.loads(done.stdout)
+    for pr in found["prs"]:
         match = RUN_BRANCH.fullmatch(pr["headRefName"])
         pr["run_id"] = match and match[1]
-    return {"prs": prs}
+    return found
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -204,7 +255,68 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(404, {"error": "no such session"})
         return s
 
+    def tunnel(self):
+        """Pass one request under /vscode/ to `code serve-web`, and its answer back, as raw bytes:
+        that carries its WebSockets too, and puts VS Code on our origin and behind our guard."""
+        if not self.guard():
+            return
+        try:
+            with vscode_lock:
+                path = vscode_server and vscode_server[1]
+            up = socket.socket(socket.AF_UNIX)
+            up.connect(path)
+        except (TypeError, OSError):  # never started (a stale tab, a restarted server), or gone
+            return self.reply(502, {"error": "VS Code is not running: open it from the status page"})
+        upgrade = "upgrade" in self.headers.get("Connection", "").lower()
+        # One request per connection, or a later one would ride through unguarded.
+        self.close_connection = True
+        if not upgrade:
+            del self.headers["Connection"]
+            self.headers["Connection"] = "close"
+        head = f"{self.command} {self.path} HTTP/1.1\r\n" + "".join(
+            f"{k}: {v}\r\n" for k, v in self.headers.items()) + "\r\n"
+
+        def upload():
+            try:
+                if upgrade:
+                    while data := self.rfile.read1(65536):
+                        up.sendall(data)
+                    up.shutdown(socket.SHUT_RDWR)  # the browser hung up: so does VS Code's side
+                else:
+                    up.sendall(self.rfile.read(int(self.headers.get("Content-Length") or 0)))
+            except (OSError, ValueError):
+                pass
+
+        try:
+            with up:
+                up.sendall(head.encode("latin-1"))
+                threading.Thread(target=upload, daemon=True).start()
+                while data := up.recv(65536):
+                    self.connection.sendall(data)
+        except OSError:
+            pass
+        if upgrade:  # unblocks upload(), which is still reading from the browser
+            try:
+                self.connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def route(self, mine):
+        tunnel = self.path == "/vscode" or self.path.startswith(("/vscode/", "/vscode?"))
+        (self.tunnel if tunnel else mine)()
+
     def do_GET(self):
+        self.route(self.get)
+
+    def do_POST(self):
+        self.route(self.post)
+
+    def do_PUT(self):  # nothing of ours, but VS Code may use any method
+        self.route(lambda: self.reply(404, {"error": "not found"}))
+
+    do_DELETE = do_HEAD = do_OPTIONS = do_PATCH = do_PUT
+
+    def get(self):
         if not self.guard():
             return
         url = urlparse(self.path)
@@ -212,20 +324,22 @@ class Handler(BaseHTTPRequestHandler):
         known = projects(self.server.projects_file)
         if url.path == "/":
             self.reply(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
+        elif url.path == "/session":
+            self.reply(200, (HERE / "session.html").read_bytes(), "text/html; charset=utf-8")
         elif url.path == "/api/state":
             with lock:
                 live = [s.json() for s in sessions.values()]
             self.reply(200, {"projects": known, "projects_file": str(self.server.projects_file),
                              "sessions": live})
-        elif url.path == "/api/prs" and query.get("project") in known:
-            self.reply(200, pull_requests(query["project"]))
+        elif url.path == "/api/github" and query.get("project") in known:
+            self.reply(200, github(query["project"]))
         elif m := re.fullmatch(r"/api/sessions/(\w+)/stream", url.path):
             if s := self.session(m[1]):
                 self.stream(s)
         else:
             self.reply(404, {"error": "not found"})
 
-    def do_POST(self):
+    def post(self):
         if not self.guard():
             return
         url = urlparse(self.path)
@@ -237,6 +351,20 @@ class Handler(BaseHTTPRequestHandler):
                 if req.get("project") not in projects(self.server.projects_file):
                     raise ValueError("not a configured project")
                 self.reply(200, start(req["project"], req.get("kind"), req.get("run_id")).json())
+            elif url.path == "/api/vscode":
+                # Only folders this UI already knows: a listed project, or a session's checkout.
+                req = json.loads(body)
+                folder = req.get("project")
+                if "session" in req:
+                    with lock:
+                        s = sessions.get(req["session"])
+                    folder = s and mirror(s.run_id)
+                elif folder not in projects(self.server.projects_file):
+                    folder = None
+                if not folder:
+                    raise ValueError("not a configured project, or a session without a checkout on this machine")
+                vscode()
+                self.reply(200, {"folder": folder})
             elif m := re.fullmatch(r"/api/sessions/(\w+)/(input|resize|close)", url.path):
                 s = self.session(m[1])
                 if s is None:
@@ -327,6 +455,7 @@ if __name__ == "__main__":
                         help="file listing one project directory per line (default: %(default)s)")
     args = parser.parse_args()
     server = serve(args.port, args.projects, args.bind)
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # so `finally` cleans up on a plain kill too
     print(f"Sandboxes: http://127.0.0.1:{server.server_address[1]}  (projects: {args.projects})",
           flush=True)
     if args.bind not in ("127.0.0.1", "localhost"):
@@ -339,3 +468,9 @@ if __name__ == "__main__":
     finally:
         for s in list(sessions.values()):
             s.stop()
+        if vscode_server:
+            try:  # the `code` CLI leaves the server it spawned running when it is terminated
+                os.killpg(vscode_server[0].pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            shutil.rmtree(os.path.dirname(vscode_server[1]), ignore_errors=True)

@@ -33,12 +33,23 @@ printf '%s\n' ~/code/my-repo ~/code/other-repo > ~/.config/claude-sandbox/projec
 ./web/server.py           # http://127.0.0.1:8787  (--port N, --projects FILE)
 ```
 
-One page for all your sandboxes: every listed project with its running sessions, a **New session**
-button (`run.sh` in that directory), a terminal per session — the agent's own TUI, so its slash
-commands and suggestions work as they do in your terminal — and a plain host **Shell** in the
-project. For a project whose `origin` is on GitHub it lists the open pull requests through the
-host's `gh` login; a PR on a per-run branch (`<prefix>/<date>-<RUN_ID>`) gets a **Resume** button,
-which is `run.sh --resume <RUN_ID>`; an ended session in the list has one too.
+The home page is a status board of all your sandboxes: every listed project with its sessions, a
+**New session** button (`run.sh` in that directory) and a plain host **Shell** in the project. For
+a project whose `origin` is on GitHub it lists the open pull requests and issues through the host's
+`gh` login, each a link to its GitHub page; a PR on a per-run branch (`<prefix>/<date>-<RUN_ID>`)
+gets a **Resume** button, which is `run.sh --resume <RUN_ID>`; an ended session in the list has one
+too.
+
+A session opens in a browser tab of its own — the agent's own TUI, so its slash commands and
+suggestions work as they do in your terminal. Clicking a session whose tab is already open brings
+that tab to the front instead of opening a second one.
+
+**Open in VS Code** opens VS Code in the browser on the project's directory, and **Code** on a
+session opens it on that run's checkout (the `agent-workspace` mirror of `/workspace`), again one
+tab per folder. It needs VS Code's `code` command on the host: the first click starts one
+`code serve-web`, accepting the VS Code Server license terms on your behalf, and it stops with the
+web UI. It listens on a unix socket only your user can reach and is served under `/vscode/` of the
+web UI itself, so there is no second port to open or to forward over an SSH tunnel.
 
 Resuming brings back the agent's conversation as well as the branch: each run's conversation is
 keyed to its RUN_ID (Claude Code `--session-id`, Copilot `--name`). The transcript lives in the
@@ -548,7 +559,7 @@ Volume mounts are contributed by plugins via `pass_mount`; the core `docker run`
 | Path | Purpose |
 |------|---------|
 | [run.sh](run.sh) | host entry point: config, agent + plugin resolution, build, `docker run` |
-| [web/](web) | web UI over `run.sh`: `server.py` (sessions in ptys, PR list) and its one page |
+| [web/](web) | web UI over `run.sh`: `server.py` (sessions in ptys, PRs and issues, a tunnel to `code serve-web`), the status page `index.html` and the per-session terminal `session.html` |
 | [Dockerfile](Dockerfile) | image: base tools, agent install stage, plugin install stage, permissions |
 | [settings-base.json](settings-base.json) | empty policy base plugin fragments merge into |
 | [src/entrypoint.sh](src/entrypoint.sh) | container root stage and privilege handoff |

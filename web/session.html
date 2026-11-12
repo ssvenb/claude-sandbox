@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sandboxes</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&display=swap">
+<style>
+  :root { --dusk: #1b1d36; --night: #0f1123; --rule: #2e3158; --paper: #e6e4f2; --haze: #8c8fb3;
+          --lamp: #f2b84b; --link: #9aa5ff; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  button { font: inherit; font-size: 14px; color: var(--paper); background: transparent;
+           border: 1px solid var(--rule); border-radius: 999px; padding: 3px 12px; cursor: pointer; }
+  button:hover { border-color: var(--haze); }
+  button:focus-visible, a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+  body { margin: 0; height: 100vh; display: flex; flex-direction: column; background: var(--night);
+         color: var(--paper); font: 15px/1.45 "Bricolage Grotesque", system-ui, sans-serif; }
+  header { display: flex; align-items: baseline; gap: 10px; padding: 10px 16px;
+           border-bottom: 1px solid var(--rule); background: var(--dusk); }
+  header strong { font-weight: 650; }
+  header .what { flex: 1; color: var(--haze); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  header .what.lit { color: var(--lamp); }
+  #stage { flex: 1; min-height: 0; position: relative; }
+  #term { position: absolute; inset: 10px 6px 6px 14px; }
+  #empty { position: absolute; inset: 0; display: grid; place-content: center; text-align: center;
+           background: var(--night); color: var(--haze); padding: 24px; }
+  #empty b { display: block; color: var(--paper); font-size: 22px; font-weight: 600; margin-bottom: 6px; }
+  #empty[hidden] { display: none; }
+  a { color: var(--link); }
+</style>
+</head>
+<body>
+<header id="bar"></header>
+<div id="stage">
+  <div id="term"></div>
+  <div id="empty" hidden><b>This session is gone</b>It was removed, or the server restarted. <a href="/">See what is running</a></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+// Everything is built with textContent, never innerHTML: PR titles are other people's text.
+const h = (tag, props = {}, ...kids) => {
+  const e = Object.assign(document.createElement(tag), props);
+  e.append(...kids);
+  return e;
+};
+const api = async (path, opts) => {
+  const r = await fetch(path, opts), j = await r.json();
+  if (!r.ok) throw new Error(j.error);
+  return j;
+};
+const post = (path, body) => api(path, {method: 'POST', body});
+const name = path => path.replace(/\/+$/, '').split('/').pop();
+const label = s => s.kind === 'shell' ? 'shell' : s.run_id + (s.kind === 'resume' ? ' (resumed)' : '');
+
+const id = location.hash.slice(1);
+const term = new Terminal({fontSize: 13, cursorBlink: true, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+  theme: {background: '#0f1123', foreground: '#e6e4f2', cursor: '#f2b84b', selectionBackground: '#9aa5ff55'}});
+const fit = new FitAddon.FitAddon();
+term.loadAddon(fit);
+term.open($('term'));
+
+// One POST at a time, batching what was typed meanwhile: parallel requests could arrive reordered.
+let pending = '', busy = false;
+async function flush() {
+  if (busy || !pending) return;
+  busy = true;
+  const data = pending;
+  pending = '';
+  try { await fetch(`/api/sessions/${id}/input`, {method: 'POST', body: data}); } catch {}
+  busy = false;
+  flush();
+}
+term.onData(d => { pending += d; flush(); });
+
+function resize() {
+  fit.fit();
+  fetch(`/api/sessions/${id}/resize?cols=${term.cols}&rows=${term.rows}`, {method: 'POST'});
+}
+new ResizeObserver(resize).observe($('term'));
+
+const es = new EventSource(`/api/sessions/${id}/stream`);
+// The stream starts with the scrollback again after a reconnect, so start clean each time.
+es.onopen = () => { term.reset(); resize(); };
+es.onmessage = e => term.write(Uint8Array.from(atob(e.data), c => c.charCodeAt(0)));
+es.addEventListener('exit', () => { es.close(); refresh(); });
+term.focus();
+
+async function end(s) {
+  if (s.exit === null && !confirm(`Stop ${label(s)} in ${name(s.project)}?`)) return;
+  await post(`/api/sessions/${s.id}/close`);
+  if (s.exit !== null) window.close();  // removed: nothing left to show in this tab
+  refresh();
+}
+
+async function refresh() {
+  const s = (await api('/api/state')).sessions.find(s => s.id === id);
+  $('empty').hidden = !!s;
+  if (!s) { es.close(); return $('bar').replaceChildren(h('span', {className: 'what'}, 'No session')); }
+  document.title = `${name(s.project)} ${label(s)}`;
+  $('bar').replaceChildren(
+    h('strong', {}, name(s.project)),
+    h('span', {className: 'what' + (s.exit === null ? ' lit' : '')},
+      label(s) + (s.exit === null ? ', running' : `, exited ${s.exit}`)),
+    h('button', {onclick: () => end(s)}, s.exit === null ? 'Stop session' : 'Remove'));
+}
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

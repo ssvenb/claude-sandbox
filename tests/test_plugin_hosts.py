@@ -339,6 +339,14 @@ def test_github_auth_needs_the_key_file(sb):
     sb.plugin("github-auth", GH_APP_ID=1, GH_PRIVATE_KEY_FILE=sb.tmp / "none.pem").dies("GH_PRIVATE_KEY_FILE not found")
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any file")
+def test_github_auth_needs_a_key_file_its_user_can_read(sb):
+    key = sb.tmp / "app.pem"
+    key.write_text("k")
+    key.chmod(0)
+    sb.plugin("github-auth", GH_APP_ID=1, GH_PRIVATE_KEY_FILE=key).dies("GH_PRIVATE_KEY_FILE is not readable")
+
+
 def test_github_auth_registers_a_token_and_never_passes_the_key(sb):
     key = sb.tmp / "app.pem"
     key.write_text("-----BEGIN RSA PRIVATE KEY-----\nsecret\n")

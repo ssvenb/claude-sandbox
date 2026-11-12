@@ -6,6 +6,7 @@ checked without the network. openssl (GitHub's JWT) and the gcloud stub run for 
 import base64
 import io
 import json
+import os
 import runpy
 import subprocess
 import urllib.error
@@ -194,3 +195,26 @@ def test_gcp_missing_grant_names_the_role(gcloud, monkeypatch):
     with pytest.raises(SystemExit) as exc:
         run(GCP_MINT)
     assert "roles/iam.serviceAccountTokenCreator" in exc.value.code
+
+
+def test_github_key_openssl_cannot_use_says_why(gh_env, monkeypatch, tmp_path):
+    key = tmp_path / "bad.pem"
+    key.write_text("not a key\n")
+    monkeypatch.setenv("GH_PRIVATE_KEY_FILE", str(key))
+    with pytest.raises(SystemExit) as e:
+        run(GH_MINT)
+    msg = str(e.value)
+    assert f"openssl could not sign the App's JWT with {key}" in msg
+    assert "PEM private key" in msg
+    assert "Traceback" not in msg
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any file")
+def test_github_key_this_user_cannot_read_says_so(gh_env, monkeypatch, app_key, tmp_path):
+    key = tmp_path / "locked.pem"
+    key.write_bytes((app_key / "key.pem").read_bytes())
+    key.chmod(0)
+    monkeypatch.setenv("GH_PRIVATE_KEY_FILE", str(key))
+    with pytest.raises(SystemExit) as e:
+        run(GH_MINT)
+    assert "is not readable by this user" in str(e.value)

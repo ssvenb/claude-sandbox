@@ -53,9 +53,20 @@ payload = b64url(json.dumps(
     {"iat": now - 60, "exp": now + 300, "iss": os.environ["GH_APP_ID"]}).encode())
 signing_input = f"{header}.{payload}".encode()
 
-sig = subprocess.run(
-    ["openssl", "dgst", "-sha256", "-sign", os.environ["GH_PRIVATE_KEY_FILE"]],
-    input=signing_input, capture_output=True, check=True).stdout
+key_file = os.environ["GH_PRIVATE_KEY_FILE"]
+signed = subprocess.run(["openssl", "dgst", "-sha256", "-sign", key_file],
+                        input=signing_input, capture_output=True)
+if signed.returncode != 0:
+    detail = signed.stderr.decode(errors="replace").strip()
+    if not os.access(key_file, os.R_OK):
+        hint = (f"{key_file} is not readable by this user (uid {os.getuid()}); run.sh signs with "
+                "your own account, so make the key readable by it (e.g. chown it to you, mode 600).")
+    else:
+        hint = ("GH_PRIVATE_KEY_FILE must be the App's PEM private key, as downloaded from the "
+                "App's settings page (\"-----BEGIN RSA PRIVATE KEY-----\"), without a passphrase.")
+    sys.exit(f"mint-gh-token: openssl could not sign the App's JWT with {key_file}:\n"
+             f"{detail}\n{hint}")
+sig = signed.stdout
 jwt = f"{signing_input.decode()}.{b64url(sig)}"
 
 # The App may be installed on several orgs; a token from the wrong one sees REPO_URL as "not found".

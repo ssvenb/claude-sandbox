@@ -185,6 +185,8 @@ function render() {
         h('button', {className: 'session' + (s.exit === null ? '' : ' ended'), ariaCurrent: String(s.id === current), onclick: () => attach(s.id)},
           h('span', {className: 'lamp' + (s.exit === null ? ' lit' : '')}),
           label(s) + (s.exit === null ? '' : `, exited ${s.exit}`)),
+        s.exit !== null && s.run_id && !live(s.run_id)
+          ? h('button', {onclick: () => start(path, 'resume', s.run_id), title: 'Same branch, same conversation'}, 'Resume') : '',
         h('button', {className: 'icon', onclick: () => close(s), ariaLabel: s.exit === null ? 'Stop session' : 'Remove session'}, '✕')))),
       ...(pr.prs || pr.error ? [
         h('h3', {}, 'Open pull requests',
@@ -197,7 +199,7 @@ function render() {
                   h('span', {className: 'num'}, `#${p.number}`),
                   p.isDraft ? h('span', {className: 'draft'}, 'Draft: ') : '', p.title),
                 s ? h('button', {onclick: () => attach(s.id)}, 'Open')
-                  : p.run_id ? h('button', {onclick: () => start(path, 'resume', p.run_id)}, 'Resume') : '');
+                  : p.run_id ? h('button', {onclick: () => start(path, 'resume', p.run_id), title: 'Same branch, same conversation'}, 'Resume') : '');
             }))
           : h('p', {}, 'None open.')] : []));
   }));

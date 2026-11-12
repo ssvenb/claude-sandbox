@@ -18,7 +18,7 @@ token — and each run works on its own
 cp .env.example ~/code/my-repo/.env   # pick AGENT, fill in its token and any plugin variables
 cd ~/code/my-repo
 ./run.sh                  # build + fresh run (generates a RUN_ID)
-./run.sh --resume a1b2c3  # re-attach to an existing run's branch
+./run.sh --resume a1b2c3  # re-attach to an existing run: its branch and its conversation
 ```
 
 `jq` is required on the host. `run.sh` builds the image itself (tagged `claude-agent:$AGENT`), so
@@ -38,7 +38,13 @@ button (`run.sh` in that directory), a terminal per session — the agent's own 
 commands and suggestions work as they do in your terminal — and a plain host **Shell** in the
 project. For a project whose `origin` is on GitHub it lists the open pull requests through the
 host's `gh` login; a PR on a per-run branch (`<prefix>/<date>-<RUN_ID>`) gets a **Resume** button,
-which is `run.sh --resume <RUN_ID>`.
+which is `run.sh --resume <RUN_ID>`; an ended session in the list has one too.
+
+Resuming brings back the agent's conversation as well as the branch: each run's conversation is
+keyed to its RUN_ID (Claude Code `--session-id`, Copilot `--name`). The transcript lives in the
+agent's home directory, so it only outlives the container while `claude-home` / `copilot-home`
+mounts it from the host (both on by default); without them a resumed run starts a new conversation
+on the old branch.
 
 Needs only `python3` on the host (and `gh` for the PR list); the page loads xterm.js from a CDN.
 It listens on loopback only and has no login — use an SSH tunnel to reach it from elsewhere.

@@ -1,0 +1,7 @@
+{
+  "env": {
+    "GH_USERNAME": "ssvenb",
+    "GH_APP_ID": "5713280",
+    "GH_PRIVATE_KEY_FILE": "/var/lib/agent-sandbox-app/agent-sandbox-app.2026-11-11.private-key.pem"
+  }
+}

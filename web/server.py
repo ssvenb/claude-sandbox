@@ -2,7 +2,7 @@
 """Web UI to orchestrate sandboxes: a status page listing the configured projects with their
 sessions and whatever their enabled plugins have to show (`run.sh --web`: open pull requests and
 issues, say); a terminal page per session, each in its own tab; and VS Code in the browser
-(`code serve-web`) on a project or on a run's checkout.
+(`code serve-web`) on a run's checkout.
 
 Runs on the HOST, as you, next to run.sh — a session is `run.sh` in a pty with the project as its
 cwd, exactly what you would type yourself. Standard library only; the page loads xterm.js from a
@@ -343,17 +343,12 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("not a configured project")
                 self.reply(200, start(req["project"], req.get("kind"), req.get("run_id")).json())
             elif url.path == "/api/vscode":
-                # Only folders this UI already knows: a listed project, or a session's checkout.
-                req = json.loads(body)
-                folder = req.get("project")
-                if "session" in req:
-                    with lock:
-                        s = sessions.get(req["session"])
-                    folder = s and checkout(s.project, s.run_id)
-                elif folder not in projects(self.server.projects_file):
-                    folder = None
+                # Only a folder this UI already knows: a session's checkout, as its plugins said.
+                with lock:
+                    s = sessions.get(json.loads(body).get("session"))
+                folder = s and checkout(s.project, s.run_id)
                 if not folder:
-                    raise ValueError("not a configured project, or a session without a checkout on this machine")
+                    raise ValueError("no such session, or it has no checkout on this machine")
                 vscode()
                 self.reply(200, {"folder": folder})
             elif m := re.fullmatch(r"/api/sessions/(\w+)/(input|resize|close)", url.path):

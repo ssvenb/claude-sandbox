@@ -116,17 +116,24 @@ while True:
 """
 
 
-def test_vscode_is_started_once_and_reached_only_through_the_guarded_tunnel(ui):
-    ask = lambda **body: ui("/api/vscode", json.dumps(body).encode())  # noqa: E731
-    assert "not installed" in json.load(ask(project=ui.project))["error"]
+def test_vscode_opens_only_a_sessions_checkout_through_the_guarded_tunnel(ui):
+    ask = lambda sid: ui("/api/vscode", json.dumps({"session": sid}).encode())  # noqa: E731
+    json.load(ui("/api/project?project=" + ui.project))  # agent-workspace: checkouts in ~/.agent-workspaces
+    mirror = ui.tmp / ".agent-workspaces/proj-20261112-0a1b2c"
+    mirror.mkdir(parents=True)
+    # run.sh itself fails here (no App key), but the session keeps its run id, as an ended run does.
+    s = json.load(ui("/api/sessions", json.dumps({"project": ui.project, "kind": "resume",
+                                                  "run_id": "0a1b2c"}).encode()))
+    assert s["workspace"] == str(mirror)
+    assert "not installed" in json.load(ask(s["id"]))["error"]
     assert ui("/vscode/?folder=/x").status == 502  # nothing started yet
     code = ui.tmp / "bin/code"
     code.parent.mkdir()
     code.write_text(FAKE_CODE)
     code.chmod(0o755)
 
-    assert json.load(ask(project=ui.project)) == {"folder": ui.project}
-    assert json.load(ask(project=ui.project)) == {"folder": ui.project}  # the same server again
+    assert json.load(ask(s["id"])) == {"folder": str(mirror)}
+    assert json.load(ask(s["id"])) == {"folder": str(mirror)}  # the same server again
     seen = ui("/vscode/?folder=/x").read()
     assert seen.startswith(b"GET /vscode/?folder=/x HTTP/1.1\r\n") and b"Connection: close" in seen
     assert ui("/vscode/", b"body").read().startswith(b"POST /vscode/ ")
@@ -135,9 +142,10 @@ def test_vscode_is_started_once_and_reached_only_through_the_guarded_tunnel(ui):
     assert ui("/vscode/", Host="evil.example").status == 403
     assert ui("/vscodex").status == 404
 
-    assert ask(project="/etc").status == 400
-    s = json.load(ui("/api/sessions", json.dumps({"project": ui.project, "kind": "shell"}).encode()))
-    assert s["workspace"] is None and ask(session=s["id"]).status == 400  # a shell has no checkout
+    shell = json.load(ui("/api/sessions", json.dumps({"project": ui.project, "kind": "shell"}).encode()))
+    assert shell["workspace"] is None and ask(shell["id"]).status == 400  # a shell has no checkout
+    assert ask("nosuchid").status == 400
+    assert ui("/api/vscode", json.dumps({"project": ui.project}).encode()).status == 400  # projects: no
 
 
 def test_the_page_gets_what_the_projects_plugins_describe(ui):
@@ -159,71 +167,3 @@ def test_a_project_run_sh_cannot_describe_says_why(tmp_path):
     (tmp_path / ".claude-sandbox.json").write_text("{not json")
     [note] = web.describe(str(tmp_path))["notes"]
     assert ".claude-sandbox.json" in note
-
-
-def test_a_projects_line_may_be_a_glob(tmp_path):
-    code = tmp_path / "code"
-    for name in ("beta", "alpha", "plain"):
-        (code / name).mkdir(parents=True)
-    (code / "alpha/.git").mkdir()
-    (code / "beta/.git").write_text("gitdir: elsewhere\n")  # a worktree's .git is a file
-    (code / "notes.txt").write_text("")
-    listing = tmp_path / "projects"
-    listing.write_text(f"# all of them\n{code}/*\n\n{code}/*/.git\n{tmp_path}/missing-*\n")
-    every = [str(code / d) for d in ("alpha", "beta", "plain")]
-    assert web.projects(listing) == every  # files skipped, repeats listed once, no match → nothing
-    listing.write_text(f"{code}/*/.git\n{code}/plain\n")
-    assert web.projects(listing) == [str(code / "alpha"), str(code / "beta"), str(code / "plain")]
-
-
-def test_a_network_bind_admits_this_machines_own_names_only():
-    names = web.local_names("0.0.0.0")
-    assert {"127.0.0.1", "localhost", web.socket.gethostname()} <= names
-    assert "evil.example" not in names
-    assert web.local_names("127.0.0.1") == {"127.0.0.1", "localhost"}
-
-def test_the_session_page_is_served_next_to_the_status_page(ui):
-    assert b"/api/project" in ui("/").read()
-    assert b"/stream" in ui("/session").read()
-
-
-# Stands in for `code serve-web`: echoes each request's head back as the response body.
-FAKE_CODE = r"""#!/usr/bin/env python3
-import socket, sys
-args = sys.argv[1:]
-assert args[0] == "serve-web" and "--without-connection-token" in args
-s = socket.socket(socket.AF_UNIX)
-s.bind(args[args.index("--socket-path") + 1])
-s.listen()
-while True:
-    c, _ = s.accept()
-    head = b""
-    while b"\r\n\r\n" not in head:
-        head += c.recv(65536)
-    c.sendall(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n" + head)
-    c.close()
-"""
-
-
-def test_vscode_is_started_once_and_reached_only_through_the_guarded_tunnel(ui):
-    ask = lambda **body: ui("/api/vscode", json.dumps(body).encode())  # noqa: E731
-    assert "not installed" in json.load(ask(project=ui.project))["error"]
-    assert ui("/vscode/?folder=/x").status == 502  # nothing started yet
-    code = ui.tmp / "bin/code"
-    code.parent.mkdir()
-    code.write_text(FAKE_CODE)
-    code.chmod(0o755)
-
-    assert json.load(ask(project=ui.project)) == {"folder": ui.project}
-    assert json.load(ask(project=ui.project)) == {"folder": ui.project}  # the same server again
-    seen = ui("/vscode/?folder=/x").read()
-    assert seen.startswith(b"GET /vscode/?folder=/x HTTP/1.1\r\n") and b"Connection: close" in seen
-    assert ui("/vscode/", b"body").read().startswith(b"POST /vscode/ ")
-    # VS Code in a browser is a shell on this machine: our own page only.
-    assert ui("/vscode/", Origin="http://evil.example").status == 403
-    assert ui("/vscode/", Host="evil.example").status == 403
-    assert ui("/vscodex").status == 404
-
-    assert ask(project="/etc").status == 400
-    s = json.load(ui("/api/sessions", json.dumps({"project": ui.project, "kind": "shell"}).encode()))
-    assert s["workspace"] is None and ask(session=s["id"]).status == 400  # a shell has no checkout

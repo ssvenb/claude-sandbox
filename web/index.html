@@ -104,11 +104,11 @@ async function start(project, kind, run_id) {
   } catch (e) { w?.close(); alert(e.message); }
 }
 
-async function code(key, body) {
-  const w = tab('code-' + key);
+async function code(s) {
+  const w = tab('code-' + s.workspace);
   if (!w || !fresh(w)) return;
   try {
-    const v = await post('/api/vscode', JSON.stringify(body));
+    const v = await post('/api/vscode', JSON.stringify({session: s.id}));
     w.location.replace('/vscode/?folder=' + encodeURIComponent(v.folder));
   } catch (e) { w.close(); alert(e.message); }
 }
@@ -144,14 +144,13 @@ function render() {
           h('h2', {title: path}, name(path)),
           h('div', {className: 'actions'},
             h('button', {className: 'primary', onclick: () => start(path, 'run')}, 'New session'),
-            h('button', {onclick: () => start(path, 'shell'), title: 'A shell on this machine, in the project directory'}, 'Open shell'),
-            h('button', {onclick: () => code(path, {project: path}), title: `VS Code in the browser, on ${path}`}, 'Open in VS Code')),
+            h('button', {onclick: () => start(path, 'shell'), title: 'A shell on this machine, in the project directory'}, 'Open shell')),
           ...(said ? said.notes.map(note => h('p', {}, note)) : [h('p', {}, 'Reading the project…')])),
         column('Sessions', mine, s => h('li', {},
           h('button', {className: 'session' + (s.exit === null ? '' : ' ended'), onclick: () => show(s), title: 'Open its terminal in a tab'},
             h('span', {className: 'lamp' + (s.exit === null ? ' lit' : '')}),
             label(s) + (s.exit === null ? '' : `, exited ${s.exit}`)),
-          s.workspace ? h('button', {onclick: () => code(s.workspace, {session: s.id}), title: `VS Code on this run's checkout, ${s.workspace}`}, 'Code') : '',
+          s.workspace ? h('button', {onclick: () => code(s), title: `VS Code on this run's checkout, ${s.workspace}`}, 'Code') : '',
           s.exit !== null && s.run_id && !live(s.run_id) ? resume(path, s.run_id) : '',
           h('button', {className: 'icon', onclick: () => close(s), ariaLabel: s.exit === null ? 'Stop session' : 'Remove session'}, '✕')),
           'Nobody at work.'),

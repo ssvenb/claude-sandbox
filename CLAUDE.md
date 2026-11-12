@@ -187,7 +187,7 @@ themselves, so a new plugin shows up on the page by adding a `web.sh`, not by ed
 terminal is `web/session.html` (xterm.js) in a browser tab named after the session, so a second
 click focuses it. `POST /api/vscode` starts one `code serve-web` on first use, on a unix socket in
 a 0700 directory; the server tunnels `/vscode/` to it behind the same Host/Origin guard, and the
-page opens it there on a project directory or on a run's checkout (`web_checkout`). It stops a session by removing the container `run.sh` names
+page opens it there on a session's checkout (`web_checkout`). It stops a session by removing the container `run.sh` names
 `sandbox-<RUN_ID>`.
 
 ## Tests

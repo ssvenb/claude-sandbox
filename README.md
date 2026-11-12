@@ -50,9 +50,8 @@ A session opens in a browser tab of its own — the agent's own TUI, so its slas
 suggestions work as they do in your terminal. Clicking a session whose tab is already open brings
 that tab to the front instead of opening a second one.
 
-**Open in VS Code** opens VS Code in the browser on the project's directory, and **Code** on a
-session opens it on that run's checkout (the `agent-workspace` mirror of `/workspace`), again one
-tab per folder. It needs VS Code's `code` command on the host: the first click starts one
+**Code** on a session opens VS Code in the browser on that run's checkout (the `agent-workspace`
+mirror of `/workspace`), again one tab per run. It needs VS Code's `code` command on the host: the first click starts one
 `code serve-web`, accepting the VS Code Server license terms on your behalf, and it stops with the
 web UI. It listens on a unix socket only your user can reach and is served under `/vscode/` of the
 web UI itself, so there is no second port to open or to forward over an SSH tunnel.

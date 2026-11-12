@@ -73,6 +73,21 @@ def test_sandbox_sessions_run_run_sh_under_an_id_the_ui_knows():
     assert not web.RUN_BRANCH.fullmatch("feature/login")
 
 
+def test_a_projects_line_may_be_a_glob(tmp_path):
+    code = tmp_path / "code"
+    for name in ("beta", "alpha", "plain"):
+        (code / name).mkdir(parents=True)
+    (code / "alpha/.git").mkdir()
+    (code / "beta/.git").write_text("gitdir: elsewhere\n")  # a worktree's .git is a file
+    (code / "notes.txt").write_text("")
+    listing = tmp_path / "projects"
+    listing.write_text(f"# all of them\n{code}/*\n\n{code}/*/.git\n{tmp_path}/missing-*\n")
+    every = [str(code / d) for d in ("alpha", "beta", "plain")]
+    assert web.projects(listing) == every  # files skipped, repeats listed once, no match → nothing
+    listing.write_text(f"{code}/*/.git\n{code}/plain\n")
+    assert web.projects(listing) == [str(code / "alpha"), str(code / "beta"), str(code / "plain")]
+
+
 def test_a_network_bind_admits_this_machines_own_names_only():
     names = web.local_names("0.0.0.0")
     assert {"127.0.0.1", "localhost", web.socket.gethostname()} <= names

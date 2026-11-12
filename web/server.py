@@ -9,11 +9,14 @@ CDN. Terminal output goes out as server-sent events, keystrokes come back as POS
     web/server.py [--port 8787] [--bind 127.0.0.1] [--projects FILE]
 
 FILE lists one project directory per line (default ~/.config/claude-sandbox/projects) and is
-re-read on every request. Sessions belong to this process: stopping the server stops them.
+re-read on every request. A line may be a glob (`~/code/*`); a match ending in `.git` stands for
+its repo, so `~/code/*/.git` lists only the git checkouts. Sessions belong to this process:
+stopping the server stops them.
 """
 import argparse
 import base64
 import fcntl
+import glob
 import json
 import os
 import pty
@@ -47,7 +50,23 @@ def projects(file):
         lines = [line.strip() for line in Path(file).read_text().splitlines()]
     except FileNotFoundError:
         return []
-    return [str(Path(line).expanduser()) for line in lines if line and not line.startswith("#")]
+    found = []
+    for line in lines:
+        if not line or line.startswith("#"):
+            continue
+        path = str(Path(line).expanduser())
+        if not glob.has_magic(path):
+            found.append(path)
+            continue
+        # A pattern stands for every directory it matches now, so a new checkout shows up on the
+        # next request; a match named .git stands for its repo (`~/code/*/.git`: git repos only).
+        for match in sorted(glob.glob(path)):
+            match = Path(match)
+            if match.name == ".git":
+                found.append(str(match.parent))
+            elif match.is_dir():
+                found.append(str(match))
+    return list(dict.fromkeys(found))  # a project listed twice shows once
 
 
 def command(kind, run_id):

@@ -177,7 +177,7 @@ AGENT=copilot ./run.sh                # same sandbox, GitHub Copilot CLI instead
 
 `web/server.py` (stdlib only, host side) runs `run.sh` in a pty per session, with the project as
 cwd, and streams it to `web/index.html` (xterm.js): projects come from
-`~/.config/claude-sandbox/projects` (one directory per line, `--projects FILE` to override), open
+`~/.config/claude-sandbox/projects` (one directory or glob per line, `~/code/*/.git` for just the git repos; `--projects FILE` to override), open
 PRs from the host's `gh`, and a PR on a per-run branch resumes with `run.sh --resume`. It stops a
 session by removing the container `run.sh` names `sandbox-<RUN_ID>`.
 

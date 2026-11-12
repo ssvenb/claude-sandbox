@@ -14,12 +14,20 @@ if [ -z "$GCP_AUTH_PROJECT" ] && [[ $GCP_SERVICE_ACCOUNT =~ @([a-z0-9-]+)\.iam\.
 fi
 [ -n "$GCP_AUTH_PROJECT" ] || die "gcp-auth: cannot tell the project from '$GCP_SERVICE_ACCOUNT'; set GCP_PROJECT."
 
+# Workload identity federation: the host's own credential (e.g. an X.509 cert) instead of a login.
+GCP_CREDENTIAL_FILE=${GCP_CREDENTIAL_FILE:-}
+[ -z "$GCP_CREDENTIAL_FILE" ] || [ -r "$GCP_CREDENTIAL_FILE" ] \
+  || die "gcp-auth: GCP_CREDENTIAL_FILE '$GCP_CREDENTIAL_FILE' is not readable."
+
 GCP_AUTH_DIR=$PLUGIN_DIR
-gcp_auth_mint() { GCP_SERVICE_ACCOUNT="$GCP_SERVICE_ACCOUNT" "$GCP_AUTH_DIR/host/mint-gcp-token.py"; }
+gcp_auth_mint() {
+  GCP_SERVICE_ACCOUNT="$GCP_SERVICE_ACCOUNT" GCP_CREDENTIAL_FILE="$GCP_CREDENTIAL_FILE" \
+    "$GCP_AUTH_DIR/host/mint-gcp-token.py"
+}
 # Tokens live 1h; 40 min leaves room for failed attempts, and every token the container's metadata
 # server hands out has at least 20 min left.
 register_credential gcp-token 2400 gcp_auth_mint
 
 pass_value GCP_SERVICE_ACCOUNT "$GCP_SERVICE_ACCOUNT"
 pass_value GCP_PROJECT "$GCP_AUTH_PROJECT"
-echo "☁️  gcp-auth: $GCP_SERVICE_ACCOUNT (project $GCP_AUTH_PROJECT)"
+echo "☁️  gcp-auth: $GCP_SERVICE_ACCOUNT (project $GCP_AUTH_PROJECT)${GCP_CREDENTIAL_FILE:+ via $GCP_CREDENTIAL_FILE}"

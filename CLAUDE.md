@@ -249,6 +249,7 @@ only required while that one is in use.
 | `NB_HOSTNAME` | netbird | Peer name in the dashboard (default: `sandbox-<RUN_ID>`) |
 | `GCP_SERVICE_ACCOUNT` | gcp-auth | Service account the sandbox acts as; your gcloud account needs `roles/iam.serviceAccountTokenCreator` on it |
 | `GCP_PROJECT` | gcp-auth | Default project for gcloud and the client libraries (default: the one in the service account's email) |
+| `GCP_CREDENTIAL_FILE` | gcp-auth | Host path to a workload identity federation config (e.g. X.509, from `create-cred-config`) that impersonates `GCP_SERVICE_ACCOUNT`; tokens are minted from it (`auth/credential_file_override`) instead of your gcloud login, and it and its key stay on the host |
 | `SCREENSHOTS_DIR` | screenshots | Host dir mounted read-only at `/home/node/Pictures/Screenshots` (default: `$HOME/Pictures/Screenshots`) |
 | `SSH_PRIVATE_KEY_FILE` | ssh-credentials | Host path to the (passphrase-less) key installed for the agent |
 | `SSH_HOST_PATTERN` / `SSH_HOST_USER` / `SSH_HOST_SUFFIX` | ssh-credentials | `~/.ssh/config` stanza: hosts the key is offered for, login user, domain appended to bare names |

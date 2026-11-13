@@ -170,7 +170,7 @@
   .ask .row { display: flex; gap: 8px; justify-content: flex-end; }
   .ask.settled .said { color: var(--ink); }
 
-  /* The dock: the plan it works through, a suggestion, and the composer. */
+  /* The dock: the plan it works through and the composer. */
   #dock { border-top: 1px solid var(--rule); background: var(--page); padding: 10px 0 max(14px, env(safe-area-inset-bottom)); }
   #dock .column { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
   #plan, #tasks { border: 1px solid var(--rule); border-radius: 10px; background: var(--panel); font-size: 13.5px; }
@@ -190,10 +190,6 @@
   #tasks li .at { flex: 1 1 0; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #tasks li button { margin-left: auto; }
   .composer .shots { padding: 12px 16px 0; }
-  #suggest { justify-self: start; max-width: 100%; display: inline-flex; gap: 8px; align-items: baseline; border-style: dashed;
-             color: var(--muted); border-radius: 10px; text-align: left; }
-  #suggest kbd { font-size: 11px; padding: 0 5px; border: 1px solid var(--rule); border-radius: 4px; }
-  #suggest span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .composer { position: relative; border: 1.5px solid var(--rule); border-radius: 16px; background: var(--panel); box-shadow: var(--shadow); }
   .composer:focus-within { border-color: var(--lamp); }
   .composer textarea { display: block; width: 100%; min-height: 48px; max-height: 40vh; resize: none; border: 0; outline: 0 !important;
@@ -231,9 +227,8 @@
     .ask { padding: 12px; }
     .code .lang { display: none; }
   }
-  /* On a touch screen Enter starts a new line and the button sends; there is no Tab to take a suggestion with. */
+  /* On a touch screen Enter starts a new line and the button sends. */
   @media (pointer: coarse) {
-    #suggest kbd { display: none; }
     .composer .bar { justify-content: space-between; }
     .composer .bar select { flex: 0 1 auto; }
     .composer .bar button.round { width: 40px; height: 40px; margin-left: auto; }
@@ -255,7 +250,6 @@
 <footer id="dock"><div class="column">
   <details id="tasks" hidden></details>
   <details id="plan" hidden></details>
-  <button id="suggest" type="button" hidden></button>
   <form class="composer" id="composer">
     <div id="menu" role="listbox" hidden></div>
     <div class="shots" id="shots"></div>
@@ -657,7 +651,6 @@ function handle(e) {
     case 'todos': plan(e.items); break;
     case 'tasks': background(e.items); break;
     case 'exit': background([]); settleBlocks(); ended(e); break;
-    case 'suggestion': suggest(e.text); break;
   }
 }
 function apply(e) {
@@ -676,14 +669,13 @@ function restore(snap) {
   bootState();
   plan(snap.todos);
   background(snap.tasks);
-  suggest(snap.suggestion);
   pickers();
   chrome();
   follow = true;
   requestAnimationFrame(settle);
 }
 
-// ---- the dock: background tasks, plan, suggestion, composer --------------------------------------
+// ---- the dock: background tasks, plan, composer ----------- --------------------------------------
 
 // What the agent runs in the background, as its own task list has it: the whole set each time.
 // Rows are kept by task, so one being stopped stays busy under the pointer.
@@ -721,13 +713,6 @@ function plan(items) {
   el.replaceChildren(h('summary', {}, h('b', {}, 'Plan'), h('span', {}, done === items.length ? 'All done' : now?.text || ''),
     h('i', {}, `${done} of ${items.length}`)), steps(items));
 }
-function suggest(text) {
-  const el = $('suggest');
-  el.hidden = !text || !!input.value;
-  el.dataset.text = text || '';
-  el.replaceChildren(h('kbd', {}, 'Tab'), h('span', {}, text || ''));
-}
-$('suggest').onclick = () => { input.value = $('suggest').dataset.text; $('suggest').hidden = true; grow(); input.focus(); };
 
 function pickers() {
   const model = $('model'), effort = $('effort');
@@ -780,14 +765,13 @@ function choose(c) {
   input.focus();
 }
 
-input.addEventListener('input', () => { grow(); picked = 0; menu(); draft.set(input.value); $('suggest').hidden = !$('suggest').dataset.text || !!input.value; });
+input.addEventListener('input', () => { grow(); picked = 0; menu(); draft.set(input.value); });
 input.addEventListener('keydown', e => {
   if (offered.length && !$('menu').hidden) {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); picked = (picked + (e.key === 'ArrowDown' ? 1 : offered.length - 1)) % offered.length; return menu(); }
     if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && `/${offered[picked].name}` !== input.value)) { e.preventDefault(); return choose(offered[picked]); }
     if (e.key === 'Escape') { e.preventDefault(); $('menu').hidden = true; offered = []; return; }
   }
-  if (e.key === 'Tab' && !input.value && !$('suggest').hidden) { e.preventDefault(); return $('suggest').click(); }
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !touch) { e.preventDefault(); $('composer').requestSubmit(); }
 });
 document.addEventListener('keydown', e => {

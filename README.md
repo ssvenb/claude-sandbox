@@ -37,8 +37,9 @@ The home page is a dashboard of all your sandboxes. On top is a box to start a s
 its first message, with the project it is for beside it. Under it, on the left, is what is
 **running now**, grouped by project: a **window** per running session (the ones waiting on your
 answer first; each says what it was asked and what it is doing right now, with its pull request,
-its ports and, top right, its stop button), and the project's ended sessions folded away below
-them. On the right is every listed **project** with what its plugins list (its issues), a **+** button for a
+its ports and, top right, its stop button); with nothing running that side is not there, and the
+projects take the width. On the right is every listed **project** with what its plugins list (its
+issues), its ended sessions folded away at the foot of its panel, a **+** button for a
 new session (`run.sh --chat` in that directory) and a terminal
 button (**>_**) for a shell on this machine in the project — one per project, its tab brought to
 the front when it is already open. The gear button opens the project's settings, saved to its

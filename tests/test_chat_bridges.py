@@ -101,7 +101,7 @@ def test_claude_is_started_as_the_terminal_would_and_its_messages_become_chat_ev
     options = b.calls()[0]["options"]
     assert options | {"cwd": ""} == {  # every permission granted, the run's own conversation, the briefing appended
         "cwd": "", "pathToClaudeCodeExecutable": "/opt/claude", "permissionMode": "bypassPermissions",
-        "allowDangerouslySkipPermissions": True, "includePartialMessages": True, "promptSuggestions": True,
+        "allowDangerouslySkipPermissions": True, "includePartialMessages": True,
         "agentProgressSummaries": True, "effort": "high", "canUseTool": "function", "stderr": "function",
         "systemPrompt": {"type": "preset", "preset": "claude_code", "append": "Brief."},
         "sessionId": "5a4db0c0-0000-4000-8000-0000000a1b2c",
@@ -128,7 +128,7 @@ def test_claude_is_started_as_the_terminal_would_and_its_messages_become_chat_ev
         {"text": "Doing it", "status": "active"}, {"text": "Done it", "status": "done"}]}]
     assert of(events, "turn") == [{"type": "turn", "cost": 0.25, "duration": 900, "context": {"used": 1200, "max": 200000}}]
     assert [e["state"] for e in of(events, "status")] == ["working", "working", "idle"]
-    assert of(events, "suggestion") == [{"type": "suggestion", "text": "Ship it"}]
+    assert of(events, "suggestion") == []  # the next prompt the SDK would offer is not asked for, nor passed on
 
     b.say(type="interrupt")
     b.say(type="model", id="opus")

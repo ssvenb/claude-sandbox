@@ -7,5 +7,21 @@
   "requires": [],
   "conflicts": ["cwd-workspace"],
   "requiredEnv": [],
-  "secrets": []
+  "secrets": [],
+  "settings": [
+    {
+      "env": "AGENT_WORKSPACE_DIR",
+      "type": "path",
+      "label": "Mirror directory",
+      "description": "Host directory holding the per-run mirrors, <dir>/<project>-<date>-<RUN_ID>.",
+      "placeholder": "~/.agent-workspaces"
+    },
+    {
+      "env": "AGENT_WORKSPACE_CLEANUP",
+      "type": "boolean",
+      "label": "Delete the mirror on exit",
+      "description": "Off keeps it for inspection, one leftover directory per run.",
+      "default": true
+    }
+  ]
 }

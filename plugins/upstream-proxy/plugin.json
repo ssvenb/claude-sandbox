@@ -6,5 +6,187 @@
   "provides": ["upstream-proxy"],
   "requires": [],
   "requiredEnv": [],
-  "secrets": []
+  "secrets": [],
+  "settings": [
+    {
+      "key": "envFile",
+      "type": "path",
+      "label": "Env file",
+      "description": "Where the routes' credentials are read from, relative to the project; /dev/null loads nothing.",
+      "default": ".env"
+    },
+    {
+      "key": "routes",
+      "type": "list",
+      "label": "Routes",
+      "description": "One credential-injecting proxy per route; the agent reaches each at http://127.0.0.1:<port>.",
+      "items": {
+        "type": "object",
+        "title": "name",
+        "fields": [
+          {
+            "key": "name",
+            "type": "string",
+            "label": "Name",
+            "required": true,
+            "placeholder": "azure-openai"
+          },
+          {
+            "key": "port",
+            "type": "integer",
+            "label": "Port",
+            "required": true,
+            "min": 1,
+            "max": 65535,
+            "description": "Loopback port the agent reaches it on."
+          },
+          {
+            "key": "upstream",
+            "type": "string",
+            "label": "Upstream",
+            "required": true,
+            "placeholder": "https://api.example.com",
+            "description": "Absolute URL; ${VAR} expands from the host env."
+          },
+          {
+            "key": "allowMethods",
+            "type": "list",
+            "items": {
+              "type": "enum",
+              "choices": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+            },
+            "label": "Allowed methods",
+            "description": "None picked: every method."
+          },
+          {
+            "key": "allowPaths",
+            "type": "list",
+            "items": {
+              "type": "string",
+              "placeholder": "/api/v1/",
+              "monospace": true
+            },
+            "label": "Allowed path prefixes",
+            "description": "None: every path."
+          },
+          {
+            "key": "auth",
+            "type": "object",
+            "label": "Authentication",
+            "fields": [
+              {
+                "key": "type",
+                "type": "enum",
+                "label": "Type",
+                "choices": ["none", "header", "bearer", "oauth2_client_credentials", "gcp"],
+                "default": "none"
+              },
+              {
+                "key": "header",
+                "type": "string",
+                "label": "Header",
+                "default": "Authorization",
+                "when": {
+                  "type": ["header"]
+                }
+              },
+              {
+                "key": "valueEnv",
+                "type": "string",
+                "label": "Value from env var",
+                "required": true,
+                "when": {
+                  "type": ["header", "bearer"]
+                },
+                "monospace": true
+              },
+              {
+                "key": "tokenUrl",
+                "type": "string",
+                "label": "Token URL",
+                "required": true,
+                "when": {
+                  "type": ["oauth2_client_credentials"]
+                }
+              },
+              {
+                "key": "audience",
+                "type": "string",
+                "label": "Audience",
+                "when": {
+                  "type": ["oauth2_client_credentials"]
+                }
+              },
+              {
+                "key": "clientIdEnv",
+                "type": "string",
+                "label": "Client id from env var",
+                "required": true,
+                "when": {
+                  "type": ["oauth2_client_credentials"]
+                },
+                "monospace": true
+              },
+              {
+                "key": "clientSecretEnv",
+                "type": "string",
+                "label": "Client secret from env var",
+                "required": true,
+                "when": {
+                  "type": ["oauth2_client_credentials"]
+                },
+                "monospace": true
+              },
+              {
+                "key": "serviceAccount",
+                "type": "string",
+                "label": "Service account",
+                "description": "Default: the host's gcloud account.",
+                "when": {
+                  "type": ["gcp"]
+                }
+              },
+              {
+                "key": "accessBoundary",
+                "type": "json",
+                "label": "Access boundary",
+                "description": "A Credential Access Boundary downscoping the token (Cloud Storage only).",
+                "when": {
+                  "type": ["gcp"]
+                }
+              }
+            ]
+          },
+          {
+            "key": "containerEnv",
+            "type": "map",
+            "label": "Container environment",
+            "description": "Variables set in the container, e.g. the endpoint pointed at the proxy.",
+            "placeholder": "API_URL"
+          },
+          {
+            "key": "maxBodyBytes",
+            "type": "integer",
+            "label": "Max request body (bytes)",
+            "default": 8388608,
+            "min": 0
+          },
+          {
+            "key": "localUrl",
+            "type": "string",
+            "label": "Local URL",
+            "placeholder": "http://127.0.0.1:<port>",
+            "description": "What the sandbox calls this upstream."
+          },
+          {
+            "key": "rewriteUrls",
+            "type": "boolean",
+            "label": "Rewrite URLs",
+            "default": true,
+            "description": "Swap the local URL and the upstream in bodies and headers."
+          }
+        ]
+      }
+    }
+  ]
 }

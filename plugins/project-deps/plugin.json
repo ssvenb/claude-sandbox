@@ -6,5 +6,51 @@
   "provides": ["project-deps"],
   "requires": [],
   "requiredEnv": [],
-  "secrets": []
+  "secrets": [],
+  "settings": [
+    {
+      "key": "apt",
+      "type": "list",
+      "items": {
+        "type": "string",
+        "placeholder": "ripgrep",
+        "monospace": true
+      },
+      "label": "apt packages",
+      "description": "Installed at boot, as root."
+    },
+    {
+      "key": "npm",
+      "type": "list",
+      "items": {
+        "type": "string",
+        "placeholder": "pnpm@9",
+        "monospace": true
+      },
+      "label": "npm packages",
+      "description": "Installed globally at boot."
+    },
+    {
+      "key": "pip",
+      "type": "list",
+      "items": {
+        "type": "string",
+        "placeholder": "ruff",
+        "monospace": true
+      },
+      "label": "pip packages",
+      "description": "Installed at boot."
+    },
+    {
+      "key": "setup",
+      "type": "list",
+      "items": {
+        "type": "string",
+        "placeholder": "make bootstrap",
+        "monospace": true
+      },
+      "label": "Setup commands",
+      "description": "Shell commands run in /workspace as the agent user, in order, after the packages."
+    }
+  ]
 }

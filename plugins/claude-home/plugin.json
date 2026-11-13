@@ -7,5 +7,14 @@
   "provides": ["claude-home"],
   "requires": [],
   "requiredEnv": [],
-  "secrets": []
+  "secrets": [],
+  "settings": [
+    {
+      "env": "CLAUDE_HOME_DIR",
+      "type": "path",
+      "label": "Claude config directory",
+      "description": "Host directory mounted as the agent's ~/.claude.",
+      "placeholder": "~/.claude"
+    }
+  ]
 }

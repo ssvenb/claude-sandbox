@@ -5,5 +5,21 @@
   "defaultEnabled": true,
   "provides": ["workspace"],
   "requires": ["git-credentials"],
-  "secrets": []
+  "secrets": [],
+  "settings": [
+    {
+      "key": "branchPrefix",
+      "type": "string",
+      "label": "Branch prefix",
+      "description": "Leading segment of each run's branch, <prefix>/<date>-<id>. Default: BRANCH_PREFIX in the repo's .env, else the agent's own prefix.",
+      "placeholder": "claude-code"
+    },
+    {
+      "env": "BASE_BRANCH",
+      "type": "string",
+      "label": "Base branch",
+      "description": "Branch new agent branches are cut from. Default: the repo's default branch (origin/HEAD).",
+      "placeholder": "main"
+    }
+  ]
 }

@@ -37,8 +37,12 @@ The home page is a dashboard of all your sandboxes: totals across them, then eve
 with its sessions, a **+** button for a new session (`run.sh` in that directory) and a terminal
 button (**>_**) for a shell on this machine in the project — one per project, its tab brought to
 the front when it is already open. The gear button opens the project's settings, saved to its
-`.claude-sandbox.json`: each plugin On, Off or at its default, its own settings as JSON (the
-example config's section is shown as a hint), and the `env` block; the next session reads them.
+`.claude-sandbox.json`: a form drawn from what the sandbox, each agent and each plugin declare (see
+[Declaring settings](#declaring-settings)) — a switch per plugin, and per setting a toggle, text
+field, number field, dropdown, list or name/value editor, with its default shown and a **reset**
+that unsets it again. A filter narrows the form; the **JSON** view edits the whole file. The server
+checks every declared value against its type before writing, and keeps whatever the form has no
+control for; the next session reads the file.
 For a project whose
 `origin` is on GitHub it lists the open pull requests, with their CI status, and issues through the
 host's `gh` login, each a link to its GitHub page (one tab per item, brought to the front when it
@@ -157,6 +161,9 @@ commit. The worked-on repo overrides the prefix, either with
 `BRANCH_PREFIX` in its `.env` or — winning over that — `.plugins["git-workspace"].branchPrefix`
 in its `.claude-sandbox.json`.
 
+An optional `settings` list declares the agent's own variables (`CLAUDE_EFFORT`, its token) for
+the web UI's settings form, as a plugin's do: see [Declaring settings](#declaring-settings).
+
 Because `host.sh` runs after the plugin host stage, it can see `AGENT_AUTH_PROVIDED=1` from a
 plugin that supplies credentials itself and skip its own token check:
 
@@ -247,9 +254,45 @@ so the agent cannot edit or disable its own guardrails.
 | `conflicts` | string[] | `[]` | Plugin names that must not be enabled at the same time. |
 | `requiredEnv` | string[] | `[]` | Env vars that must be non-empty while this plugin is enabled. |
 | `secrets` | string[] | `[]` | Env vars `entrypoint.sh` unsets before handing control to `node`. Use for anything only the root stage may see. |
+| `settings` | object[] | `[]` | The settings this plugin reads, for the web UI's settings form. See [Declaring settings](#declaring-settings). |
 
 Validation (`conflicts`, `requiredEnv`, `requires`) runs on the host **before** the image is
 built, so misconfiguration fails fast and cheaply.
+
+### Declaring settings
+
+Every setting a project can make in its `.claude-sandbox.json` is declared by its owner — a plugin
+in its `plugin.json`, an agent in its `agent.json`, the sandbox itself in
+[src/kernel.json](src/kernel.json) — as a `settings` list. The web UI draws its settings form from
+these, and `web/server.py` checks values against them before it writes the file.
+
+```json
+"settings": [
+  { "key": "branchPrefix", "type": "string", "label": "Branch prefix",
+    "description": "Leading segment of each run's branch.", "placeholder": "claude-code" },
+  { "env": "AGENT_WORKSPACE_CLEANUP", "type": "boolean", "label": "Delete the mirror on exit", "default": true }
+]
+```
+
+Each entry names exactly one of `key` (a key in the plugin's own section,
+`.plugins["<plugin>"].<key>`, read with `plugin_config`) or `env` (a variable in the `env` block,
+which must also be in `.env.example`; there a boolean is written as `1`/`0`). The rest:
+
+| Key | Meaning |
+|-----|---------|
+| `type` | `boolean` (a switch), `string`, `path` (a text field), `text` (several lines), `integer` (with optional `min`/`max`), `enum` (a dropdown of `choices`), `list` (of `items`, itself a type: a list of enums is a set of checkboxes), `map` (name → value pairs), `object` (its own `fields`), `json` (anything, edited as JSON) |
+| `label`, `description` | What the form shows. |
+| `default` | What applies while it is unset; shown as the placeholder or the switch's resting state. Informational: the owner still applies its own default. |
+| `placeholder` | An example value, for settings without a fixed default. |
+| `required` | The value must be set (inside an `object`; a plugin's `requiredEnv` is marked as well). |
+| `secret` | A password field. The file is plain text, so prefer the repo's `.env` for secrets. |
+| `pattern` | A regular expression a string must match whole. |
+| `monospace` | Draw the field in a fixed-width font (commands, paths). |
+| `when` | Inside an `object`: show (and check) the field only while a sibling has one of these values, e.g. `{"type": ["header", "bearer"]}`. |
+| `title` | On a list's `object` items: the field whose value titles each item. |
+
+`tests/test_manifests.py` keeps the declarations in step with `.env.example`: every sandbox
+variable but the `ENABLE_` flags and the two `PROJECT_*_FILE` paths is declared exactly once.
 
 ### `install.sh` — build stage (root)
 
@@ -649,6 +692,7 @@ Volume mounts are contributed by plugins via `pass_mount`; the core `docker run`
 | [web/](web) | web UI over `run.sh`: `server.py` (sessions in ptys, PRs and issues, a tunnel to `code serve-web`), the status page `index.html` and the per-session terminal `session.html` |
 | [Dockerfile](Dockerfile) | image: base tools, agent install stage, plugin install stage, permissions |
 | [settings-base.json](settings-base.json) | empty policy base plugin fragments merge into |
+| [src/kernel.json](src/kernel.json) | the sandbox's own settings (`AGENT`, ports), declared as plugins declare theirs |
 | [src/entrypoint.sh](src/entrypoint.sh) | container root stage and privilege handoff |
 | [src/agent-setup.sh](src/agent-setup.sh) | container agent stage and agent launch |
 | [src/merge-settings.py](src/merge-settings.py) | deep-merges settings fragments |

@@ -42,6 +42,8 @@ from urllib.parse import parse_qs, urlparse
 HERE = Path(__file__).resolve().parent
 RUN_SH = HERE.parent / "run.sh"
 PLUGINS = HERE.parent / "plugins"
+AGENTS = HERE.parent / "agents"
+KERNEL = HERE.parent / "src/kernel.json"  # the settings of the sandbox itself, as plugins declare theirs
 EXAMPLE = HERE.parent / ".claude-sandbox.example.json"  # what each plugin's section may hold
 CONFIG = ".claude-sandbox.json"  # a project's own sandbox configuration, next to its checkout
 RUN_ID = re.compile(r"[0-9a-f]{6}")
@@ -193,24 +195,49 @@ def describe(project):
     return found
 
 
+def _manifest(path):
+    try:
+        found = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return found if isinstance(found, dict) else None
+
+
 def plugin_manifests():
-    """Every plugin the sandbox ships, as its manifest says, for the page's configuration dialog,
-    with its section from the example config as a hint of what it reads."""
+    """Every plugin the sandbox ships, as its manifest says, for the page's configuration dialog:
+    the settings it declares, and its section from the example config."""
     try:
         example = json.loads(EXAMPLE.read_text()).get("plugins", {})
     except (OSError, ValueError):
         example = {}
     found = []
     for manifest in sorted(PLUGINS.glob("*/plugin.json")):
-        try:
-            meta = json.loads(manifest.read_text())
-        except (OSError, ValueError):
+        meta = _manifest(manifest)
+        if meta is None:
             continue
         name = manifest.parent.name
         found.append({"name": name, "description": meta.get("description", ""),
                       "defaultEnabled": bool(meta.get("defaultEnabled")),
-                      "requiredAgent": meta.get("requiredAgent"), "example": example.get(name)})
+                      "requiredAgent": meta.get("requiredAgent"), "example": example.get(name),
+                      "settings": meta.get("settings", [])})
     return found
+
+
+def agent_manifests():
+    """Every agent the sandbox ships, with the settings it declares."""
+    found = []
+    for manifest in sorted(AGENTS.glob("*/agent.json")):
+        meta = _manifest(manifest)
+        if meta is not None:
+            found.append({"name": manifest.parent.name, "description": meta.get("description", ""),
+                          "settings": meta.get("settings", [])})
+    return found
+
+
+def kernel_manifest():
+    """The settings of the sandbox itself, outside any agent or plugin."""
+    meta = _manifest(KERNEL) or {}
+    return {"description": meta.get("description", ""), "settings": meta.get("settings", [])}
 
 
 def read_config(project):
@@ -224,7 +251,8 @@ def read_config(project):
         raise ValueError(f"{path} is not valid JSON ({e}): fix it by hand first")
     if not isinstance(config, dict):
         raise ValueError(f"{path} must hold a JSON object: fix it by hand first")
-    return {"file": str(path), "exists": path.exists(), "config": config, "plugins": plugin_manifests()}
+    return {"file": str(path), "exists": path.exists(), "config": config, "kernel": kernel_manifest(),
+            "agents": agent_manifests(), "plugins": plugin_manifests()}
 
 
 def check_config(config):
@@ -242,6 +270,84 @@ def check_config(config):
     env = config.get("env", {})
     if not isinstance(env, dict) or any(isinstance(v, (dict, list)) for v in env.values()):
         raise ValueError(".env must be an object of scalar values")
+    # What the kernel, the agents and the plugins declare is checked against its declared type;
+    # anything else is left to run.sh and the plugins, as before.
+    declared = kernel_manifest()["settings"] + [s for a in agent_manifests() for s in a["settings"]]
+    for p in plugin_manifests():
+        declared += [s for s in p["settings"] if "env" in s]
+        section = plugins.get(p["name"], {})
+        for spec in p["settings"]:
+            if "key" in spec and spec["key"] in section:
+                check_setting(spec, section[spec["key"]], f'.plugins["{p["name"]}"].{spec["key"]}')
+    for spec in declared:
+        if spec.get("env") in env:
+            check_setting(spec, env[spec["env"]], f".env.{spec['env']}", in_env=True)
+
+
+def check_setting(spec, value, where, in_env=False):
+    """One value against the type its owner declared for it (see README, "Declaring settings").
+    An .env value is a scalar that run.sh exports as a string, so there it may be spelled as one."""
+    kind = spec.get("type", "string")
+    if value is None:
+        raise ValueError(f"{where} must not be null: leave it out instead")
+    if in_env:
+        text = str(value).lower() if isinstance(value, bool) else str(value)
+        if kind == "boolean" and text not in ("0", "1", "true", "false"):
+            raise ValueError(f"{where} must be 0 or 1")
+        if kind == "integer" and not re.fullmatch(r"-?[0-9]+", text):
+            raise ValueError(f"{where} must be a whole number")
+        if kind == "enum" and text not in spec.get("choices", []):
+            raise ValueError(f"{where} must be one of {', '.join(spec.get('choices', []))}")
+        if spec.get("pattern") and not re.fullmatch(spec["pattern"], text):
+            raise ValueError(f"{where} is not in the expected format")
+        return
+    if kind == "boolean":
+        ok = isinstance(value, bool)
+    elif kind in ("string", "path"):
+        ok = isinstance(value, str) and not (spec.get("pattern") and not re.fullmatch(spec["pattern"], value))
+    elif kind == "text":
+        ok = isinstance(value, str) or (isinstance(value, list) and all(isinstance(v, str) for v in value))
+    elif kind == "integer":
+        ok = isinstance(value, int) and not isinstance(value, bool) \
+            and spec.get("min", value) <= value <= spec.get("max", value)
+    elif kind == "enum":
+        ok = value in spec.get("choices", [])
+    elif kind == "list":
+        if not isinstance(value, list):
+            raise ValueError(f"{where} must be a list")
+        for i, item in enumerate(value):
+            check_setting(spec.get("items", {"type": "string"}), item, f"{where}[{i}]")
+        return
+    elif kind == "map":
+        ok = isinstance(value, dict) and all(isinstance(v, (str, int, float)) and not isinstance(v, bool)
+                                             for v in value.values())
+    elif kind == "object":
+        if not isinstance(value, dict):
+            raise ValueError(f"{where} must be an object")
+        for field in spec.get("fields", []):
+            if not shown(field, value, spec["fields"]):
+                continue
+            key = field["key"]
+            if key in value:
+                check_setting(field, value[key], f"{where}.{key}")
+            elif field.get("required"):
+                raise ValueError(f"{where}.{key} is required")
+        return
+    else:  # json: anything JSON holds
+        ok = True
+    if not ok:
+        raise ValueError(f"{where} is not a valid {kind}" + (
+            f" (one of {', '.join(map(str, spec['choices']))})" if kind == "enum" else ""))
+
+
+def shown(field, siblings, fields):
+    """Whether a field applies, given the object it sits in: its `when` names the values a sibling
+    must have, that sibling's declared default while it is unset."""
+    for key, allowed in field.get("when", {}).items():
+        default = next((f.get("default") for f in fields if f.get("key") == key), None)
+        if siblings.get(key, default) not in allowed:
+            return False
+    return True
 
 
 def write_config(project, config):

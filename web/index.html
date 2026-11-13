@@ -86,6 +86,14 @@
   .status.ok { color: var(--ok); }
   .status.fail { color: var(--fail); }
   .status.pending { color: var(--lamp); }
+  /* An item on a session's row (its pull request): a small button, its status mark and ref. */
+  a.chip { display: inline-flex; align-items: center; padding: 2px 9px 2px 5px; border-radius: 999px;
+           border: 1px solid var(--rule); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  a.chip:hover { border-color: var(--haze); color: var(--paper); }
+  a.chip .status { margin-right: 3px; }
+  a.chip.ok { border-color: #6fd3a266; }
+  a.chip.fail { border-color: #ff7b8a66; }
+  a.chip.pending { border-color: #f2b84b66; }
 
   @media (max-width: 900px) {
     body { padding: 24px 16px 48px; }
@@ -119,6 +127,11 @@ const label = s => s.kind === 'shell' ? 'terminal' : s.run_id + (s.kind === 'res
 
 let state = {projects: [], sessions: []}, plugins = {}, drawn = '';
 
+// What a project's plugins put on a run's session row: items they added there themselves, and
+// items of their sections they tied to a run (a pull request on the run's branch).
+const runItems = said => [...said.lists.flatMap(list => list.items).filter(i => i.run_id),
+  ...(said.session_items || [])];
+
 // The tabs this page opened, by name, so closing a session can close them too. Terminal tabs also
 // close themselves when told on `tabs` (they keep doing so after this page reloads); a VS Code tab
 // is not ours to script, so only this page's handle on it closes it.
@@ -128,8 +141,7 @@ const opened = {}, tabs = new BroadcastChannel('sandbox-tabs');
 // A session's tabs: its terminal, VS Code on its checkout, and any item (its pull request) a
 // plugin tied to its run.
 const tabNames = s => ['session-' + s.id, 'code-' + s.workspace,
-  ...Object.values(plugins).flatMap(said => said.lists.flatMap(list => list.items))
-    .filter(i => s.run_id && i.run_id === s.run_id).map(i => 'item-' + i.url)];
+  ...Object.values(plugins).flatMap(runItems).filter(i => s.run_id && i.run_id === s.run_id).map(i => 'item-' + i.url)];
 const closeTabs = s => tabNames(s).forEach(n => opened[n]?.close());
 tabs.onmessage = e => closeTabs(e.data);
 
@@ -230,6 +242,14 @@ async function remove(s) {
   refresh();
 }
 
+const mark = i => i.status ? h('span', {className: 'status ' + i.status, ariaLabel: i.status_text || i.status},
+  {ok: '✓', fail: '✕', pending: '●'}[i.status] || '') : '';
+const tip = i => [(i.ref ? i.ref + ' ' : '') + (i.note ? i.note + ': ' : '') + i.title + (i.branch ? ` (${i.branch})` : ''),
+  i.status_text].filter(Boolean).join('\n');
+// An item on a session's row: opens in its own tab, as in a section.
+const chip = i => h('a', {className: 'chip ' + (i.status || ''), href: i.url, target: '_blank', rel: 'noopener',
+                          onclick: e => item(e, i), title: tip(i)}, mark(i), i.ref || i.title);
+
 const column = (title, items, row, none, lit) => h('div', {},
   h('h3', {}, title, h('span', {className: 'count' + (lit ? ' lit' : '')}, String(items.length))),
   items.length ? h('ul', {}, ...items.map(row)) : h('p', {}, none));
@@ -241,6 +261,11 @@ function render() {
   if (sig === drawn) return;
   drawn = sig;
   const live = id => state.sessions.find(s => s.run_id === id && s.exit === null);
+  // The one session of a run that carries its items: the live one, else the latest.
+  const holder = (path, id) => {
+    const of = agents.filter(s => s.project === path && s.run_id === id);
+    return of.find(s => s.exit === null) || of.pop();
+  };
   const agents = state.sessions.filter(s => s.kind !== 'shell');  // terminals are not sessions
   const running = agents.some(s => s.exit === null);
   const totals = new Map([['Sessions', agents.length]]);
@@ -253,6 +278,8 @@ function render() {
       h('b', {className: title === 'Sessions' && running ? 'lit' : ''}, String(n)), h('span', {}, title)))),
     ...state.projects.map(path => {
       const mine = agents.filter(s => s.project === path), said = plugins[path];
+      const tied = said ? runItems(said) : [];
+      const onRow = s => s.run_id && holder(path, s.run_id) === s ? tied.filter(i => i.run_id === s.run_id) : [];
       return h('section', {},
         h('div', {className: 'head'},
           h('h2', {title: path}, name(path)),
@@ -268,6 +295,7 @@ function render() {
           h('button', {className: 'session' + (s.exit === null ? '' : ' ended'), onclick: () => show(s), title: 'Open its terminal in a tab'},
             h('span', {className: 'lamp ' + (s.status || ''), title: SAYS[s.status] || 'ended'}),
             label(s) + (s.exit === null ? '' : `, exited ${s.exit}`) + (s.status === 'question' ? ', has a question' : '')),
+          ...onRow(s).map(chip),
           s.exit !== null && s.run_id && !live(s.run_id)
             ? h('button', {className: 'icon play', onclick: () => start(path, 'resume', s.run_id), ariaLabel: 'Resume session',
                            title: 'Resume: same branch, same conversation'}, PLAY()) : '',
@@ -280,21 +308,18 @@ function render() {
           'Nobody at work.', mine.some(s => s.exit === null)),
         // What the project's plugins list (pull requests, issues, …): the page only draws it. An
         // item a plugin tied to a run opens that run's session, or resumes it.
-        ...(said ? said.lists : []).map(list => column(list.title, list.items, i => {
-          const s = i.run_id && live(i.run_id);
-          return h('li', {},
-            h('a', {href: i.url, target: '_blank', rel: 'noopener', onclick: e => item(e, i),
-                    title: [i.title + (i.branch ? ` (${i.branch})` : ''), i.status_text].filter(Boolean).join('\n')},
-              i.status ? h('span', {className: 'status ' + i.status, ariaLabel: i.status_text || i.status},
-                {ok: '✓', fail: '✕', pending: '●'}[i.status] || '') : '',
-              i.ref ? h('span', {className: 'num'}, i.ref) : '',
+        // An item tied to a run is on that run's session row instead, while one is listed.
+        ...(said ? said.lists : []).map(list => column(list.title,
+          list.items.filter(i => !(i.run_id && holder(path, i.run_id))), i =>
+          h('li', {},
+            h('a', {href: i.url, target: '_blank', rel: 'noopener', onclick: e => item(e, i), title: tip(i)},
+              mark(i), i.ref ? h('span', {className: 'num'}, i.ref) : '',
               i.note ? h('span', {className: 'draft'}, i.note + ': ') : '', i.title),
-            s ? h('button', {onclick: () => show(s)}, 'Open')
-              : i.run_id ? resume(path, i.run_id) : '',
+            i.run_id ? resume(path, i.run_id) : '',
             // A new session on a task the plugin wrote for this item (an issue's Resolve).
             i.start ? h('button', {onclick: () => start(path, 'run', undefined, i.start.task), title: i.start.task},
-                        i.start.label) : '');
-        }, 'None open.'))));
+                        i.start.label) : ''),
+          'None open.'))));
     }));
   if (!state.projects.length)
     $('board').append(h('p', {},

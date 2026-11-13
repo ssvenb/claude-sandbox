@@ -72,7 +72,9 @@ def board(tmp_path, browser):
     base = proc.stdout.readline().split()[1]
     # Items on another origin, as GitHub's are: localhost is the same server, another origin.
     elsewhere = base.replace("127.0.0.1", "localhost")
-    (sandbox / "web.json").write_text(json.dumps({"notes": [], "checkout": f"{tmp_path}/mirrors/*-{{run_id}}", "lists": [
+    (sandbox / "web.json").write_text(json.dumps({"notes": [], "checkout": f"{tmp_path}/mirrors/*-{{run_id}}",
+        "session_items": [{"run_id": RUN, "ref": "preview", "title": "The run's preview", "url": f"{elsewhere}/preview"}],
+        "lists": [
         {"title": "Pull requests", "items": [
             {"ref": "#3", "title": "Agent's work", "url": f"{elsewhere}/pr/3", "run_id": RUN,
              "status": "fail", "status_text": "CI: 1 of 2 checks failed"},
@@ -187,12 +189,31 @@ def test_one_tab_per_pull_request(board):
     assert issue.url.endswith("/issues/7")
 
 
+def test_a_runs_pull_request_moves_onto_its_session_row(board):
+    # No session of the run yet: the pull request waits in its section, offering to resume it.
+    assert board.query_selector("a.chip") is None
+    board.wait_for_selector("li:has-text(\"Agent's work\") >> text=Resume")
+    board.resume()
+    board.wait_for_selector("button.session ~ a.chip.fail")
+    row = board.query_selector("li:has(button.session)")
+    assert [c.text_content() for c in row.query_selector_all("a.chip")] == ["✕#3", "preview"]
+    assert "Agent's work" in board.get_attribute("a.chip.fail", "title")
+    assert "CI: 1 of 2 checks failed" in board.get_attribute("a.chip.fail", "title")
+    assert board.query_selector("text=Agent's work") is None  # gone from its section
+    assert board.query_selector("text=By hand")  # a pull request of no run stays there
+    pr = opens_tab(board, lambda: board.click("a.chip.fail"))
+    assert pr.url.endswith("/pr/3")
+    again_opens_nothing(board, lambda: board.click("a.chip.fail"))
+    preview = opens_tab(board, lambda: board.click("a.chip:has-text('preview')"))
+    assert preview.url.endswith("/preview")
+
+
 def test_deleting_a_session_closes_its_tabs_and_only_its_own(board):
     board.resume()
     session = opens_tab(board, lambda: board.click("button.session"))
     code = opens_tab(board, lambda: board.click("button[aria-label='VS Code']"))
     assert "/vscode/?folder=" in code.url
-    its_pr = opens_tab(board, lambda: board.click("text=Agent's work"))
+    its_pr = opens_tab(board, lambda: board.click("a.chip:has-text('#3')"))
     other_pr = opens_tab(board, lambda: board.click("text=By hand"))
     term = opens_tab(board, lambda: board.click("button[aria-label='Terminal']"))
 
@@ -207,7 +228,7 @@ def test_stopping_keeps_the_session_and_its_tab_and_deleting_closes_them(board):
     board.resume()
     session = opens_tab(board, lambda: board.click("button.session"))
     session.on("dialog", lambda d: d.accept())
-    its_pr = opens_tab(board, lambda: board.click("text=Agent's work"))
+    its_pr = opens_tab(board, lambda: board.click("a.chip:has-text('#3')"))
     session.click("button[aria-label='Stop session']")
     session.wait_for_selector("text=exited")  # still open, to read how it ended
     board.wait_for_selector("button.session.ended")  # listed still, to resume, and no longer stoppable

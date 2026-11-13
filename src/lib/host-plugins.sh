@@ -289,6 +289,7 @@ plugins_web_action() {
   PLUGIN_NAME="$1"
   PLUGIN_DIR="$PLUGIN_ROOT/$1"
   [ -f "$PLUGIN_DIR/web.sh" ] || die "Plugin '$1' has no web.sh."
+  # shellcheck disable=SC2034  # read by the plugin's web.sh
   WEB_ACTION="$2" WEB_ACTION_ARG="$3" WEB_ACTION_DONE=0
   # shellcheck disable=SC1091  # path resolved at runtime
   . "$PLUGIN_DIR/web.sh" || true

@@ -59,6 +59,9 @@
   .you { align-self: flex-end; max-width: min(86%, 640px); padding: 9px 14px; border-radius: 16px 16px 4px 16px;
          background: var(--lamp-wash); white-space: pre-wrap; overflow-wrap: anywhere; }
   .you.queued { background: transparent; border: 1px dashed var(--muted); }
+  .you .shots { margin: 2px 0 6px; justify-content: flex-end; }
+  .you .shots:last-child { margin-bottom: 2px; }
+  .you .shots img { height: 96px; max-width: 220px; }
 
   /* What the agent wrote: prose, set like prose. */
   .say { line-height: 1.6; overflow-wrap: anywhere; min-width: 0; }
@@ -89,13 +92,8 @@
                   background: var(--lamp); animation: blink 1s steps(2) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
 
-  /* What it thought before it spoke: folded away, there to read. */
-  .think { color: var(--muted); font-size: 13.5px; }
-  .think > summary { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; list-style: none; }
-  .think > summary::-webkit-details-marker { display: none; }
-  .think > summary svg { width: 12px; height: 12px; transition: transform .12s; }
-  .think[open] > summary svg { transform: rotate(90deg); }
-  .think > div { margin-top: 6px; padding-left: 14px; border-left: 2px solid var(--rule); white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* That it thought before it spoke: a line, turning while it does. What it thought is not shown. */
+  .think { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 13.5px; }
 
   /* What it did: one line per tool call, runs of them in one box. Open a line for what went in
      and what came back. */
@@ -117,6 +115,14 @@
   .tool pre { margin: 0; padding: 9px 11px; border-radius: 8px; background: var(--sunk); border: 1px solid var(--rule);
               font-size: 12px; line-height: 1.5; max-height: 340px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
   .tool pre.err { border-color: color-mix(in srgb, var(--fail) 45%, transparent); }
+  /* What went in and what came back are told apart at a glance: what went in stands on the panel,
+     in ink, behind a bar in the link's colour (a command behind its prompt); what came back is
+     set back, muted, on the sunk ground. */
+  .tool .given pre { background: transparent; border-color: var(--rule); border-left: 3px solid var(--link); border-radius: 4px 8px 8px 4px; }
+  .tool .given pre.cmd { font-weight: 600; }
+  .tool .given pre.cmd::before { content: "$ "; color: var(--link); }
+  .tool .out pre { color: var(--muted); }
+  .tool .out pre.err { color: var(--ink); }
   .diff { padding: 6px 0 !important; white-space: pre !important; overflow-wrap: normal !important; }
   .diff span { display: block; padding: 0 11px; min-width: max-content; }
   .diff .add { background: var(--add); }
@@ -167,13 +173,23 @@
   /* The dock: the plan it works through, a suggestion, and the composer. */
   #dock { border-top: 1px solid var(--rule); background: var(--page); padding: 10px 0 max(14px, env(safe-area-inset-bottom)); }
   #dock .column { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
-  #plan { border: 1px solid var(--rule); border-radius: 10px; background: var(--panel); font-size: 13.5px; }
-  #plan > summary { display: flex; align-items: center; gap: 9px; padding: 6px 12px; cursor: pointer; list-style: none; min-width: 0; }
-  #plan > summary::-webkit-details-marker { display: none; }
-  #plan > summary b { font-weight: 600; flex: none; }
-  #plan > summary span { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #plan > summary i { font-style: normal; color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+  #plan, #tasks { border: 1px solid var(--rule); border-radius: 10px; background: var(--panel); font-size: 13.5px; }
+  :is(#plan, #tasks) > summary { display: flex; align-items: center; gap: 9px; padding: 6px 12px; cursor: pointer; list-style: none; min-width: 0; }
+  :is(#plan, #tasks) > summary::-webkit-details-marker { display: none; }
+  :is(#plan, #tasks) > summary b { font-weight: 600; flex: none; }
+  :is(#plan, #tasks) > summary span { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  :is(#plan, #tasks) > summary i { font-style: normal; color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
   #plan .steps { padding: 4px 12px 10px; max-height: 30vh; overflow: auto; }
+  /* What runs in the background, apart from the conversation: it goes on while the agent answers,
+     and after its turn. A line each, and a button that stops it. */
+  #tasks > summary span.spin { flex: none; color: var(--lamp); }
+  #tasks ul { list-style: none; margin: 0; padding: 0 6px 6px 12px; max-height: 30vh; overflow: auto; }
+  #tasks li { display: flex; align-items: center; gap: 9px; min-height: 30px; min-width: 0; }
+  #tasks li .kind { flex: none; padding: 0 7px; border: 1px solid var(--rule); border-radius: 999px; color: var(--muted); font-size: 12px; }
+  #tasks li .text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #tasks li .at { flex: 1 1 0; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #tasks li button { margin-left: auto; }
+  .composer .shots { padding: 12px 16px 0; }
   #suggest { justify-self: start; max-width: 100%; display: inline-flex; gap: 8px; align-items: baseline; border-style: dashed;
              color: var(--muted); border-radius: 10px; text-align: left; }
   #suggest kbd { font-size: 11px; padding: 0 5px; border: 1px solid var(--rule); border-radius: 4px; }
@@ -237,10 +253,12 @@
   </div>
 </main>
 <footer id="dock"><div class="column">
+  <details id="tasks" hidden></details>
   <details id="plan" hidden></details>
   <button id="suggest" type="button" hidden></button>
   <form class="composer" id="composer">
     <div id="menu" role="listbox" hidden></div>
+    <div class="shots" id="shots"></div>
     <textarea id="input" rows="1" aria-label="Message to the agent" autocomplete="off"></textarea>
     <div class="bar">
       <select id="model" aria-label="Model" hidden></select>
@@ -450,9 +468,9 @@ function bootState() {
 }
 
 function user(e) {
-  const el = place(h('div', {className: 'you' + (e.queued ? ' queued' : '')}, e.text));
+  const el = place(h('div', {className: 'you' + (e.queued ? ' queued' : '')}, e.images?.length ? shots(e.images) : '', e.text));
   if (e.id) users.set(e.id, el);
-  if (session && !session.title) session.title = e.text.replace(/\s+/g, ' ').slice(0, 140);  // it is called what it was first asked
+  if (session && !session.title) session.title = e.text.replace(/\s+/g, ' ').slice(0, 140) || 'Image';  // it is called what it was first asked
   follow = true;
 }
 function sent(e) {
@@ -467,8 +485,7 @@ function draw(b) {
   requestAnimationFrame(() => {
     b.dirty = false;
     if (b.kind === 'thinking') {
-      b.body.textContent = b.text;
-      b.label.replaceChildren(b.streaming ? h('span', {className: 'spin'}) : '', b.streaming ? ' Thinking' : 'Thought');
+      b.el.replaceChildren(b.streaming ? h('span', {className: 'spin'}) : '', b.streaming ? 'Thinking' : 'Thought');
     } else {
       b.body.replaceChildren();
       markdown(b.text, b.body);
@@ -486,11 +503,8 @@ function block(e, streaming) {
   let b = blocks.get(e.id);
   if (!b) {
     b = {text: '', kind: e.kind, dirty: false};
-    if (e.kind === 'thinking') {
-      b.label = h('span', {}, 'Thinking');
-      b.body = h('div');
-      b.el = h('details', {className: 'think'}, h('summary', {}, ICON.chevron(), b.label), b.body);
-    } else b.el = b.body = h('div', {className: 'say'});
+    if (e.kind === 'thinking') b.el = h('div', {className: 'think'}, 'Thinking');
+    else b.el = b.body = h('div', {className: 'say'});
     blocks.set(e.id, b);
     place(b.el, e.parent);
   }
@@ -504,7 +518,7 @@ function tool(e) {
   let t = tools.get(e.id);
   if (!t) {
     t = {mark: h('span', {className: 'mark'}), verb: h('span', {className: 'verb'}), what: h('span', {className: 'what'}),
-         took: h('span', {className: 'took'}), given: h('div'), kids: h('div', {className: 'kids'}), out: h('div')};
+         took: h('span', {className: 'took'}), given: h('div', {className: 'given'}), kids: h('div', {className: 'kids'}), out: h('div', {className: 'out'})};
     t.el = h('details', {className: 'tool running'}, h('summary', {}, t.mark, t.verb, t.what, t.took),
              h('div', {className: 'body'}, t.given, t.kids, t.out));
     tools.set(e.id, t);
@@ -524,7 +538,7 @@ function tool(e) {
     if (i.todos) parts.push(steps(todoItems(i)));
     else if (typeof before === 'string' && typeof after === 'string') parts.push(diff(before, after));
     else if (typeof written === 'string' && (i.file_path || i.path)) parts.push(h('pre', {}, written));
-    else if (typeof i.command === 'string') parts.push(h('pre', {}, i.command));
+    else if (typeof i.command === 'string') parts.push(h('pre', {className: 'cmd'}, i.command));
     else if (typeof i.prompt === 'string') parts.push(h('pre', {}, i.prompt));
     else if (Object.keys(i).length) parts.push(h('pre', {}, JSON.stringify(i, null, 2)));
     t.given.replaceChildren(...parts);
@@ -641,8 +655,9 @@ function handle(e) {
     case 'model': info.model = e.id; pickers(); break;
     case 'effort': info.effort = e.level; pickers(); break;
     case 'todos': plan(e.items); break;
+    case 'tasks': background(e.items); break;
+    case 'exit': background([]); settleBlocks(); ended(e); break;
     case 'suggestion': suggest(e.text); break;
-    case 'exit': settleBlocks(); ended(e); break;
   }
 }
 function apply(e) {
@@ -660,6 +675,7 @@ function restore(snap) {
   for (const b of blocks.values()) b.streaming = false;
   bootState();
   plan(snap.todos);
+  background(snap.tasks);
   suggest(snap.suggestion);
   pickers();
   chrome();
@@ -667,7 +683,35 @@ function restore(snap) {
   requestAnimationFrame(settle);
 }
 
-// ---- the dock: plan, suggestion, composer -------------------------------------------------------
+// ---- the dock: background tasks, plan, suggestion, composer --------------------------------------
+
+// What the agent runs in the background, as its own task list has it: the whole set each time.
+// Rows are kept by task, so one being stopped stays busy under the pointer.
+const rows = new Map();
+function background(items) {
+  const el = $('tasks');
+  items = items || [];
+  el.hidden = !items.length;
+  for (const id of [...rows.keys()]) if (!items.some(t => t.id === id)) rows.delete(id);
+  if (el.hidden) return el.replaceChildren();
+  const list = h('ul', {}, ...items.map(t => {
+    let row = rows.get(t.id);
+    if (!row) {
+      const halt = h('button', {type: 'button', className: 'icon stop', ariaLabel: 'Stop task', title: 'Stop',
+        onclick: () => { halt.classList.add('busy'); halt.disabled = true;  // until the list comes without it
+                         post(`/api/sessions/${id}/task`, JSON.stringify({id: t.id})).catch(e => { halt.classList.remove('busy'); halt.disabled = false; alert(e.message); }); }}, ICON.stop());
+      row = {kind: h('span', {className: 'kind'}), text: h('span', {className: 'text'}), note: h('span', {className: 'at'}), halt};
+      row.el = h('li', {}, row.kind, row.text, row.note, halt);
+      rows.set(t.id, row);
+    }
+    row.kind.textContent = t.kind || 'task';
+    row.text.textContent = row.text.title = t.text || '';
+    row.note.textContent = row.note.title = t.note || '';
+    return row.el;
+  }));
+  el.replaceChildren(h('summary', {}, h('span', {className: 'spin'}), h('b', {}, 'Background'),
+    h('span', {}, items.map(t => t.text).filter(Boolean).join(' · ')), h('i', {}, `${items.length} running`)), list);
+}
 
 function plan(items) {
   const el = $('plan');
@@ -707,6 +751,7 @@ $('effort').onchange = () => post(`/api/sessions/${id}/effort`, JSON.stringify({
 
 const touch = matchMedia('(pointer: coarse)').matches;  // a soft keyboard's Enter is a new line; the button sends
 const grow = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, innerHeight * .4) + 'px'; };
+const held = pasted(input, $('shots'), () => settle());
 const draft = {get: () => { try { return sessionStorage.getItem('draft-' + id) || ''; } catch { return ''; } },
                set: v => { try { v ? sessionStorage.setItem('draft-' + id, v) : sessionStorage.removeItem('draft-' + id); } catch {} }};
 
@@ -751,13 +796,14 @@ document.addEventListener('keydown', e => {
 $('composer').addEventListener('submit', async e => {
   e.preventDefault();
   const text = input.value;
-  if (!text.trim() || over !== null) return;
+  if (!(text.trim() || held.count()) || over !== null) return;
+  const images = held.take();
   input.value = '';
   draft.set('');
   $('menu').hidden = true;
   grow();
-  try { await post(`/api/sessions/${id}/prompt`, JSON.stringify({text})); }
-  catch (err) { input.value = text; grow(); alert(err.message); }
+  try { await post(`/api/sessions/${id}/prompt`, JSON.stringify({text, images: images.length ? images : undefined})); }
+  catch (err) { input.value = text; held.put(images); grow(); alert(err.message); }
 });
 const interrupt = () => busy($('halt'), () => post(`/api/sessions/${id}/interrupt`).catch(e => alert(e.message)));
 $('halt').onclick = interrupt;

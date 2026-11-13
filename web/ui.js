@@ -47,7 +47,6 @@ const ICON = {
   gear: () => svg('<g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></g>', '0 0 24 24'),
   send: () => stroke('M10 16V4M4.5 9.5 10 4l5.5 5.5', 2.2),
   back: () => stroke('M11.5 4.5 6 10l5.5 5.5', 2.2),
-  chevron: () => stroke('M7.5 5 12.5 10l-5 5', 2),
   sun: () => svg('<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="10" cy="10" r="3.4"/><path d="M10 2.2v2M10 15.8v2M2.2 10h2M15.8 10h2M4.5 4.5l1.4 1.4M14.1 14.1l1.4 1.4M4.5 15.5l1.4-1.4M14.1 5.9l1.4-1.4"/></g>'),
   moon: () => stroke('M16.5 11.8A7 7 0 0 1 8.2 3.5a7 7 0 1 0 8.3 8.3z', 1.8),
   auto: () => svg('<circle cx="10" cy="10" r="6.8" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 3.2a6.8 6.8 0 0 1 0 13.6z" fill="currentColor"/>'),
@@ -98,3 +97,36 @@ const tip = i => [(i.ref ? i.ref + ' ' : '') + (i.note ? i.note + ': ' : '') + i
 // What a plugin publishes for a running session (its servers' ports), to link from wherever this
 // page was opened: `{host}` in its url is this page's own host name.
 const here = i => ({...i, url: i.url.replaceAll('{host}', location.hostname)});
+
+// Pictures pasted into a message: kept in a tray over the field until it is sent, each with a
+// button that takes it out again. `take()` hands them over (their type and their bytes in base64)
+// and empties the tray.
+const PICTURE = /^image\/(png|jpeg|gif|webp)$/;
+function pasted(field, tray, changed = () => {}) {
+  let held = [];
+  const draw = () => {
+    tray.replaceChildren(...held.map(p => h('span', {className: 'shot'},
+      h('img', {src: `data:${p.type};base64,${p.data}`, alt: 'Pasted image'}),
+      h('button', {type: 'button', ariaLabel: 'Remove image', title: 'Remove', onclick: () => { held = held.filter(x => x !== p); draw(); field.focus(); }}, '✕'))));
+    changed();
+  };
+  const add = file => new Promise(done => {
+    if (file.size > 5 << 20) { alert('An image can be at most 5 MB.'); return done(); }
+    if (held.length >= 8) return done();
+    const reader = new FileReader();
+    reader.onload = () => { held.push({type: file.type, data: String(reader.result).split(',')[1]}); draw(); done(); };
+    reader.onerror = () => done();
+    reader.readAsDataURL(file);
+  });
+  field.addEventListener('paste', e => {
+    const files = [...(e.clipboardData?.files || [])].filter(f => PICTURE.test(f.type));
+    if (!files.length) return;  // text: pasted as ever
+    e.preventDefault();
+    files.reduce((before, f) => before.then(() => add(f)), Promise.resolve());
+  });
+  return {count: () => held.length, take: () => { const all = held; held = []; draw(); return all; },
+          put: all => { held = all; draw(); }};
+}
+// The pictures of a message that was sent, as it shows them.
+const shots = images => h('div', {className: 'shots'}, ...(images || []).filter(p => PICTURE.test(p.type) && /^[A-Za-z0-9+/=]+$/.test(p.data))
+  .map(p => h('img', {src: `data:${p.type};base64,${p.data}`, alt: 'Image'})));

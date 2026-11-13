@@ -552,6 +552,48 @@ def test_a_chat_keeps_the_conversation_for_a_page_opened_later(chat):
     assert s.snapshot()["suggestion"] is None  # it was for the turn before
 
 
+PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="  # one pixel
+
+
+def test_a_chat_lists_what_runs_in_the_background_and_stops_one_on_request(chat):
+    s = chat()
+    chat.until(s, lambda s: s.ready)
+    s.prompt("run it in the background")
+    chat.until(s, lambda s: len(s.tasks) == 2 and s.status() == "idle")  # the turn is over, they run on
+    assert s.snapshot()["tasks"] == [{"id": "bg1a", "kind": "shell", "text": "npm run dev"},
+                                     {"id": "bg1b", "kind": "agent", "text": "Check the callers", "note": "Reading src/app.py"}]
+    assert not any(e["type"] == "tasks" for e in s.events)  # the latest set, not a log of them
+    s.tell({"type": "task", "id": "bg1a"})
+    chat.until(s, lambda s: [t["id"] for t in s.tasks] == ["bg1b"])
+    s.stop()
+    chat.until(s, lambda s: s.exit is not None)
+    assert s.tasks == []  # nothing runs once it has ended
+
+
+def test_a_prompt_takes_the_images_pasted_into_it(chat, monkeypatch):
+    monkeypatch.setenv("STUB_BOOT", "0.2")
+    picture = {"type": "image/png", "data": PNG}
+    s = web.start(str(chat.tmp), "run", None, None, None, [picture])  # a first message of only a picture
+    try:
+        assert s.json()["title"] == "Image" and s.events[0] == {"type": "user", "id": "u1", "text": "", "images": [picture], "queued": True}
+        chat.until(s, lambda s: s.ready)
+        s.prompt("and this one", [{**picture, "name": "left out"}])
+        commands = chat.tmp / "commands"
+        chat.until(s, lambda s: commands.exists() and len(commands.read_text().splitlines()) == 2)
+        assert [json.loads(line) for line in commands.read_text().splitlines()] == [
+            {"type": "prompt", "text": "", "images": [picture]}, {"type": "prompt", "text": "and this one", "images": [picture]}]
+        assert any(e.get("text") == "and this one" and e["images"] == [picture] for e in s.snapshot()["events"])  # kept, for a page opened later
+        for bad in ([{"type": "image/svg+xml", "data": PNG}], [{"type": "image/png", "data": "<script>"}], [picture] * 9, "x",
+                    [{"type": "image/png", "data": "A" * (7 << 20)}]):
+            with pytest.raises(ValueError):
+                s.prompt("look", bad)
+        with pytest.raises(ValueError):
+            web.start(str(chat.tmp), "run", None, "look", "terminal", [picture])
+    finally:
+        s.stop()
+        s.proc.wait(5)
+
+
 def test_a_chat_streams_its_events_and_takes_answers_and_interrupts(chat, tmp_path):
     (tmp_path / "projects").write_text(f"{tmp_path}\n")
     server = web.serve(0, tmp_path / "projects")

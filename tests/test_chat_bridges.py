@@ -139,6 +139,60 @@ def test_claude_is_started_as_the_terminal_would_and_its_messages_become_chat_ev
     b.close()
 
 
+PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="  # one pixel
+
+
+def test_claudes_background_tasks_are_listed_whole_each_time_and_one_can_be_stopped(tmp_path):
+    shell = {"task_id": "s1", "task_type": "local_bash", "description": "npm run dev"}
+    agent = {"task_id": "a1", "task_type": "local_agent", "subagent_type": "Explore", "description": "Check the callers"}
+    b = Bridge("claude", tmp_path, [
+        {"type": "system", "subtype": "background_tasks_changed", "tasks": [
+            shell, agent, {"task_id": "w1", "task_type": "local_bash", "description": "a watcher", "ambient": True}]},
+        {"type": "system", "subtype": "task_progress", "task_id": "a1", "tool_use_id": "t9", "description": "Check the callers",
+         "summary": "Reading src/app.py"},
+        {"type": "system", "subtype": "task_progress", "task_id": "gone", "description": "x", "summary": "Not listed"},
+        {"type": "system", "subtype": "background_tasks_changed", "tasks": [shell]},
+        {"type": "result", "subtype": "success", "is_error": False, "total_cost_usd": 0, "duration_ms": 1, "result": ""}])
+    b.until(lambda e: e["type"] == "ready")
+    b.say(type="prompt", text="start them")
+    b.until(lambda e: e["type"] == "turn")
+    assert [e["items"] for e in of(b.events, "tasks")] == [
+        [{"id": "s1", "kind": "shell", "text": "npm run dev"}, {"id": "a1", "kind": "agent", "text": "Check the callers"}],  # no housekeeping
+        [{"id": "s1", "kind": "shell", "text": "npm run dev"},
+         {"id": "a1", "kind": "agent", "text": "Check the callers", "note": "Reading src/app.py"}],  # what it is at
+        [{"id": "s1", "kind": "shell", "text": "npm run dev"}]]
+    assert {"type": "progress", "id": "t9", "text": "Reading src/app.py"} in b.events  # and on the call that started it
+    b.say(type="task", id="s1")
+    b.say(type="effort", level="low")
+    b.until(lambda e: e["type"] == "effort")
+    assert b.calls()[-2:] == [{"stopTask": "s1"}, {"settings": {"effortLevel": "low"}}]
+    b.close()
+
+
+def test_images_pasted_into_a_prompt_reach_each_agent_as_its_sdk_takes_them(tmp_path):
+    picture = {"type": "image/png", "data": PNG}
+    turn = [{"type": "result", "subtype": "success", "is_error": False, "total_cost_usd": 0, "duration_ms": 1, "result": ""}]
+    b = Bridge("claude", tmp_path, turn)
+    b.until(lambda e: e["type"] == "ready")
+    b.say(type="prompt", text="what is this?", images=[picture, {"type": "text/html", "data": "PGI+"}, {"type": "image/png", "data": "<b>"}])
+    b.until(lambda e: e["type"] == "turn")
+    b.say(type="prompt", text="", images=[picture])
+    b.until(lambda e: e["type"] == "turn" and len(of(b.events, "turn")) == 2)
+    image = {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": PNG}}
+    assert [c["prompt"] for c in b.calls() if "prompt" in c] == [  # only what is a picture; no empty text
+        [image, {"type": "text", "text": "what is this?"}], [image]]
+    b.close()
+
+    (tmp_path / "c").mkdir()
+    c = Bridge("copilot", tmp_path / "c", [])
+    c.until(lambda e: e["type"] == "ready")
+    c.say(type="prompt", text="what is this?", images=[picture])
+    c.until(lambda e: e["type"] == "status" and e["state"] == "idle" and any("send" in x for x in c.calls()))
+    assert {"send": {"prompt": "what is this?", "attachments": [
+        {"type": "blob", "data": PNG, "mimeType": "image/png", "displayName": "image 1"}]}} in c.calls()
+    c.close()
+
+
 def test_a_claude_that_does_not_report_its_state_is_idle_once_its_turn_ends(tmp_path):
     b = Bridge("claude", tmp_path, CLAUDE_TURN, FAKE_STATELESS="1")
     b.until(lambda e: e["type"] == "ready")
@@ -178,6 +232,8 @@ def test_a_resumed_claude_run_replays_its_transcript_and_resumes_the_conversatio
     history = [
         {"type": "user", "parent_tool_use_id": None, "message": {"content": "Fix the bug"}},
         {"type": "user", "parent_tool_use_id": None, "message": {"content": "<system-reminder>not the user's</system-reminder>"}},
+        {"type": "user", "parent_tool_use_id": None, "message": {"content": [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": PNG}}, {"type": "text", "text": "Like this"}]}},
         {"type": "user", "parent_tool_use_id": None,
          "message": {"content": "<command-name>/compact</command-name><command-args>briefly</command-args>"}},
         {"type": "assistant", "parent_tool_use_id": None, "message": {"content": [
@@ -188,7 +244,8 @@ def test_a_resumed_claude_run_replays_its_transcript_and_resumes_the_conversatio
     b.until(lambda e: e["type"] == "ready")
     replayed = [e for e in b.events if e["type"] not in ("hello", "ready")]
     assert [(e["type"], e.get("text") or e.get("name") or e.get("output")) for e in replayed] == [
-        ("user", "Fix the bug"), ("user", "/compact briefly"), ("text", "Looking."), ("tool", "Read"), ("result", "contents")]
+        ("user", "Fix the bug"), ("user", "Like this"), ("user", "/compact briefly"), ("text", "Looking."), ("tool", "Read"), ("result", "contents")]
+    assert [e.get("images") for e in of(replayed, "user")] == [None, [{"type": "image/png", "data": PNG}], None]  # with what was pasted into it
     options = next(c["options"] for c in b.calls() if "options" in c)
     assert options["resume"] == session and "sessionId" not in options
     b.close()

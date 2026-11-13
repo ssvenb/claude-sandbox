@@ -75,12 +75,12 @@ def board(tmp_path, browser):
         "live": [str(tmp_path / "ports.json")],
         "session_items": [{"run_id": RUN, "ref": "preview", "title": "The run's preview", "url": f"{elsewhere}/preview"}],
         "run_items": [
-            {"ref": "#3", "title": "Agent's work", "url": f"{elsewhere}/pr/3", "run_id": RUN,
+            {"ref": "#3", "title": "Agent's work", "url": f"{elsewhere}/pr/3", "run_id": RUN, "section": "Pull requests",
              "status": "fail", "status_text": "CI: 1 of 2 checks failed",
              "on_delete": {"plugin": "github-auth", "action": "close-pr", "arg": "3", "ask": "Close #3 too?"}},
             {"ref": "#2", "title": "Went in", "url": f"{elsewhere}/pr/2", "run_id": RUN,
              "note": "Merged", "status": "done", "status_text": "Merged"},
-            {"ref": "#4", "title": "By hand", "url": f"{elsewhere}/pr/4", "status": "ok", "status_text": "CI: 2 checks passed",
+            {"ref": "#4", "title": "By hand", "url": f"{elsewhere}/pr/4", "section": "Pull requests", "status": "ok", "status_text": "CI: 2 checks passed",
              "on_delete": {"plugin": "github-auth", "action": "close-pr", "arg": "4", "ask": "Close #4 too?"}}],
         "lists": [
         {"title": "Issues", "items": [{"ref": "#7", "title": "A bug", "url": f"{elsewhere}/issues/7",
@@ -100,6 +100,7 @@ def board(tmp_path, browser):
     page.goto(base)
     page.wait_for_selector("a .num")
     page.actions = sandbox / "actions"
+    page.web_json = sandbox / "web.json"
 
     def resume():
         """A session of RUN, the way the PR's Resume button starts one."""
@@ -222,8 +223,11 @@ def test_each_side_of_the_dashboard_scrolls_on_its_own_under_a_chat_bar_that_sta
 
 
 def test_a_list_with_nothing_on_it_is_not_shown(board):
-    assert " ".join(board.inner_text(".project h4").split()) == "Issues 1"
-    board.evaluate("() => { plugins[state.projects[0]].lists[0].items = []; render(); }")  # the last issue was closed
+    board.wait_for_selector(".project h4:has-text('Pull requests')")
+    assert [" ".join(h.inner_text().split()) for h in board.query_selector_all(".project h4")] == ["Issues 1", "Pull requests 1"]
+    # The last issue was closed, and the run's pull request merged.
+    board.evaluate("() => { const said = plugins[state.projects[0]]; said.lists[0].items = [];"
+                   " said.run_items = said.run_items.filter(i => i.ref !== '#3'); render(); }")
     assert board.query_selector(".project h4") is None and "None" not in board.inner_text(".project")
     assert board.inner_text(".project .head h3").startswith("proj")  # the project stays, with its buttons
 
@@ -542,12 +546,19 @@ def test_one_tab_per_item(board):
     again_opens_nothing(board, lambda: board.click("text=A bug"))  # GitHub's tab: another origin
 
 
-def test_pull_requests_show_only_on_their_runs_session(board):
-    # No session of the run yet: its pull requests show nowhere, and there is no column of them.
+def test_a_runs_pull_request_is_on_its_session_or_with_none_listed_on_its_projects_panel(board):
+    # No session of the run yet: its open pull request is on the project's panel, to resume it.
     assert board.query_selector("a.chip") is None
-    assert board.query_selector("h4:has-text('Pull requests')") is None
-    board.resume()
+    board.wait_for_selector(".project h4:has-text('Pull requests')")
+    assert board.text_content(".project h4:has-text('Pull requests') .count") == "1"
+    listed = board.query_selector(".project li:has-text(\"Agent's work\")")
+    assert "CI: 1 of 2 checks failed" in listed.query_selector("a").get_attribute("title")
+    assert board.query_selector("text=Went in") is None  # its merged one: on a session's row only
+    assert board.query_selector("text=By hand") is None  # a pull request of no run: nowhere
+    listed.query_selector("button:has-text('Resume')").click()
     board.wait_for_selector(f"{ROW} a.chip.fail")
+    # Now on its session's window, and no longer a section of the panel.
+    board.wait_for_selector(".project h4:has-text('Pull requests')", state="detached")
     row = board.query_selector(ROW)
     assert [c.text_content() for c in row.query_selector_all("a.chip")] == ["✕#3", "⇥#2", "preview"]
     assert "Agent's work" in board.get_attribute(f"{ROW} a.chip.fail", "title")
@@ -559,6 +570,11 @@ def test_pull_requests_show_only_on_their_runs_session(board):
     again_opens_nothing(board, lambda: board.click(".window a.chip.fail"))  # the same tab, from its window
     preview = opens_tab(board, lambda: board.click(f"{ROW} a.chip:has-text('preview')"))
     assert preview.url.endswith("/preview")
+    # Ended, the session is listed on its project's panel, its pull requests with it.
+    board.click(".window button[aria-label='Stop session']")
+    board.wait_for_selector("ul.ended a.chip.fail")
+    assert [c.text_content() for c in board.query_selector_all("ul.ended a.chip")] == ["✕#3", "⇥#2", "preview"]
+    assert board.query_selector(".project h4:has-text('Pull requests')") is None
 
 
 def test_a_port_the_session_publishes_is_a_button_on_its_window_while_published(board):
@@ -614,6 +630,18 @@ def test_deleting_a_session_asks_before_closing_its_open_pull_request(board):
             break
         board.wait_for_timeout(100)
     assert board.actions.read_text() == "github-auth close-pr 3\n"
+
+
+def test_deleting_asks_about_a_pull_request_opened_since_the_page_last_looked(board):
+    board.resume()
+    board.wait_for_selector(f"{ROW} a.chip.fail")
+    said = json.loads(board.web_json.read_text())
+    said["run_items"].append({"ref": "#5", "title": "Just opened", "url": "u5", "run_id": RUN,
+                              "on_delete": {"plugin": "github-auth", "action": "close-pr", "arg": "5", "ask": "Close #5 too?"}})
+    board.web_json.write_text(json.dumps(said))
+    delete(board)  # the page has not described the project again, the server does
+    board.wait_for_selector(NOBODY)
+    assert board.asked == ["Close #3 too?", "Close #5 too?"]
 
 
 def test_stopping_keeps_the_session_and_its_tab_and_deleting_closes_them(board):

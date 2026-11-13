@@ -437,6 +437,7 @@ request, with its CI). An item is `{title, url}` plus optional `ref` (a short id
 | Call | Puts on the page |
 |------|------------------|
 | `web_list TITLE JSON_ARRAY` | a section of items; an item's `start` (`{label, task}`) is a button starting a session on `task`, e.g. an issue's Resolve |
+| `web_run_items JSON_ARRAY` | items shown only for the run a later plugin ties them to (`web_tie_items`): on that run's session row while one is listed; with none, an item naming a `section` (`Pull requests`, for a run's open one) shows under that title on the project's panel with a **Resume** button, any other nowhere. An item's `on_delete` (`{ask, action, arg}`) offers to tidy it up when its run's session is deleted (close the pull request) |
 | `web_session_item RUN_ID JSON_ITEM` | an item on that run's session row, shown while the page lists a session of the run |
 | `web_tie_items JQ_FILTER` | hands items listed so far (by plugins of a lower `priority`) to the run the filter names for each (a RUN_ID; `null` or `""` leaves the item be): such an item moves onto that run's session row while one is listed, else stays in its section with a **Resume** button |
 | `web_map_items JQ_FILTER` | rewrites every item listed so far (by plugins of a lower `priority`) |

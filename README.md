@@ -39,7 +39,7 @@ its first message, with the project it is for beside it. Under it, on the left, 
 answer first; each says what it was asked and what it is doing right now, with its pull request,
 its ports and, top right, its stop button); with nothing running that side is not there, and the
 projects take the width. On the right is every listed **project** with what its plugins list (its
-issues), its ended sessions folded away at the foot of its panel, a **+** button for a
+issues), a **+** button for a
 new session (`run.sh --chat` in that directory) and a terminal
 button (**>_**) for a shell on this machine in the project — one per project, its tab brought to
 the front when it is already open. The gear button opens the project's settings, saved to its
@@ -53,7 +53,7 @@ For a project whose
 `origin` is on GitHub it lists the open pull requests, with their CI status, and issues through the
 host's `gh` login, each a link to its GitHub page (one tab per item, brought to the front when it
 is already open); a PR on a per-run branch (`<prefix>/<date>-<RUN_ID>`) gets a **Resume** button,
-which is `run.sh --resume <RUN_ID>`; an ended session in the list has one too. An issue's
+which is `run.sh --resume <RUN_ID>`. An issue's
 **Resolve** starts a new session whose agent begins on it straight away: its first message
 (`run.sh --task`) names the issue and tells it to read it with `gh issue view`, fix it with tests,
 push and open a pull request that closes it. Seeing that pull request's CI through to green is
@@ -99,8 +99,8 @@ A session runs until you end it: closing its
 tab, or the whole browser, leaves it running, and clicking it opens it again with the whole
 conversation. Each session has two
 buttons for that. **Stop** (the red square, on its window and in its tab) removes its container
-and keeps it listed among its project's ended sessions, its tab showing how it ended, so you can read it and resume it with the play button. **Delete**
-(the trash can, in its tab and on an ended session) stops it if it still runs, removes it from the list and closes its tabs: its
+and takes it off the dashboard, which shows running sessions only; its tab stays, showing how it ended, so you can read it and resume it there. **Delete**
+(the trash can, in its tab) stops it if it still runs, forgets it and closes its tabs: its
 chat, VS Code and its pull request (the last two only while the page that opened them has
 not been reloaded).
 

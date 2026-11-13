@@ -71,12 +71,6 @@
   .window .chips { display: flex; gap: 6px; min-width: 0; overflow: hidden; }
   .window .chips:empty { display: none; }
   .window .chips > * { position: relative; z-index: 1; }
-  /* A project's ended sessions, folded away at the foot of its panel. */
-  details.ended { margin-top: 8px; }
-  details.ended > summary { display: inline-block; cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; padding: 2px 0; }
-  details.ended > summary::-webkit-details-marker { display: none; }
-  details.ended > summary:hover { color: var(--ink); }
-
   /* The right: a panel per project, its buttons, then what its plugins list (issues, …). */
   .project { padding: 14px 16px 12px; background: var(--panel); border: 1px solid var(--rule); border-radius: 14px; }
   .project + .project { margin-top: 12px; }
@@ -280,25 +274,11 @@ async function terminal(project) {
   } catch (e) { w.close(); alert(e.message); }
 }
 
-// Stopping removes the container and keeps the session listed, its tab showing how it ended, so
-// it can be read and resumed. Nothing else stops it: closing its tab, or the browser, does not.
+// Stopping removes the container: the session leaves the dashboard, and its tab, if open, shows
+// how it ended and can resume or delete it. Nothing else stops it: closing its tab, or the browser, does not.
 async function stop(s) {
   if (!confirm(`Stop “${titled(s)}”?`)) return;
   await post(`/api/sessions/${s.id}/stop`).catch(e => alert(e.message));
-  refresh();
-}
-
-// Deleting forgets the session (stopping it first if it still runs) and closes its tabs.
-async function remove(s) {
-  if (s.exit === null && !confirm(`Stop and delete “${titled(s)}”?`)) return;
-  // What a plugin offers to tidy up with it (its run's open pull request: close it) is asked
-  // about one by one, and done only on a yes.
-  const {offers} = await api(`/api/sessions/${s.id}/offers`).catch(() => ({offers: []}));
-  const tidy = offers.filter(o => confirm(o.ask)).map(o => o.url);
-  const done = await post(`/api/sessions/${s.id}/delete`, JSON.stringify({tidy})).catch(e => alert(e.message));
-  if (done?.failed?.length) alert('Not done:\n' + done.failed.join('\n'));
-  closeTabs(s);
-  tabs.postMessage(s);
   refresh();
 }
 
@@ -686,17 +666,12 @@ function windowOf(s, items) {
     h('div', {className: 'chips'}, ...items.map(chip(s))));
 }
 
-const unfolded = new Set();  // the projects whose ended sessions are unfolded, across redraws
 function render() {
   const sig = JSON.stringify([state, plugins]);
   if (sig === drawn) return;
   drawn = sig;
-  const live = id => state.sessions.find(s => s.run_id === id && s.exit === null);
-  // The one session of a run that carries its items: the live one, else the latest.
-  const holder = (path, id) => {
-    const of = agents.filter(s => s.project === path && s.run_id === id);
-    return of.find(s => s.exit === null) || of.pop();
-  };
+  // The running session of a run, which carries its items. An ended session is not shown.
+  const holder = (path, id) => agents.find(s => s.project === path && s.run_id === id && s.exit === null);
   const agents = state.sessions.filter(s => s.kind !== 'shell');  // terminals are not sessions
   const tiedTo = s => {
     const said = plugins[s.project];
@@ -715,29 +690,9 @@ function render() {
     return h('div', {className: 'group'}, h('h3', {title: path}, name(path)),
       h('div', {className: 'windows'}, ...running.map(s => windowOf(s, tiedTo(s)))));
   }).filter(Boolean);
-  // A project's ended sessions, folded away at the foot of its panel on the right.
-  const endedOf = path => {
-    const ended = agents.filter(s => s.project === path && s.exit !== null).reverse();
-    if (!ended.length) return '';
-    const fold = h('details', {className: 'ended', open: unfolded.has(path),
-                               ontoggle: () => { fold.open ? unfolded.add(path) : unfolded.delete(path); }},
-      h('summary', {}, 'Ended'),
-      h('ul', {}, ...ended.map(s => {
-        const play = h('button', {className: 'icon play', onclick: () => busy(play, () => start(path, 'resume', s.run_id)), ariaLabel: 'Resume session',
-                                  title: 'Resume'}, ICON.play());
-        return h('li', {},
-          h('button', {className: 'session', onclick: () => show(s), title: s.title || ''},
-            h('span', {className: 'lamp'}), h('span', {className: 'name'}, titled(s))),
-          ...tiedTo(s).map(chip(s)),
-          s.run_id && !live(s.run_id) ? play : '',
-          h('button', {className: 'icon', onclick: () => remove(s), ariaLabel: 'Delete session', title: 'Delete'}, ICON.trash()));
-      })));
-    return fold;
-  };
-
   // The right: each project, its buttons, and what its plugins list (issues, …): the page only
-  // draws it. An item a plugin tied to a run is on that run's session instead, while one is
-  // listed; with none, it offers to resume the run. Items listed for runs only (pull requests)
+  // draws it. An item a plugin tied to a run is on that run's session instead, while one
+  // runs; with none, it offers to resume the run. Items listed for runs only (pull requests)
   // show nowhere else.
   const projects = state.projects.map(path => {
     const said = plugins[path];
@@ -763,8 +718,7 @@ function render() {
               // A new session on a task the plugin wrote for this item (an issue's Resolve).
               go || '');
           }))];
-      }),
-      endedOf(path));
+      }));
   });
 
   $('board').replaceChildren(

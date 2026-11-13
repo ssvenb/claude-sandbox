@@ -581,6 +581,14 @@ def local_names(bind):
     return names | {a for a in out.split() if ":" not in a}  # 0.0.0.0 is IPv4 only
 
 
+def ports_bind(bind, env):
+    """Where the sessions' published ports listen: where the page does, so a port button works from
+    wherever the page was opened — unless PORTS_BIND says otherwise (the shell's, or a project's)."""
+    if env.get("PORTS_BIND") or bind in ("127.0.0.1", "localhost"):
+        return env.get("PORTS_BIND")
+    return bind or "0.0.0.0"
+
+
 def serve(port, projects_file, bind="127.0.0.1", allow_hosts=()):
     # Loopback by default: there is no login, so anyone who can reach the port can start
     # sandboxes as you. --bind 0.0.0.0 opens it to your network; the Host allowlist still
@@ -604,6 +612,8 @@ if __name__ == "__main__":
                         default=Path.home() / ".config/claude-sandbox/projects",
                         help="file listing one project directory per line (default: %(default)s)")
     args = parser.parse_args()
+    if (bind := ports_bind(args.bind, os.environ)):
+        os.environ["PORTS_BIND"] = bind  # for every run.sh this starts, sessions and --web alike
     server = serve(args.port, args.projects, args.bind, args.allow_host)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # so `finally` cleans up on a plain kill too
     print(f"Sandboxes: http://127.0.0.1:{server.server_address[1]}  (projects: {args.projects})",
@@ -611,6 +621,7 @@ if __name__ == "__main__":
     if args.bind not in ("127.0.0.1", "localhost"):
         print("  also on: " + ", ".join(sorted(h for h in server.hosts if not h.startswith(("127.", "localhost")))),
               "  (no login: anyone who can reach it can start sandboxes as you)", flush=True)
+        print(f"  sessions publish their ports on {os.environ.get('PORTS_BIND', '127.0.0.1')}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

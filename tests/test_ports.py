@@ -140,7 +140,7 @@ def test_each_session_gets_its_own_host_port_for_the_same_port(daemon):
     assert ask(socket.create_connection(("127.0.0.1", by_run["aaaaaa"]))) == b"a:hi"
     assert ask(socket.create_connection(("127.0.0.1", by_run["bbbbbb"]))) == b"b:hi"
     items = json.loads((daemon.dir / "items.json").read_text())
-    assert {"run_id": "bbbbbb", "ref": f":{port}", "url": f"http://localhost:{by_run['bbbbbb']}/"}.items() \
+    assert {"run_id": "bbbbbb", "ref": f":{port}", "url": f"http://{{host}}:{by_run['bbbbbb']}/"}.items() \
         <= next(i for i in items if i["run_id"] == "bbbbbb").items()
     for s in servers:
         s.close()
@@ -185,7 +185,7 @@ def test_the_proxy_exits_once_nobody_uses_it(daemon):
 
 
 def test_links_name_the_host_the_way_the_page_can_reach_it():
-    assert portd.url_host("127.0.0.1") == "localhost"
+    assert portd.url_host("127.0.0.1") == "{host}"
     assert portd.url_host("0.0.0.0") == "{host}"
     assert portd.url_host("192.168.1.5") == "192.168.1.5"
     assert portd.url_host("fd00::1") == "[fd00::1]"

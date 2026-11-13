@@ -114,6 +114,14 @@ def test_a_network_bind_admits_this_machines_own_names_only():
     assert web.local_names("127.0.0.1") == {"127.0.0.1", "localhost"}
 
 
+def test_sessions_publish_their_ports_where_the_page_listens():
+    assert web.ports_bind("0.0.0.0", {}) == "0.0.0.0"
+    assert web.ports_bind("", {}) == "0.0.0.0"
+    assert web.ports_bind("192.168.1.5", {}) == "192.168.1.5"
+    assert web.ports_bind("127.0.0.1", {}) is None  # run.sh's own default: loopback
+    assert web.ports_bind("0.0.0.0", {"PORTS_BIND": "10.0.0.2"}) == "10.0.0.2"  # the shell's says otherwise
+
+
 def test_allow_host_adds_a_name_to_the_allowlist(tmp_path):
     server = web.serve(0, tmp_path / "projects", allow_hosts=["box.vpn.example"])
     try:

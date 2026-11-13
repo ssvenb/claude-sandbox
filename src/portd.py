@@ -176,12 +176,11 @@ def offered(runs_dir: str, live: dict[str, str]) -> dict[tuple[str, int], str]:
 
 
 def url_host(bind: str) -> str:
-    """How the page should name this machine in a link: on every interface, by whatever name the
-    page itself was opened by ({host}, filled in by the page); on loopback, as localhost."""
-    if bind in ("0.0.0.0", "::"):
+    """How the page should name this machine in a link: by whatever name the page itself was
+    opened by ({host}, filled in by the page) — on every interface that reaches the port, and on
+    loopback the page is on this machine too — or, bound to one address, by that address."""
+    if bind in ("0.0.0.0", "::", "127.0.0.1", "::1"):
         return "{host}"
-    if bind in ("127.0.0.1", "::1"):
-        return "localhost"
     return f"[{bind}]" if ":" in bind else bind
 
 

@@ -6,5 +6,18 @@
   "provides": ["data-mounts"],
   "requires": [],
   "requiredEnv": [],
-  "secrets": []
+  "secrets": [],
+  "settings": [
+    {
+      "key": "mounts",
+      "type": "list",
+      "items": {
+        "type": "string",
+        "placeholder": "/srv/datasets:/data:ro",
+        "monospace": true
+      },
+      "label": "Mounts",
+      "description": "host:container[:ro], one per mount; ~ is your home."
+    }
+  ]
 }

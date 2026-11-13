@@ -2,6 +2,7 @@
 import json
 import re
 import subprocess
+import sys
 
 import pytest
 
@@ -64,6 +65,63 @@ def test_env_example_documents_the_plugin_flag_with_its_default(name):
 @pytest.mark.parametrize("var", sorted({v for p in PLUGINS for v in manifest(p).get("requiredEnv", [])}))
 def test_env_example_documents_every_required_variable(var):
     assert var in EXAMPLE_KEYS
+
+
+TYPES = {"boolean", "string", "path", "text", "integer", "enum", "list", "map", "object", "json"}
+# Who declares settings: the kernel, each agent, each plugin.
+OWNERS = ([("kernel", REPO / "src/kernel.json")] + [(f"agents/{a}", REPO / "agents" / a / "agent.json") for a in AGENTS]
+          + [(f"plugins/{p}", REPO / "plugins" / p / "plugin.json") for p in PLUGINS])
+# Where the settings files are: set in .env.example or the shell only, never in the config file.
+NOT_IN_CONFIG = {"PROJECT_CONFIG_FILE", "PROJECT_ENV_FILE"}
+
+
+def check_spec(spec, where, top=False):
+    assert spec["type"] in TYPES, where
+    assert isinstance(spec.get("label", ""), str) and isinstance(spec.get("description", ""), str), where
+    if top:
+        assert ("env" in spec) != ("key" in spec), f"{where}: exactly one of env / key"
+    if spec["type"] == "enum":
+        assert spec["choices"] and spec.get("default", spec["choices"][0]) in spec["choices"], where
+    if spec["type"] == "list":
+        check_spec(spec.get("items", {"type": "string"}), where + "[]")
+    if spec["type"] == "object":
+        keys = [f["key"] for f in spec["fields"]]
+        assert len(keys) == len(set(keys)), where
+        for f in spec["fields"]:
+            check_spec(f, f"{where}.{f['key']}")
+            assert set(f.get("when", {})) <= set(keys), f"{where}.{f['key']}: when names a sibling"
+
+
+@pytest.mark.parametrize("owner,path", OWNERS, ids=[o for o, _ in OWNERS])
+def test_declared_settings_are_well_formed(owner, path):
+    """What the web UI's settings form is drawn from (see README, "Declaring settings")."""
+    settings = json.loads(path.read_text()).get("settings", [])
+    for spec in settings:
+        check_spec(spec, f"{owner}:{spec.get('env') or spec.get('key')}", top=True)
+        if "env" in spec:
+            assert spec["env"] in EXAMPLE_KEYS, f"{spec['env']}: run.sh refuses names .env.example lacks"
+        else:
+            assert owner.startswith("plugins/"), f"{owner}: only a plugin has a section of its own"
+    names = [s.get("env") or s.get("key") for s in settings]
+    assert len(names) == len(set(names)), owner
+
+
+def test_every_sandbox_variable_is_declared_by_exactly_one_owner():
+    """.env.example and the declarations list the same names, so the form offers every one."""
+    declared = [s["env"] for _, path in OWNERS for s in json.loads(path.read_text()).get("settings", []) if "env" in s]
+    assert len(declared) == len(set(declared)), "declared twice"
+    assert set(declared) == {k for k in EXAMPLE_KEYS if not k.startswith("ENABLE_")} - NOT_IN_CONFIG
+
+
+def test_the_kernel_offers_every_agent():
+    agent = next(s for s in json.loads((REPO / "src/kernel.json").read_text())["settings"] if s.get("env") == "AGENT")
+    assert sorted(agent["choices"]) == AGENTS
+
+
+def test_the_example_config_passes_the_declared_types():
+    sys.path.insert(0, str(REPO / "web"))
+    import server
+    server.check_config(json.loads((REPO / ".claude-sandbox.example.json").read_text()))
 
 
 def test_settings_fragments_are_json_objects():

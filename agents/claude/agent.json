@@ -6,5 +6,22 @@
   "git": {
     "branchPrefix": "claude-code",
     "userName": "Claude Code"
-  }
+  },
+  "settings": [
+    {
+      "env": "CLAUDE_EFFORT",
+      "type": "enum",
+      "choices": ["low", "medium", "high", "xhigh", "max"],
+      "label": "Reasoning effort",
+      "description": "Lower saves cost, higher suits harder autonomous work.",
+      "default": "medium"
+    },
+    {
+      "env": "CLAUDE_CODE_OAUTH_TOKEN",
+      "type": "string",
+      "secret": true,
+      "label": "OAuth token",
+      "description": "From `claude setup-token`; not needed while claude-home mounts a logged-in ~/.claude. Stored in plain text in this file: prefer the repo's .env."
+    }
+  ]
 }

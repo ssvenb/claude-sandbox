@@ -7,5 +7,20 @@
   "requires": [],
   "conflicts": ["git-workspace"],
   "requiredEnv": [],
-  "secrets": []
+  "secrets": [],
+  "settings": [
+    {
+      "env": "HOST_WORKSPACE_DIR",
+      "type": "path",
+      "label": "Workspace directory",
+      "description": "Host directory mounted at /workspace. Default: the project's directory."
+    },
+    {
+      "env": "CWD_WORKSPACE_HIDE",
+      "type": "string",
+      "label": "Hidden paths",
+      "description": "Space-separated paths inside it the container must not see; each is shadowed by an empty read-only file.",
+      "default": ".env"
+    }
+  ]
 }

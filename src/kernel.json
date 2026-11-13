@@ -1,0 +1,36 @@
+{
+  "description": "The sandbox itself: which agent runs, and which of the sessions' ports are published.",
+  "settings": [
+    {
+      "env": "AGENT",
+      "type": "enum",
+      "choices": ["claude", "copilot"],
+      "label": "Agent",
+      "description": "Which CLI agent runs in the sandbox.",
+      "default": "claude"
+    },
+    {
+      "env": "AGENT_VERSION",
+      "type": "string",
+      "label": "Agent version",
+      "description": "Pins the agent CLI's version. Empty: the latest release, checked on every run.",
+      "placeholder": "latest"
+    },
+    {
+      "env": "PORTS",
+      "type": "string",
+      "pattern": "^[0-9 ]*$",
+      "label": "Ports to publish",
+      "description": "Space-separated ports the sandbox opens: a server listening on one is published on this machine and shown on its session. Empty: none.",
+      "placeholder": "3000 5173",
+      "monospace": true
+    },
+    {
+      "env": "PORTS_BIND",
+      "type": "string",
+      "label": "Publish ports on",
+      "description": "Address the sessions' ports are published on; 0.0.0.0 for your whole network.",
+      "placeholder": "127.0.0.1"
+    }
+  ]
+}

@@ -6,5 +6,15 @@
   "provides": ["dev-server"],
   "requires": [],
   "requiredEnv": [],
-  "secrets": []
+  "secrets": [],
+  "settings": [
+    {
+      "key": "command",
+      "type": "string",
+      "label": "Command",
+      "description": "Started in /workspace at every boot of the container. Empty: nothing is started.",
+      "placeholder": "pnpm dev --port 3000",
+      "monospace": true
+    }
+  ]
 }

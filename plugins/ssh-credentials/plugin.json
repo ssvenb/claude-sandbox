@@ -6,5 +6,38 @@
   "provides": ["ssh-credentials"],
   "requires": [],
   "requiredEnv": ["SSH_PRIVATE_KEY_FILE"],
-  "secrets": []
+  "secrets": [],
+  "settings": [
+    {
+      "env": "SSH_PRIVATE_KEY_FILE",
+      "type": "path",
+      "label": "Private key file",
+      "description": "Host path to a key without a passphrase, dedicated to the sandbox."
+    },
+    {
+      "env": "SSH_HOST_PATTERN",
+      "type": "string",
+      "label": "Hosts",
+      "description": "Host pattern the key is offered for.",
+      "default": "*"
+    },
+    {
+      "env": "SSH_HOST_USER",
+      "type": "string",
+      "label": "Login user",
+      "description": "User to log in as."
+    },
+    {
+      "env": "SSH_HOST_SUFFIX",
+      "type": "string",
+      "label": "Domain suffix",
+      "description": "Appended to bare host names: netbird.cloud makes `ssh my-vm` reach my-vm.netbird.cloud."
+    },
+    {
+      "env": "SSH_KNOWN_HOSTS_FILE",
+      "type": "path",
+      "label": "known_hosts file",
+      "description": "Pins the peers' host keys. Empty: trust on first use."
+    }
+  ]
 }

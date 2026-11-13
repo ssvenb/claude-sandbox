@@ -97,29 +97,89 @@
   a.chip.pending { border-color: #f2b84b66; }
   a.chip.done { border-color: #c69cff66; }
 
-  /* A project's sandbox settings (its .claude-sandbox.json): one row per plugin. */
-  dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0;
+  /* A project's sandbox settings (its .claude-sandbox.json), drawn from what the kernel, the
+     agents and the plugins declare: one card each, a control per setting. */
+  dialog { width: min(820px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0;
            background: var(--night); color: var(--paper); border: 1px solid var(--rule); border-radius: 16px; }
   dialog::backdrop { background: #0008; }
   dialog form { display: flex; flex-direction: column; max-height: calc(100vh - 50px); }
   dialog header, dialog footer { padding: 18px 24px; }
+  dialog header { display: grid; gap: 4px; border-bottom: 1px solid var(--rule); }
   dialog header h2 { font-size: 22px; }
+  dialog header .tools { display: flex; gap: 10px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  dialog header .tools input[type=search] { flex: 1 1 200px; }
+  .modes { display: inline-flex; border: 1px solid var(--rule); border-radius: 999px; padding: 2px; }
+  .modes button { border: 0; padding: 2px 12px; color: var(--haze); }
+  .modes button[aria-pressed=true] { background: var(--rule); color: var(--paper); }
   dialog footer { display: flex; align-items: center; gap: 10px; justify-content: flex-end;
                   border-top: 1px solid var(--rule); }
   dialog footer .error { flex: 1; color: var(--fail); margin: 0; white-space: pre-wrap; }
-  dialog .body { overflow-y: auto; padding: 0 24px 12px; }
-  .plugin { padding: 10px 0; border-top: 1px solid var(--rule); }
-  .plugin .row { display: flex; align-items: center; gap: 12px; }
-  .plugin .row b { flex: 1; font-weight: 600; }
-  .plugin .row .agent { color: var(--haze); font-size: 12px; font-weight: 400; margin-left: 6px; }
-  .plugin p { margin: 2px 0 4px; }
-  .plugin summary { cursor: pointer; color: var(--haze); font-size: 13px; }
-  .plugin summary:hover { color: var(--paper); }
-  select, textarea { font: inherit; font-size: 13px; color: var(--paper); background: var(--dusk);
-                     border: 1px solid var(--rule); border-radius: 8px; padding: 4px 8px; }
-  textarea { display: block; width: 100%; min-height: 72px; margin-top: 6px; resize: vertical;
-             font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  textarea.bad { border-color: var(--fail); }
+  dialog .body { overflow-y: auto; padding: 8px 24px 16px; }
+  dialog .body > h4 { margin: 18px 0 2px; color: var(--haze); font-size: 12px; font-weight: 600;
+                      letter-spacing: .08em; text-transform: uppercase; }
+  .card { margin-top: 10px; padding: 12px 16px 14px; border: 1px solid var(--rule); border-radius: 12px; }
+  .card.off { opacity: .72; }
+  .card .row { display: flex; align-items: center; gap: 12px; }
+  .card .row b { flex: 1; font-weight: 600; }
+  .card .row .agent { color: var(--haze); font-size: 12px; font-weight: 400; margin-left: 6px; }
+  .card > p { margin: 2px 0 0; }
+  .card .fields { display: grid; gap: 14px; margin-top: 12px; }
+  .card .fields:empty { display: none; }
+  .field { display: grid; gap: 4px; min-width: 0; }
+  .field > .label { display: flex; align-items: center; gap: 8px; height: 24px; font-size: 14px; font-weight: 500; }
+  .field > .label label { flex: 1; }
+  .field > .label .req { color: var(--lamp); margin-left: 2px; }
+  .field > .label code, .card .row code { color: var(--haze); font-size: 11px; font-weight: 400; }
+  .field > p { margin: 0; font-size: 12px; }
+  .field.bool { grid-template-columns: 1fr auto; align-items: center; column-gap: 12px; }
+  .field.bool > .label { grid-column: 1; }
+  .field.bool > p { grid-column: 1; }
+  .field.bool > .control { grid-column: 2; grid-row: 1 / span 2; justify-self: end; }
+  .control { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .control > input, .control > select, .control > textarea, .control > .entries,
+  .control > fieldset, .control > .chips { flex: 1; min-width: 0; }
+  .reset { border-color: transparent; color: var(--haze); padding: 0 8px; font-size: 12px; line-height: 20px; }
+  .reset:hover { color: var(--paper); }
+  .default { color: var(--haze); font-size: 12px; }
+  input, select, textarea { font: inherit; font-size: 13px; color: var(--paper); background: var(--dusk);
+                            border: 1px solid var(--rule); border-radius: 8px; padding: 6px 9px; }
+  input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--link); outline-offset: 0; }
+  input::placeholder, textarea::placeholder { color: #8c8fb399; }
+  textarea { display: block; width: 100%; min-height: 64px; resize: vertical; }
+  .mono, textarea.json { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .bad { border-color: var(--fail) !important; }
+  /* A switch: on is lit; while it only shows the default, it is drawn hollow. */
+  button.switch { position: relative; width: 42px; height: 24px; padding: 0; flex: none;
+                  background: var(--dusk); border-color: var(--rule); }
+  button.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
+                         border-radius: 50%; background: var(--haze); transition: transform .15s; }
+  button.switch[aria-checked=true] { background: var(--ok); border-color: var(--ok); }
+  button.switch[aria-checked=true]::after { transform: translateX(18px); background: var(--night); }
+  button.switch.unset { background: transparent; }
+  button.switch.unset[aria-checked=true] { background: #6fd3a233; border-color: var(--ok); }
+  button.switch.unset[aria-checked=true]::after { background: var(--ok); }
+  /* Lists and maps: a row per entry, its own remove button; objects in a list are cards of their own. */
+  .entries { display: grid; gap: 6px; }
+  .entry { display: flex; gap: 6px; align-items: center; }
+  .entry > input { flex: 1; min-width: 0; }
+  .entry > input.key { flex: 0 1 40%; }
+  .add { justify-self: start; font-size: 13px; color: var(--link); border-style: dashed; }
+  .remove { border-color: transparent; color: var(--haze); padding: 2px 8px; }
+  .remove:hover { color: var(--fail); }
+  .item { padding: 10px 12px 12px; border: 1px solid var(--rule); border-radius: 10px; background: #ffffff05; }
+  .item > .row { display: flex; align-items: center; gap: 8px; }
+  .item > .row b { flex: 1; font-weight: 600; font-size: 14px; }
+  .item .fields { margin-top: 8px; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .item .fields > .wide { grid-column: 1 / -1; }
+  fieldset.object { margin: 0; padding: 8px 12px 12px; border: 1px solid var(--rule); border-radius: 10px; }
+  fieldset.object > .fields { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips label { display: inline-flex; align-items: center; gap: 5px; padding: 2px 10px; font-size: 13px;
+                 border: 1px solid var(--rule); border-radius: 999px; cursor: pointer; }
+  .chips label:has(input:checked) { border-color: var(--link); color: var(--link); }
+  .chips input { margin: 0; accent-color: var(--link); }
+  .kept { font-size: 12px; }
+  .hidden { display: none !important; }
 
   @media (max-width: 900px) {
     body { padding: 24px 16px 48px; }
@@ -128,6 +188,9 @@
     .total b { font-size: 24px; }
     .total { gap: 6px; }
     .columns { grid-auto-flow: row; gap: 22px; }
+    dialog header, dialog footer { padding: 14px 16px; }
+    dialog .body { padding: 4px 16px 12px; }
+    .card { padding: 10px 12px 12px; }
   }
   @media (prefers-reduced-motion: reduce) { .lamp { animation: none !important; } }
 </style>
@@ -281,75 +344,346 @@ async function remove(s) {
   refresh();
 }
 
-// A project's sandbox settings, its .claude-sandbox.json: each plugin on, off, or as its manifest
-// (and the shell's ENABLE_ flags) say, and its own section; the env block. Saved to the file as is,
-// keeping whatever else it holds; run.sh reads it on the project's next session.
-const pretty = v => v === undefined ? '' : JSON.stringify(v, null, 2);
+// A project's sandbox settings, its .claude-sandbox.json, as a form: each setting the kernel, an
+// agent or a plugin declares (its manifest's "settings": type, label, default) gets a control of
+// its type, each plugin a switch. A setting left unset falls through to the repo's .env, your
+// shell, then its default; ↺ unsets one again. Whatever the form has no control for stays as it
+// is, and the JSON view edits the whole file. run.sh reads it on the project's next session.
+const clone = v => v === undefined ? undefined : JSON.parse(JSON.stringify(v));
+const ON = [true, 1, '1', 'true'];
+const pretty = v => JSON.stringify(v, null, 2);
+
+// A slot is where one value lives: get() is undefined while unset, set(undefined) unsets it.
+const slot = (obj, key, after) => ({
+  get: () => obj()?.[key],
+  set: v => { const o = obj(true); if (v === undefined) delete o[key]; else o[key] = v; after?.(); },
+});
+// Values in .env are exported as strings, so a switch writes 1/0 there and reads either spelling.
+const envSlot = (s, spec) => spec.type !== 'boolean' ? s
+  : {get: () => s.get() === undefined ? undefined : ON.includes(s.get()), set: v => s.set(v === undefined ? v : v ? 1 : 0)};
+const shownIn = (field, value, fields) => Object.entries(field.when || {}).every(([k, allowed]) =>
+  allowed.includes(value?.[k] ?? fields.find(f => f.key === k)?.default));
+
+// Entries added and left empty are not saved; a list that held only those goes with them.
+function tidy(v) {
+  if (Array.isArray(v)) return v.filter(x => x !== '').map(tidy);
+  if (v && typeof v === 'object')
+    for (const [k, x] of Object.entries(v)) {
+      v[k] = tidy(x);
+      if (Array.isArray(x) && x.length && !v[k].length) delete v[k];
+    }
+  return v;
+}
+
+let uid = 0;
+function settingsForm(ctx) {
+  // ctx.bad: controls holding what is not yet a value (JSON that does not parse), blocking Save.
+  const markBad = (el, bad) => { el.classList.toggle('bad', bad); bad ? ctx.bad.add(el) : ctx.bad.delete(el); };
+
+  // One setting: its label, its control, its description; ↺ while it is set.
+  function field(spec, s, name, opts = {}) {
+    const id = 'f' + ++uid, kind = spec.type || 'string';
+    const control = h('div', {className: 'control'});
+    const reset = h('button', {type: 'button', className: 'reset', title: 'Unset: use the default', ariaLabel: 'Reset ' + (spec.label || name),
+                               onclick: () => { s.set(undefined); draw(); opts.changed?.(); }}, '↺ reset');
+    const showReset = () => reset.classList.toggle('hidden', s.get() === undefined || !!opts.noReset);
+    const set = v => { s.set(v); showReset(); opts.changed?.(); };
+    const el = h('div', {className: 'field' + (kind === 'boolean' ? ' bool' : '') +
+                        (['list', 'map', 'object', 'json', 'text'].includes(kind) ? ' wide' : '')},
+      h('div', {className: 'label'},
+        h('label', {htmlFor: id}, spec.label || spec.key || spec.env, spec.required || opts.required ? h('span', {className: 'req', title: 'Required'}, '*') : ''),
+        spec.env ? h('code', {title: 'Set in the env block'}, spec.env) : '', reset),
+      control,
+      spec.description ? h('p', {}, spec.description) : '');
+    const ph = spec.default !== undefined && !['boolean', 'enum'].includes(kind) ? String(spec.default) : spec.placeholder || '';
+    function draw() {
+      showReset();
+      const v = s.get();
+      if (kind === 'boolean') {
+        const on = v === undefined ? !!spec.default : !!v;
+        const sw = h('button', {type: 'button', id, name, role: 'switch', ariaLabel: opts.ariaLabel || spec.label, className: 'switch' + (v === undefined ? ' unset' : ''),
+                                ariaChecked: String(on), title: v === undefined ? `Default: ${on ? 'on' : 'off'}` : on ? 'On' : 'Off',
+                                onclick: () => { set(!on); draw(); }});
+        control.replaceChildren(v === undefined ? h('span', {className: 'default'}, 'default') : '', sw);
+      } else if (kind === 'enum') {
+        const sel = h('select', {id, name, onchange: () => set(sel.value === '' ? undefined : sel.value)},
+          h('option', {value: ''}, spec.default !== undefined ? `Default (${spec.default})` : '—'),
+          ...spec.choices.map(c => h('option', {value: c}, String(c))));
+        sel.value = v === undefined ? '' : String(v);
+        control.replaceChildren(sel);
+      } else if (kind === 'integer') {
+        const inp = h('input', {id, name, type: 'number', step: 1, placeholder: ph, value: v ?? '',
+                                oninput: () => { const ok = inp.value === '' || inp.validity.valid; markBad(inp, !ok);
+                                                 if (ok) set(inp.value === '' ? undefined : Number(inp.value)); }});
+        if (spec.min !== undefined) inp.min = spec.min;
+        if (spec.max !== undefined) inp.max = spec.max;
+        control.replaceChildren(inp);
+      } else if (kind === 'text') {
+        const area = h('textarea', {id, name, placeholder: ph, value: Array.isArray(v) ? v.join('\n') : v ?? '',
+                                    oninput: () => set(area.value === '' ? undefined : area.value)});
+        control.replaceChildren(area);
+      } else if (kind === 'json') {
+        const area = h('textarea', {id, name, className: 'json', placeholder: ph || '{ }', value: v === undefined ? '' : pretty(v),
+          oninput: () => {
+            if (!area.value.trim()) { markBad(area, false); return set(undefined); }
+            try { const parsed = JSON.parse(area.value); markBad(area, false); set(parsed); }
+            catch { markBad(area, true); }
+          }});
+        control.replaceChildren(area);
+      } else if (kind === 'list') {
+        control.replaceChildren(list(spec, s, name, set, draw, id, control));
+      } else if (kind === 'map') {
+        control.replaceChildren(map(spec, s, name, set, id));
+      } else if (kind === 'object') {
+        control.replaceChildren(object(spec, s, name, set, id));
+      } else {  // string, path
+        const inp = h('input', {id, name, type: spec.secret ? 'password' : 'text', placeholder: ph, value: v ?? '',
+                                autocomplete: 'off', spellcheck: false,
+                                className: spec.monospace || kind === 'path' ? 'mono' : '',
+                                oninput: () => {
+                                  markBad(inp, !!spec.pattern && !new RegExp(`^(?:${spec.pattern})$`).test(inp.value));
+                                  set(inp.value === '' ? undefined : inp.value);
+                                }});
+        control.replaceChildren(inp);
+      }
+    }
+    draw();
+    el.dataset.search = [spec.label, spec.key, spec.env, spec.description].join(' ').toLowerCase();
+    return el;
+  }
+
+  // A list of enums is a set of chips to tick; any other list a row per entry, objects as cards.
+  function list(spec, s, name, set, redraw, id, control) {
+    const items = spec.items || {type: 'string'};
+    const arr = () => s.get() || [];
+    const put = a => set(a.length ? a : undefined);
+    if (items.type === 'enum') {
+      return h('div', {className: 'chips', id, role: 'group'}, ...items.choices.map(c => h('label', {},
+        h('input', {type: 'checkbox', name: `${name}.${c}`, checked: arr().includes(c),
+                    onchange: e => put(e.target.checked ? [...arr(), c] : arr().filter(x => x !== c))}), String(c))));
+    }
+    const at = i => ({get: () => arr()[i], set: v => { const a = [...arr()]; a[i] = v; put(a); }});
+    const drop = i => () => { const a = [...arr()]; a.splice(i, 1); put(a); redraw(); };
+    const rows = arr().map((v, i) => {
+      if (items.type === 'object') {
+        const title = h('b', {}, (items.title && v?.[items.title]) || `#${i + 1}`);
+        const sub = {...items, label: undefined};
+        return h('div', {className: 'item'},
+          h('div', {className: 'row'}, title,
+            h('button', {type: 'button', className: 'remove', title: 'Remove', ariaLabel: `Remove ${title.textContent}`, onclick: drop(i)}, '✕')),
+          object(sub, at(i), `${name}.${i}`, v2 => { at(i).set(v2 ?? {}); title.textContent = (items.title && v2?.[items.title]) || `#${i + 1}`; },
+                 i === 0 ? id : undefined, true));
+      }
+      const inp = h('input', {name: `${name}.${i}`, value: v ?? '', placeholder: items.placeholder || '', autocomplete: 'off',
+                              spellcheck: false, className: items.monospace ? 'mono' : '', id: i === 0 ? id : '',
+                              oninput: () => at(i).set(items.type === 'integer' ? Number(inp.value) : inp.value)});
+      return h('div', {className: 'entry'}, inp,
+        h('button', {type: 'button', className: 'remove', title: 'Remove', ariaLabel: 'Remove ' + (v || 'entry'), onclick: drop(i)}, '✕'));
+    });
+    // A new entry starts empty (left out when saved while still empty), its first input focused.
+    const add = h('button', {type: 'button', className: 'add', onclick: () => {
+      s.set([...arr(), items.type === 'object' ? {} : '']);
+      redraw();
+      control.querySelector('.entries').lastElementChild.previousElementSibling?.querySelector('input, select')?.focus();
+    }}, '+ Add');
+    return h('div', {className: 'entries'}, ...rows, add);
+  }
+
+  // Name → value pairs (environment variables): a row each.
+  function map(spec, s, name, set, id) {
+    const pairs = Object.entries(s.get() || {});
+    const write = () => {
+      const o = {};
+      for (const [k, v] of pairs) if (k !== '') o[k] = v;
+      set(Object.keys(o).length ? o : undefined);
+    };
+    // A pair with no name yet is not written, but keeps its row until it gets one.
+    const row = (pair, i) => {
+      const key = h('input', {className: 'key mono', name: `${name}.${i}.key`, value: pair[0], placeholder: spec.placeholder || 'NAME',
+                              ariaLabel: 'Name', spellcheck: false, id: i === 0 ? id : '', oninput: () => { pair[0] = key.value; write(); }});
+      const val = h('input', {className: 'mono', name: `${name}.${i}.value`, value: String(pair[1]), placeholder: 'value', ariaLabel: 'Value',
+                              spellcheck: false, oninput: () => { pair[1] = val.value; write(); }});
+      const el = h('div', {className: 'entry'}, key, val,
+        h('button', {type: 'button', className: 'remove', title: 'Remove', ariaLabel: 'Remove ' + (pair[0] || 'entry'),
+                     onclick: () => { pairs.splice(pairs.indexOf(pair), 1); write(); el.remove(); }}, '✕'));
+      return el;
+    };
+    const rows = pairs.map(row);
+    const add = h('button', {type: 'button', className: 'add', onclick: () => {
+      const pair = ['', ''];
+      pairs.push(pair);
+      const el = row(pair, pairs.length - 1);
+      add.before(el);
+      el.querySelector('input').focus();
+    }}, '+ Add');
+    return h('div', {className: 'entries'}, ...rows, add);
+  }
+
+  // An object: its fields, those whose `when` does not match its other values left out.
+  function object(spec, s, name, set, id, bare) {
+    const fields = spec.fields || [];
+    const box = h('div', {className: 'fields'});
+    function draw() {
+      const v = s.get();
+      box.replaceChildren(...fields.filter(f => shownIn(f, v, fields)).map(f => {
+        const fs = {get: () => s.get()?.[f.key],
+                    set: x => { const o = {...(s.get() || {})}; if (x === undefined) delete o[f.key]; else o[f.key] = x;
+                                set(Object.keys(o).length || bare ? o : undefined); }};
+        const gates = fields.some(g => g.when && f.key in g.when);
+        return field(f, fs, `${name}.${f.key}`, {changed: gates ? draw : undefined});
+      }));
+    }
+    draw();
+    if (bare) return box;
+    return h('fieldset', {className: 'object', id}, box);
+  }
+
+  return {field};
+}
+
 async function configure(path) {
   const dlg = $('config');
   let got;
   try { got = await api('/api/config?project=' + encodeURIComponent(path)); }
   catch (e) { return alert(e.message); }
-  const {config} = got, sections = config.plugins || {};
-  const error = h('p', {className: 'error'});
-  // A JSON object typed in a textarea: {} when empty, marked red and reported when it is not one.
-  const parse = (area, what) => {
-    area.classList.remove('bad');
-    if (!area.value.trim()) return {};
-    try {
-      const v = JSON.parse(area.value);
-      if (v && typeof v === 'object' && !Array.isArray(v)) return v;
-    } catch {}
-    area.classList.add('bad');
-    throw new Error(`${what}: not a JSON object`);
+  let draft = clone(got.config), mode = 'form';
+  const ctx = {bad: new Set()};
+  const error = h('p', {className: 'error', role: 'alert'});
+  const body = h('div', {className: 'body'});
+  const filter = h('input', {type: 'search', placeholder: 'Filter settings and plugins…', ariaLabel: 'Filter',
+                             oninput: () => applyFilter()});
+  const area = h('textarea', {className: 'json', name: 'json', ariaLabel: 'The whole file, as JSON', spellcheck: false,
+                              style: 'min-height: 50vh'});
+  const env = create => (create && !draft.env && (draft.env = {}), draft.env);
+  const section = name => create => {
+    if (create) { draft.plugins ??= {}; draft.plugins[name] ??= {}; }
+    return draft.plugins?.[name];
   };
-  const env = h('textarea', {name: 'env', value: pretty(config.env), placeholder: '{ "CLAUDE_EFFORT": "high" }',
-                             ariaLabel: 'Environment'});
-  const rows = got.plugins.map(p => {
-    const {enabled, ...rest} = sections[p.name] || {};
-    const state = enabled === undefined ? '' : [true, 1, '1', 'true'].includes(enabled) ? 'on' : 'off';
-    const select = h('select', {name: 'enabled-' + p.name, ariaLabel: p.name + ' enabled'},
-      h('option', {value: ''}, `Default (${p.defaultEnabled ? 'on' : 'off'})`),
-      h('option', {value: 'on'}, 'On'), h('option', {value: 'off'}, 'Off'));
-    select.value = state;
-    const area = h('textarea', {name: 'settings-' + p.name, value: Object.keys(rest).length ? pretty(rest) : '',
-                                placeholder: p.example ? pretty(p.example) : '{}', ariaLabel: p.name + ' settings'});
-    return {p, select, area, el: h('div', {className: 'plugin'},
-      h('div', {className: 'row'},
-        h('b', {}, p.name, p.requiredAgent ? h('span', {className: 'agent'}, p.requiredAgent + ' only') : ''), select),
-      h('p', {}, p.description),
-      h('details', {open: Object.keys(rest).length > 0}, h('summary', {}, 'Settings'), area))};
-  });
+  const {field} = settingsForm(ctx);
+  const envField = spec => field(spec, envSlot(slot(env, spec.env), spec), 'env.' + spec.env);
+
+  function applyFilter() {
+    const q = filter.value.trim().toLowerCase();
+    for (const card of body.querySelectorAll('.card')) {
+      const hit = !q || card.dataset.search.includes(q);
+      const fields = [...card.querySelectorAll(':scope > .fields > .field')];
+      const fieldHits = fields.filter(f => f.dataset.search.includes(q));
+      card.classList.toggle('hidden', !hit && !fieldHits.length);
+      for (const f of fields) f.classList.toggle('hidden', !!q && !hit && !fieldHits.includes(f));
+    }
+    for (const h4 of body.querySelectorAll('h4')) {
+      let n = h4.nextElementSibling, any = false;
+      while (n && n.tagName !== 'H4') { any ||= !n.classList.contains('hidden'); n = n.nextElementSibling; }
+      h4.classList.toggle('hidden', !any);
+    }
+  }
+
+  const card = (title, description, fields, extra = {}) => {
+    const el = h('div', {className: 'card' + (extra.off ? ' off' : '')},
+      h('div', {className: 'row'}, h('b', {}, title, extra.tag ? h('span', {className: 'agent'}, extra.tag) : ''), extra.right || ''),
+      description ? h('p', {}, description) : '',
+      h('div', {className: 'fields'}, ...fields), extra.after || '');
+    el.dataset.search = [title, description, extra.tag].join(' ').toLowerCase();
+    return el;
+  };
+
+  function drawForm() {
+    const declaredEnv = new Set([...got.kernel.settings, ...got.agents.flatMap(a => a.settings),
+                                 ...got.plugins.flatMap(p => p.settings)].filter(s => s.env).map(s => s.env));
+    // env keys nobody declares: a plain name → value list, so nothing in the file goes missing.
+    const others = {get: () => { const o = Object.fromEntries(Object.entries(draft.env || {}).filter(([k]) => !declaredEnv.has(k)));
+                                 return Object.keys(o).length ? o : undefined; },
+                    set: v => { for (const k of Object.keys(draft.env || {})) if (!declaredEnv.has(k)) delete draft.env[k];
+                                if (v) Object.assign(env(true), v); }};
+    const agentNow = () => draft.env?.AGENT ?? got.kernel.settings.find(s => s.env === 'AGENT')?.default;
+    const plugins = got.plugins.map(p => {
+      const sec = section(p.name);
+      const enabled = {get: () => { const e = sec()?.enabled; return e === undefined ? undefined : ON.includes(e); },
+                       set: v => { if (v === undefined) { if (sec()) delete sec().enabled; } else sec(true).enabled = v; }};
+      const fieldsBox = () => p.settings.map(spec => spec.env
+        ? field({...spec, required: spec.required || (p.requiredEnv || []).includes(spec.env)}, envSlot(slot(env, spec.env), spec), 'env.' + spec.env)
+        : field(spec, slot(sec, spec.key), `plugins.${p.name}.${spec.key}`));
+      const declaredKeys = new Set(['enabled', ...p.settings.filter(s => s.key).map(s => s.key)]);
+      const kept = Object.keys(sec() || {}).filter(k => !declaredKeys.has(k));
+      let el;
+      const on = () => enabled.get() ?? p.defaultEnabled;
+      const sw = field({type: 'boolean', label: 'Enabled', default: p.defaultEnabled}, enabled, 'enabled-' + p.name,
+                       {ariaLabel: p.name + ' enabled', changed: () => { el.classList.toggle('off', !on()); el.querySelector(':scope > .fields').classList.toggle('hidden', !on()); }});
+      // Only its control and ↺ go on the card's head, next to the name.
+      const right = h('div', {className: 'control'}, sw.querySelector('.reset'), sw.querySelector('.control'));
+      el = card(p.name, p.description, fieldsBox(), {
+        tag: p.requiredAgent ? p.requiredAgent + ' only' : '', off: !on(), right,
+        after: kept.length ? h('p', {className: 'kept'}, `Also holds ${kept.join(', ')}: kept as is (edit it in the JSON view).`) : ''});
+      el.querySelector(':scope > .fields').classList.toggle('hidden', !on());
+      el.dataset.search += ' ' + p.settings.map(s => [s.label, s.key, s.env].join(' ')).join(' ').toLowerCase();
+      return el;
+    });
+    body.replaceChildren(
+      h('p', {}, 'Unset settings come from the repo\'s .env or your shell, else their default. ↺ reset unsets one again.'),
+      h('h4', {}, 'Sandbox'),
+      card('General', got.kernel.description, got.kernel.settings.map(envField)),
+      ...got.agents.map(a => card(a.name + ' agent', a.description, a.settings.map(envField),
+                                  {tag: a.name === agentNow() ? 'selected' : ''})),
+      card('Other variables', 'Further sandbox settings for the env block, by name (see .env.example).',
+           [field({type: 'map', label: 'Variables', placeholder: 'NAME'}, others, 'env-other')]),
+      h('h4', {}, 'Plugins'),
+      ...plugins);
+    applyFilter();
+  }
+
+  // What the file becomes: empty blocks and sections left out.
+  function result() {
+    if (mode === 'json') {
+      let v;
+      try { v = JSON.parse(area.value); } catch (e) { throw new Error('Not valid JSON: ' + e.message); }
+      if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('The file must hold a JSON object');
+      return v;
+    }
+    if (ctx.bad.size) throw new Error('Fix the fields marked red first');
+    const next = tidy(clone(draft));
+    for (const [name, sec] of Object.entries(next.plugins || {}))
+      if (sec && typeof sec === 'object' && !Object.keys(sec).length) delete next.plugins[name];
+    for (const key of ['env', 'plugins'])
+      if (next[key] && !Object.keys(next[key]).length) delete next[key];
+    return next;
+  }
+
+  const formBtn = h('button', {type: 'button', ariaPressed: 'true', onclick: () => switchTo('form')}, 'Form');
+  const jsonBtn = h('button', {type: 'button', ariaPressed: 'false', onclick: () => switchTo('json')}, 'JSON');
+  function switchTo(next) {
+    if (next === mode) return;
+    error.textContent = '';
+    try {
+      if (next === 'json') { area.value = pretty(result()); body.replaceChildren(area); }
+      else { draft = result(); ctx.bad.clear(); mode = next; drawForm(); }
+    } catch (e) { error.textContent = e.message; return; }
+    mode = next;
+    formBtn.ariaPressed = String(mode === 'form');
+    jsonBtn.ariaPressed = String(mode === 'json');
+    filter.disabled = mode === 'json';
+  }
+
   async function save(e) {
     e.preventDefault();
     error.textContent = '';
     try {
-      const plugins = {...sections};  // sections of plugins this sandbox does not ship stay as they are
-      for (const {p, select, area} of rows) {
-        const section = parse(area, p.name);
-        delete section.enabled;
-        if (select.value) section.enabled = select.value === 'on';
-        if (Object.keys(section).length) plugins[p.name] = section;
-        else delete plugins[p.name];
-      }
-      const next = {...config, env: parse(env, 'Environment'), plugins};
-      for (const key of ['env', 'plugins']) if (!Object.keys(next[key]).length) delete next[key];
-      await post('/api/config', JSON.stringify({project: path, config: next}));
+      await post('/api/config', JSON.stringify({project: path, config: result()}));
       dlg.close();
       load(path);  // what the plugins show now, or run.sh's complaint about the file
     } catch (err) { error.textContent = err.message; }
   }
+
+  drawForm();
   dlg.replaceChildren(h('form', {onsubmit: save},
     h('header', {}, h('h2', {}, name(path) + ' settings'),
-      h('p', {}, got.file + (got.exists ? '' : ' (not there yet: saving creates it)'))),
-    h('div', {className: 'body'},
-      h('div', {className: 'plugin'}, h('div', {className: 'row'}, h('b', {}, 'Environment')),
-        h('p', {}, 'Sandbox settings for this project (the env block), e.g. AGENT or CLAUDE_EFFORT.'), env),
-      ...rows.map(r => r.el)),
+      h('p', {}, got.file + (got.exists ? '' : ' (not there yet: saving creates it)')),
+      h('div', {className: 'tools'}, filter, h('div', {className: 'modes', role: 'group', ariaLabel: 'View'}, formBtn, jsonBtn))),
+    body,
     h('footer', {}, error,
       h('button', {type: 'button', onclick: () => dlg.close()}, 'Cancel'),
       h('button', {type: 'submit', className: 'primary'}, 'Save'))));
   dlg.showModal();
+  filter.focus();
 }
 
 const mark = i => i.status ? h('span', {className: 'status ' + i.status, ariaLabel: i.status_text || i.status},

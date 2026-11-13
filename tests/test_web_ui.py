@@ -59,6 +59,9 @@ def board(tmp_path, browser):
     sandbox = tmp_path / "sandbox"
     shutil.copytree(REPO / "web", sandbox / "web", ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copytree(REPO / "plugins", sandbox / "plugins")
+    shutil.copytree(REPO / "agents", sandbox / "agents")
+    (sandbox / "src").mkdir()
+    shutil.copy(REPO / "src/kernel.json", sandbox / "src")
     shutil.copy(REPO / ".claude-sandbox.example.json", sandbox)
     tool(sandbox / "run.sh", RUN_SH)
     tool(tmp_path / "bin/docker", DOCKER)
@@ -352,34 +355,82 @@ def test_ctrl_v_pastes(board, keys):
 
 
 def test_the_gear_configures_the_projects_plugins_in_its_claude_sandbox_json(board):
+    """Every declared setting gets a control of its type; what the form has none for is kept."""
     file = board.project / ".claude-sandbox.json"
-    file.write_text(json.dumps({"plugins": {"git-workspace": {"branchPrefix": "bot"}, "retired": {"x": 1}}}))
+    file.write_text(json.dumps({"env": {"CLAUDE_EFFORT": "high", "GH_USERNAME": "me"},
+                                "plugins": {"git-workspace": {"branchPrefix": "bot", "extra": 1}, "retired": {"x": 1}}}))
     board.click("button[aria-label='Settings']")
     board.wait_for_selector("dialog[open] b:has-text('docker-cli')")
-    assert board.input_value("textarea[name='settings-git-workspace']").replace(" ", "").replace("\n", "") \
-        == '{"branchPrefix":"bot"}'
-    assert "briefing" in board.get_attribute("textarea[name='settings-kvm']", "placeholder")  # the example's
-    board.select_option("select[name='enabled-docker-cli']", "off")
-    board.select_option("select[name='enabled-kvm']", "on")
-    board.click("dialog details:has(textarea[name='settings-kvm']) summary")
-    board.fill("textarea[name='settings-kvm']", "not json")
-    board.click("dialog button[type=submit]")
-    board.wait_for_selector("dialog .error:has-text('kvm: not a JSON object')")
-    assert json.loads(file.read_text())["plugins"]["git-workspace"] == {"branchPrefix": "bot"}  # unsaved
+    assert board.input_value("input[name='plugins.git-workspace.branchPrefix']") == "bot"
+    assert board.get_attribute("input[name='env.GH_HOST']", "placeholder") == "github.com"  # its default
+    assert board.input_value("select[name='env.CLAUDE_EFFORT']") == "high"
+    assert "extra" in board.text_content(".card:has(button[name='enabled-git-workspace']) .kept")
 
-    board.fill("textarea[name='settings-kvm']", '{"briefing": "VMs in /data"}')
-    board.fill("textarea[name='env']", '{"CLAUDE_EFFORT": "high"}')
+    # Plugins: a switch each, its settings shown while it is on.
+    assert board.get_attribute("button[name='enabled-docker-cli']", "aria-checked") == "true"  # the default
+    board.click("button[name='enabled-docker-cli']")
+    assert not board.is_visible("textarea[name='plugins.kvm.briefing']")  # kvm is off by default
+    board.click("button[name='enabled-kvm']")
+    board.fill("textarea[name='plugins.kvm.briefing']", "VMs in /data")
+    board.select_option("select[name='env.CLAUDE_EFFORT']", "max")
+    board.fill("input[name='env.GH_USERNAME']", "")  # emptied: unset
+
+    # Lists: + Add a row each; one left empty is not saved.
+    deps = ".card:has(button[name='enabled-project-deps']) .field:has(label:text-is('apt packages'))"
+    board.click(deps + " button.add")
+    board.fill("input[name='plugins.project-deps.apt.0']", "ripgrep")
+    board.click(deps + " button.add")
+
+    # A route: an object in a list, its auth fields following the type picked.
+    routes = ".card:has(button[name='enabled-upstream-proxy'])"
+    board.click(routes + " .field:has(label:text-is('Routes')) > .control > .entries > button.add")
+    board.fill("input[name='plugins.upstream-proxy.routes.0.name']", "api")
+    board.fill("input[name='plugins.upstream-proxy.routes.0.upstream']", "https://api.example.com")
+    board.check("input[name='plugins.upstream-proxy.routes.0.allowMethods.GET']")
+    assert not board.is_visible("input[name='plugins.upstream-proxy.routes.0.auth.valueEnv']")
+    board.select_option("select[name='plugins.upstream-proxy.routes.0.auth.type']", "bearer")
+    board.fill("input[name='plugins.upstream-proxy.routes.0.auth.valueEnv']", "API_KEY")
+    board.click(routes + " .field:has(> .label label:text-is('Container environment')) > .control button.add")
+    board.fill("input[name='plugins.upstream-proxy.routes.0.containerEnv.0.key']", "API_URL")
+    board.fill("input[name='plugins.upstream-proxy.routes.0.containerEnv.0.value']", "http://127.0.0.1:8081")
+    board.click("dialog button[type=submit]")
+    board.wait_for_selector("dialog .error:has-text('routes[0].port is required')")  # the server's check
+    assert json.loads(file.read_text())["env"]["GH_USERNAME"] == "me"  # nothing saved
+    board.fill("input[name='plugins.upstream-proxy.routes.0.port']", "8081")
+
     board.click("dialog button[type=submit]")
     board.wait_for_selector("dialog[open]", state="detached")
     assert json.loads(file.read_text()) == {
-        "plugins": {"git-workspace": {"branchPrefix": "bot"}, "retired": {"x": 1},
-                    "docker-cli": {"enabled": False}, "kvm": {"briefing": "VMs in /data", "enabled": True}},
-        "env": {"CLAUDE_EFFORT": "high"}}
+        "env": {"CLAUDE_EFFORT": "max"},
+        "plugins": {"git-workspace": {"branchPrefix": "bot", "extra": 1}, "retired": {"x": 1},
+                    "docker-cli": {"enabled": False}, "kvm": {"enabled": True, "briefing": "VMs in /data"},
+                    "project-deps": {"apt": ["ripgrep"]},
+                    "upstream-proxy": {"routes": [{"name": "api", "upstream": "https://api.example.com",
+                                                   "allowMethods": ["GET"], "auth": {"type": "bearer", "valueEnv": "API_KEY"},
+                                                   "containerEnv": {"API_URL": "http://127.0.0.1:8081"},
+                                                   "port": 8081}]}}}
 
     board.click("button[aria-label='Settings']")  # opens on what the file holds now
     board.wait_for_selector("dialog[open]")
-    assert board.input_value("select[name='enabled-docker-cli']") == "off"
-    board.select_option("select[name='enabled-docker-cli']", "")  # back to its default: no entry
+    assert board.get_attribute("button[name='enabled-docker-cli']", "aria-checked") == "false"
+    board.click(".card:has(button[name='enabled-docker-cli']) .reset")  # back to its default: no entry
+    assert board.get_attribute("button[name='enabled-docker-cli']", "aria-checked") == "true"
+    board.fill("input[type=search]", "branch prefix")  # the filter keeps the matching settings
+    assert board.is_visible("input[name='plugins.git-workspace.branchPrefix']")
+    assert not board.is_visible("button[name='enabled-kvm']")
+
+    # The JSON view edits the whole file; a typo there is reported, not saved.
+    board.click(".modes button:has-text('JSON')")
+    text = board.input_value("textarea[name='json']")
+    assert '"retired"' in text and "docker-cli" not in text
+    board.fill("textarea[name='json']", text.replace('"bot"', '"robot"'))
+    board.click(".modes button:has-text('Form')")
+    assert board.input_value("input[name='plugins.git-workspace.branchPrefix']") == "robot"
+    board.click(".modes button:has-text('JSON')")
+    board.fill("textarea[name='json']", "{oops")
+    board.click("dialog button[type=submit]")
+    board.wait_for_selector("dialog .error:has-text('Not valid JSON')")
+    board.fill("textarea[name='json']", text)
     board.click("dialog button[type=submit]")
     board.wait_for_selector("dialog[open]", state="detached")
     assert "docker-cli" not in json.loads(file.read_text())["plugins"]

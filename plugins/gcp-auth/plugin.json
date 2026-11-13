@@ -6,5 +6,26 @@
   "provides": ["gcp-credentials"],
   "requires": [],
   "requiredEnv": ["GCP_SERVICE_ACCOUNT"],
-  "secrets": []
+  "secrets": [],
+  "settings": [
+    {
+      "env": "GCP_SERVICE_ACCOUNT",
+      "type": "string",
+      "label": "Service account",
+      "description": "The account the sandbox acts as; your login needs roles/iam.serviceAccountTokenCreator on it.",
+      "placeholder": "sandbox@my-project.iam.gserviceaccount.com"
+    },
+    {
+      "env": "GCP_PROJECT",
+      "type": "string",
+      "label": "Project",
+      "description": "Default project for gcloud and the client libraries. Default: the one in the account's email."
+    },
+    {
+      "env": "GCP_CREDENTIAL_FILE",
+      "type": "path",
+      "label": "Credential file",
+      "description": "Workload identity federation config used instead of your gcloud login."
+    }
+  ]
 }

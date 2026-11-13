@@ -197,6 +197,10 @@ def test_a_projects_settings_are_read_and_saved_to_its_claude_sandbox_json(ui):
     assert (got["file"], got["exists"], got["config"]) == (str(file), False, {})
     kvm = next(p for p in got["plugins"] if p["name"] == "kvm")  # every plugin, as its manifest says
     assert kvm["defaultEnabled"] is False and kvm["description"] and "briefing" in kvm["example"]
+    assert [s["key"] for s in kvm["settings"]] == ["briefing"]  # the settings it declares
+    assert any(s["env"] == "AGENT" for s in got["kernel"]["settings"])  # and the sandbox's own
+    claude = next(a for a in got["agents"] if a["name"] == "claude")
+    assert any(s["env"] == "CLAUDE_EFFORT" for s in claude["settings"])
 
     config = {"env": {"CLAUDE_EFFORT": "high"}, "plugins": {"kvm": {"enabled": True, "briefing": "VMs"}},
               "mine": [1]}  # whatever else the file holds is the page's to keep
@@ -205,7 +209,15 @@ def test_a_projects_settings_are_read_and_saved_to_its_claude_sandbox_json(ui):
     assert file.read_text().endswith("}\n") and list((ui.tmp / "proj").iterdir()) == [file]
 
     for bad in ([], {"plugins": []}, {"plugins": {"kvm": "on"}}, {"plugins": {"kvm": {"enabled": "maybe"}}},
-                {"env": {"AGENT": ["claude"]}}):
+                {"env": {"AGENT": ["claude"]}},
+                # declared settings are checked against their type
+                {"env": {"CLAUDE_EFFORT": "huge"}}, {"env": {"AGENT_WORKSPACE_CLEANUP": "yes"}},
+                {"env": {"PORTS": "80,443"}}, {"plugins": {"project-deps": {"apt": "ripgrep"}}},
+                {"plugins": {"dev-server": {"command": ["make"]}}},
+                {"plugins": {"upstream-proxy": {"routes": [{"name": "a", "upstream": "https://x"}]}}},
+                {"plugins": {"upstream-proxy": {"routes": [{"name": "a", "port": 70000, "upstream": "https://x"}]}}},
+                {"plugins": {"upstream-proxy": {"routes": [{"name": "a", "port": 1, "upstream": "https://x",
+                                                            "auth": {"type": "bearer"}}]}}}):
         assert ui("/api/config", json.dumps({"project": ui.project, "config": bad}).encode()).status == 400
     assert json.loads(file.read_text()) == config  # none of them touched it
     assert ui("/api/config", json.dumps({"project": "/etc", "config": {}}).encode()).status == 400

@@ -7,5 +7,14 @@
   "provides": ["copilot-home"],
   "requires": [],
   "requiredEnv": [],
-  "secrets": []
+  "secrets": [],
+  "settings": [
+    {
+      "env": "COPILOT_HOME_DIR",
+      "type": "path",
+      "label": "Copilot config directory",
+      "description": "Host directory mounted as the agent's ~/.copilot.",
+      "placeholder": "~/.copilot"
+    }
+  ]
 }

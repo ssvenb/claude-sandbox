@@ -6,5 +6,27 @@
   "provides": ["mesh-network"],
   "requires": [],
   "requiredEnv": ["NB_SETUP_KEY"],
-  "secrets": ["NB_SETUP_KEY"]
+  "secrets": ["NB_SETUP_KEY"],
+  "settings": [
+    {
+      "env": "NB_SETUP_KEY",
+      "type": "string",
+      "secret": true,
+      "label": "Setup key",
+      "description": "The key the peer enrols with, preferably ephemeral. Never the NetBird PAT. Stored in plain text in this file: prefer the repo's .env."
+    },
+    {
+      "env": "NB_MANAGEMENT_URL",
+      "type": "string",
+      "label": "Management URL",
+      "description": "Self-hosted management server. Empty: NetBird Cloud."
+    },
+    {
+      "env": "NB_HOSTNAME",
+      "type": "string",
+      "label": "Peer name",
+      "description": "Name in the NetBird dashboard.",
+      "placeholder": "sandbox-<RUN_ID>"
+    }
+  ]
 }

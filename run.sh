@@ -23,9 +23,10 @@ cd "$(dirname "$0")"
 # shellcheck source=src/lib/host-settings.sh
 . src/lib/host-settings.sh
 
-usage() { echo "Usage: $0 [--resume <RUN_ID> | --run-id <RUN_ID> | --web] [--task TEXT]   (RUN_ID is 6 hex chars)" >&2; exit "${1:-1}"; }
+usage() { echo "Usage: $0 [--resume <RUN_ID> | --run-id <RUN_ID> | --web | --web-action <PLUGIN> <ACTION> <ARG>] [--task TEXT]   (RUN_ID is 6 hex chars)" >&2; exit "${1:-1}"; }
 RESUME=0
 WEB=0
+WEB_ACTION_ARGS=()
 TASK=""
 GIVEN_ID=0
 RUN_ID=""
@@ -37,6 +38,10 @@ while [ $# -gt 0 ]; do
       GIVEN_ID=1; RUN_ID="${2:-}"; shift; [ $# -eq 0 ] || shift ;;
     # Starts nothing: prints, as JSON, what the project's enabled plugins have for the web UI.
     --web) WEB=1; shift ;;
+    # Starts nothing either: does what an item's `on_delete` names, once the web UI's user said
+    # yes to it (closing a deleted session's pull request).
+    --web-action) [ $# -ge 4 ] || { echo "--web-action needs a plugin, an action and its argument." >&2; usage; }
+      WEB=2; WEB_ACTION_ARGS=("$2" "$3" "$4"); shift 4 ;;
     # The agent's first message, so it starts working without anyone typing (the web UI's Resolve).
     --task) TASK="${2:-}"; shift; [ $# -eq 0 ] || shift
       [ -n "$TASK" ] || { echo "--task needs the task's text." >&2; usage; } ;;
@@ -74,6 +79,11 @@ agent_resolve
 # (AGENT_AUTH_PROVIDED=1) is already accounted for.
 plugins_discover
 plugins_resolve
+if [ "$WEB" = 2 ]; then
+  plugins_web_action "${WEB_ACTION_ARGS[@]}"
+  echo '{}' >&3
+  exit 0
+fi
 if [ "$WEB" = 1 ]; then
   # Resolved exactly as a run would be, but not validated: a project that cannot start yet (no
   # App key, say) still has pull requests to show.

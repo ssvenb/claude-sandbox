@@ -88,43 +88,66 @@ trap plugins_run_exit_hooks EXIT
 # The web UI knows nothing about GitHub, branches or mirrors: it draws what the enabled plugins of
 # a project describe here. WEB_JSON is that description, printed by `run.sh --web`.
 
-WEB_JSON='{"lists":[],"notes":[],"session_items":[]}'
+WEB_JSON='{"lists":[],"notes":[],"session_items":[],"run_items":[]}'
 
 # The page has two places for what a plugin shows: a section of the project's band (web_list),
-# and a session's own row, next to its VS Code button (web_session_item, web_tie_items). An item
-# is {title, url} plus optional `ref` (a short id shown first, "#12"), `note` ("Draft"), `status`
-# ("ok", "fail" or "pending", e.g. a pull request's CI) with its `status_text`, and anything a
-# later plugin may want to read, such as the `branch` of a pull request. On a session's row it is
-# a button opening `url` in a tab of its own, showing its status mark and `ref`.
+# and a session's own row, next to its VS Code button (web_session_item, web_run_items,
+# web_tie_items). An item is {title, url} plus optional `ref` (a short id shown first, "#12"),
+# `note` ("Draft"), `status` ("ok", "fail" or "pending", e.g. a pull request's CI; "done",
+# e.g. a merged one) with its `status_text`, and anything a later plugin may want to read, such as the `branch` of a pull
+# request. On a session's row it is a button opening `url` in a tab of its own, showing its status
+# mark and `ref`.
+#
+# `on_delete` ({ask, action, arg}) offers to tidy an item up when its run's session is deleted:
+# the page asks `ask` (a yes/no question, "Close pull request #12?"), and only on a yes runs
+# `run.sh --web-action <plugin> <action> <arg>`, which sources the listing plugin's web.sh with
+# WEB_ACTION and WEB_ACTION_ARG set (see plugins_web_action). The listing helpers stamp the
+# plugin's name into it.
+
+# _web_items <json-array>: the items, each `on_delete` stamped with the plugin that listed it.
+_web_items() {
+  jq -c --arg plugin "${PLUGIN_NAME:-}" 'map(if .on_delete then .on_delete.plugin = $plugin else . end)' <<<"$1"
+}
 
 # web_list <title> <json-array>: a section of links on the project's band. `start` ({label, task})
 # puts a button on an item that starts a session with `task` as the agent's first message.
 web_list() {
-  WEB_JSON=$(jq -c --arg title "$1" --argjson items "$2" \
+  WEB_JSON=$(jq -c --arg title "$1" --argjson items "$(_web_items "$2")" \
     '.lists += [{title: $title, items: $items}]' <<<"$WEB_JSON")
+}
+
+# web_run_items <json-array>: items that only ever show on a session's row: once a later plugin
+# ties one to a run (web_tie_items), on the row of that run's session while the page lists one;
+# nowhere otherwise (a pull request of a run, but no section of pull requests).
+web_run_items() {
+  WEB_JSON=$(jq -c --argjson items "$(_web_items "$1")" '.run_items += $items' <<<"$WEB_JSON")
 }
 
 # web_session_item <run_id> <json-item>: an element on that run's session row, shown while the
 # page lists a session of the run.
 web_session_item() {
-  WEB_JSON=$(jq -c --arg run_id "$1" --argjson item "$2" \
-    '.session_items += [$item + {run_id: $run_id}]' <<<"$WEB_JSON")
+  WEB_JSON=$(jq -c --arg run_id "$1" --argjson item "$(_web_items "[$2]")" \
+    '.session_items += [$item[0] + {run_id: $run_id}]' <<<"$WEB_JSON")
 }
 
 # web_note <text>: one line shown with the project, for what kept a plugin from listing anything.
 web_note() { WEB_JSON=$(jq -c --arg note "$1" '.notes += [$note]' <<<"$WEB_JSON"); }
 
 # web_map_items <jq-filter>: rewrite every item listed so far, by plugins of a lower priority.
-web_map_items() { WEB_JSON=$(jq -c ".lists[].items[] |= ($1)" <<<"$WEB_JSON"); }
+web_map_items() { WEB_JSON=$(jq -c "(.lists[].items[], .run_items[]) |= ($1)" <<<"$WEB_JSON"); }
 
 # web_tie_items <jq-filter>: hand items listed so far to the run the filter names for each (a
-# RUN_ID; null or "" leaves the item where it is). A tied item moves from its section to its
+# RUN_ID; null or "" leaves the item where it is). A tied item of a section moves from it to its
 # run's session row while the page lists a session of that run; with none, it stays in its
-# section with a Resume button.
+# section with a Resume button. A tied run item (web_run_items) shows on that row only.
 web_tie_items() {
-  WEB_JSON=$(jq -c ".lists[].items[] |= (. as \$i | (\$i | $1) as \$r
+  WEB_JSON=$(jq -c "(.lists[].items[], .run_items[]) |= (. as \$i | (\$i | $1) as \$r
     | if (\$r // \"\") == \"\" then \$i else \$i + {run_id: \$r} end)" <<<"$WEB_JSON")
 }
+
+# web_action_done: in a web action (WEB_ACTION set), says the plugin did it. Without it the action
+# failed, the first web_note saying why.
+web_action_done() { WEB_ACTION_DONE=1; }
 
 # web_checkout <glob>: where a run's /workspace is on this machine, `{run_id}` standing for the
 # run. The page offers to open the directory it matches in VS Code.
@@ -253,4 +276,24 @@ plugins_web_stage() {
     fi
   done
   unset PLUGIN_NAME PLUGIN_DIR
+}
+
+# plugins_web_action <plugin> <action> <arg>: what the page asked for when a session was deleted
+# (an item's `on_delete`, after a yes): sources that plugin's web.sh alone, with WEB_ACTION and
+# WEB_ACTION_ARG set, and fails unless it called web_action_done.
+plugins_web_action() {
+  case " $ENABLED_PLUGINS " in
+    *" $1 "*) ;;
+    *) die "Plugin '$1' is not enabled for this project." ;;
+  esac
+  PLUGIN_NAME="$1"
+  PLUGIN_DIR="$PLUGIN_ROOT/$1"
+  [ -f "$PLUGIN_DIR/web.sh" ] || die "Plugin '$1' has no web.sh."
+  # shellcheck disable=SC2034  # read by the plugin's web.sh
+  WEB_ACTION="$2" WEB_ACTION_ARG="$3" WEB_ACTION_DONE=0
+  # shellcheck disable=SC1091  # path resolved at runtime
+  . "$PLUGIN_DIR/web.sh" || true
+  unset PLUGIN_NAME PLUGIN_DIR WEB_ACTION WEB_ACTION_ARG
+  [ "$WEB_ACTION_DONE" = 1 ] ||
+    die "$(jq -r '.notes[0] // empty' <<<"$WEB_JSON" | grep . || echo "$1 did not do '$2'")"
 }

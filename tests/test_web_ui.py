@@ -3,7 +3,7 @@
 The server and its pages run from a copy of web/, next to a stub run.sh: `--web` answers with the
 JSON below (what the plugins would describe, tested on their own in test_plugin_hosts.py), and a
 session is an "agent" that says it has a question (as the agent-status hook would), waits for a
-line, then exits 4. `docker` does nothing (stopping a session
+line, then exits 4; `--web-action` is logged to `actions`. `docker` does nothing (stopping a session
 removes its container), `code` is the stand-in from test_web.py. Skipped without Playwright (pip install playwright, then
 `python -m playwright install chromium`, or a chromium on the PATH).
 """
@@ -25,6 +25,7 @@ RUN = "abc123"  # the run the fixture's first pull request and checkout belong t
 RUN_SH = """#!/bin/sh
 case "$1" in
   --web) cat "$(dirname "$0")/web.json" ;;
+  --web-action) echo "$2 $3 $4" >>"$(dirname "$0")/actions"; echo '{}' ;;
   *) echo "agent $2 at work${4:+ on: $4}"
      printf '\033]1337;SetUserVar=agent_status=%s\007' "$(printf question | base64)"
      read line; exit 4 ;;
@@ -74,19 +75,32 @@ def board(tmp_path, browser):
     elsewhere = base.replace("127.0.0.1", "localhost")
     (sandbox / "web.json").write_text(json.dumps({"notes": [], "checkout": f"{tmp_path}/mirrors/*-{{run_id}}",
         "session_items": [{"run_id": RUN, "ref": "preview", "title": "The run's preview", "url": f"{elsewhere}/preview"}],
-        "lists": [
-        {"title": "Pull requests", "items": [
+        "run_items": [
             {"ref": "#3", "title": "Agent's work", "url": f"{elsewhere}/pr/3", "run_id": RUN,
-             "status": "fail", "status_text": "CI: 1 of 2 checks failed"},
-            {"ref": "#4", "title": "By hand", "url": f"{elsewhere}/pr/4", "status": "ok", "status_text": "CI: 2 checks passed"}]},
+             "status": "fail", "status_text": "CI: 1 of 2 checks failed",
+             "on_delete": {"plugin": "github-auth", "action": "close-pr", "arg": "3", "ask": "Close #3 too?"}},
+            {"ref": "#2", "title": "Went in", "url": f"{elsewhere}/pr/2", "run_id": RUN,
+             "note": "Merged", "status": "done", "status_text": "Merged"},
+            {"ref": "#4", "title": "By hand", "url": f"{elsewhere}/pr/4", "status": "ok", "status_text": "CI: 2 checks passed",
+             "on_delete": {"plugin": "github-auth", "action": "close-pr", "arg": "4", "ask": "Close #4 too?"}}],
+        "lists": [
         {"title": "Issues", "items": [{"ref": "#7", "title": "A bug", "url": f"{elsewhere}/issues/7",
                                        "start": {"label": "Resolve", "task": "Fix issue #7 now"}}]}]}))
 
     context = browser.new_context()
     page = context.new_page()
-    page.on("dialog", lambda d: d.accept())  # the "Stop …?" confirmations
+    answers = page.answers = []  # what to say to the "Close #3 too?" questions, in turn: yes if none left
+    asked = page.asked = []
+
+    def dialog(d):
+        if d.message.startswith("Close "):
+            asked.append(d.message)
+            return d.accept() if not answers or answers.pop(0) else d.dismiss()
+        d.accept()  # the "Stop …?" confirmations
+    page.on("dialog", dialog)
     page.goto(base)
     page.wait_for_selector("a .num")
+    page.actions = sandbox / "actions"
 
     def resume():
         """A session of RUN, the way the PR's Resume button starts one."""
@@ -143,11 +157,13 @@ def test_the_dashboard_shows_totals_ci_icon_buttons_and_its_own_icon(board):
     board.resume()
     board.wait_for_function("document.querySelector('.totals').innerText.includes('1\\nSessions')")
     totals = board.inner_text(".totals").split()
-    assert totals == ["1", "Sessions", "2", "Pull", "requests", "1", "Issues"]
-    failing, passing = board.query_selector_all("a .status")
+    assert totals == ["1", "Sessions", "1", "Issues"]  # pull requests: no column, no total
+    board.wait_for_selector("a.chip .status")
+    failing, merged = board.query_selector_all("a .status")
     assert (failing.get_attribute("class"), failing.inner_text()) == ("status fail", "✕")
-    assert (passing.get_attribute("class"), passing.inner_text()) == ("status ok", "✓")
+    assert (merged.get_attribute("class"), merged.inner_text()) == ("status done", "⇥")
     assert "CI: 1 of 2 checks failed" in board.get_attribute("a:has(.status.fail)", "title")
+    assert "Merged: Went in" in board.get_attribute("a:has(.status.done)", "title")
 
 
 def test_a_session_has_one_tab_with_a_lamp_in_the_colour_of_what_its_agent_does(board):
@@ -181,26 +197,24 @@ def test_one_terminal_per_project_on_this_machine(board):
     assert not term.is_closed()
 
 
-def test_one_tab_per_pull_request(board):
-    pr = opens_tab(board, lambda: board.click("text=By hand"))
-    assert pr.url.endswith("/pr/4")
-    again_opens_nothing(board, lambda: board.click("text=By hand"))  # GitHub's tab: another origin
+def test_one_tab_per_item(board):
     issue = opens_tab(board, lambda: board.click("text=A bug"))
     assert issue.url.endswith("/issues/7")
+    again_opens_nothing(board, lambda: board.click("text=A bug"))  # GitHub's tab: another origin
 
 
-def test_a_runs_pull_request_moves_onto_its_session_row(board):
-    # No session of the run yet: the pull request waits in its section, offering to resume it.
+def test_pull_requests_show_only_on_their_runs_session_row(board):
+    # No session of the run yet: its pull requests show nowhere, and there is no column of them.
     assert board.query_selector("a.chip") is None
-    board.wait_for_selector("li:has-text(\"Agent's work\") >> text=Resume")
+    assert board.query_selector("h3:has-text('Pull requests')") is None
     board.resume()
     board.wait_for_selector("button.session ~ a.chip.fail")
     row = board.query_selector("li:has(button.session)")
-    assert [c.text_content() for c in row.query_selector_all("a.chip")] == ["✕#3", "preview"]
+    assert [c.text_content() for c in row.query_selector_all("a.chip")] == ["✕#3", "⇥#2", "preview"]
     assert "Agent's work" in board.get_attribute("a.chip.fail", "title")
     assert "CI: 1 of 2 checks failed" in board.get_attribute("a.chip.fail", "title")
-    assert board.query_selector("text=Agent's work") is None  # gone from its section
-    assert board.query_selector("text=By hand")  # a pull request of no run stays there
+    assert board.query_selector("a.chip.done")  # the run's merged one, too
+    assert board.query_selector("text=By hand") is None  # a pull request of no run: nowhere
     pr = opens_tab(board, lambda: board.click("a.chip.fail"))
     assert pr.url.endswith("/pr/3")
     again_opens_nothing(board, lambda: board.click("a.chip.fail"))
@@ -214,14 +228,34 @@ def test_deleting_a_session_closes_its_tabs_and_only_its_own(board):
     code = opens_tab(board, lambda: board.click("button[aria-label='VS Code']"))
     assert "/vscode/?folder=" in code.url
     its_pr = opens_tab(board, lambda: board.click("a.chip:has-text('#3')"))
-    other_pr = opens_tab(board, lambda: board.click("text=By hand"))
+    issue = opens_tab(board, lambda: board.click("text=A bug"))
     term = opens_tab(board, lambda: board.click("button[aria-label='Terminal']"))
 
-    board.on("dialog", lambda d: d.accept())
     board.click("button[aria-label='Delete session']")
     for tab in (session, code, its_pr):
         closes(tab, board)
-    assert not other_pr.is_closed() and not term.is_closed() and not board.is_closed()
+    assert not issue.is_closed() and not term.is_closed() and not board.is_closed()
+
+
+def test_deleting_a_session_asks_before_closing_its_open_pull_request(board):
+    board.resume()
+    board.wait_for_selector("a.chip.fail")
+    board.answers.append(False)  # no: the pull request stays open
+    board.click("button[aria-label='Delete session']")
+    board.wait_for_selector("text=Nobody at work.")
+    assert board.asked == ["Close #3 too?"]  # only the open one of this run: not the merged one, nor #4
+    board.wait_for_timeout(500)
+    assert not board.actions.exists()
+
+    board.resume()
+    board.wait_for_selector("a.chip.fail")
+    board.click("button[aria-label='Delete session']")  # yes, this time
+    board.wait_for_selector("text=Nobody at work.")
+    for _ in range(50):
+        if board.actions.exists():
+            break
+        board.wait_for_timeout(100)
+    assert board.actions.read_text() == "github-auth close-pr 3\n"
 
 
 def test_stopping_keeps_the_session_and_its_tab_and_deleting_closes_them(board):
@@ -234,7 +268,7 @@ def test_stopping_keeps_the_session_and_its_tab_and_deleting_closes_them(board):
     board.wait_for_selector("button.session.ended")  # listed still, to resume, and no longer stoppable
     board.wait_for_selector("button[aria-label='Stop session']", state="detached")
     assert not its_pr.is_closed()
-    session.click("button[aria-label='Delete session']")
+    session.click("button[aria-label='Delete session']")  # its own page asks about #3 too
     closes(session, board)
     closes(its_pr, board)  # the dashboard heard it on the `sandbox-tabs` channel
     board.wait_for_selector("text=Nobody at work.")

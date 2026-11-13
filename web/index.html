@@ -86,6 +86,7 @@
   .status.ok { color: var(--ok); }
   .status.fail { color: var(--fail); }
   .status.pending { color: var(--lamp); }
+  .status.done { color: var(--ask); }
   /* An item on a session's row (its pull request): a small button, its status mark and ref. */
   a.chip { display: inline-flex; align-items: center; padding: 2px 9px 2px 5px; border-radius: 999px;
            border: 1px solid var(--rule); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -94,6 +95,7 @@
   a.chip.ok { border-color: #6fd3a266; }
   a.chip.fail { border-color: #ff7b8a66; }
   a.chip.pending { border-color: #f2b84b66; }
+  a.chip.done { border-color: #c69cff66; }
 
   @media (max-width: 900px) {
     body { padding: 24px 16px 48px; }
@@ -128,9 +130,10 @@ const label = s => s.kind === 'shell' ? 'terminal' : s.run_id + (s.kind === 'res
 let state = {projects: [], sessions: []}, plugins = {}, drawn = '';
 
 // What a project's plugins put on a run's session row: items they added there themselves, and
-// items of their sections they tied to a run (a pull request on the run's branch).
-const runItems = said => [...said.lists.flatMap(list => list.items).filter(i => i.run_id),
-  ...(said.session_items || [])];
+// items they tied to a run (a pull request on the run's branch), from their sections or listed
+// for runs only (which show nowhere else).
+const runItems = said => [...said.lists.flatMap(list => list.items), ...(said.run_items || [])]
+  .filter(i => i.run_id).concat(said.session_items || []);
 
 // The tabs this page opened, by name, so closing a session can close them too. Terminal tabs also
 // close themselves when told on `tabs` (they keep doing so after this page reloads); a VS Code tab
@@ -236,14 +239,19 @@ async function stop(s) {
 // Deleting forgets the session (stopping it first if it still runs) and closes its tabs.
 async function remove(s) {
   if (s.exit === null && !confirm(`Stop and delete ${label(s)} in ${name(s.project)}? Its tabs close too.`)) return;
-  await post(`/api/sessions/${s.id}/delete`).catch(e => alert(e.message));
+  // What a plugin offers to tidy up with it (its run's open pull request: close it) is asked
+  // about one by one, and done only on a yes.
+  const {offers} = await api(`/api/sessions/${s.id}/offers`).catch(() => ({offers: []}));
+  const tidy = offers.filter(o => confirm(o.ask)).map(o => o.url);
+  const done = await post(`/api/sessions/${s.id}/delete`, JSON.stringify({tidy})).catch(e => alert(e.message));
+  if (done?.failed?.length) alert('Not done:\n' + done.failed.join('\n'));
   closeTabs(s);
   tabs.postMessage(s);
   refresh();
 }
 
 const mark = i => i.status ? h('span', {className: 'status ' + i.status, ariaLabel: i.status_text || i.status},
-  {ok: '✓', fail: '✕', pending: '●'}[i.status] || '') : '';
+  {ok: '✓', fail: '✕', pending: '●', done: '⇥'}[i.status] || '') : '';
 const tip = i => [(i.ref ? i.ref + ' ' : '') + (i.note ? i.note + ': ' : '') + i.title + (i.branch ? ` (${i.branch})` : ''),
   i.status_text].filter(Boolean).join('\n');
 // An item on a session's row: opens in its own tab, as in a section.
@@ -306,9 +314,9 @@ function render() {
           h('button', {className: 'icon', onclick: () => remove(s), ariaLabel: 'Delete session',
                        title: 'Delete: forget it, stopping it first'}, svg(TRASH))),
           'Nobody at work.', mine.some(s => s.exit === null)),
-        // What the project's plugins list (pull requests, issues, …): the page only draws it. An
-        // item a plugin tied to a run opens that run's session, or resumes it.
-        // An item tied to a run is on that run's session row instead, while one is listed.
+        // What the project's plugins list (issues, …): the page only draws it. An item a plugin
+        // tied to a run is on that run's session row instead, while one is listed; with none, it
+        // offers to resume the run. Items listed for runs only (pull requests) have no section.
         ...(said ? said.lists : []).map(list => column(list.title,
           list.items.filter(i => !(i.run_id && holder(path, i.run_id))), i =>
           h('li', {},

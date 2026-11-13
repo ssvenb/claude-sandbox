@@ -89,6 +89,7 @@ def test_run_id_starts_a_fresh_run_under_the_given_id(sb, run_sh):
     (["--resume"], 1, "Invalid RUN_ID ''"),
     (["--task"], 1, "--task needs the task's text."),
     (["--resume", "0a1b2c", "--task", "Fix it"], 1, "--task starts a fresh run"),
+    (["--chat", "--task", "Fix it"], 1, "--chat takes its prompts as commands"),
 ])
 def test_command_line(run_sh, args, code, message):
     done = run_sh(*args, timeout=15)
@@ -166,3 +167,13 @@ def test_a_task_reaches_the_agent_as_agent_task(sb, run_sh):
     assert "AGENT_TASK=Fix #7: it's \"broken\"" in run
     run = calls(run_sh("--run-id", "0a1b2c", CLAUDE_CODE_OAUTH_TOKEN="t"), "run")[-1]  # the log is shared
     assert not any(arg.startswith("AGENT_TASK=") for arg in run)  # no task, no variable
+
+
+def test_a_chat_runs_without_a_terminal_behind_the_agents_bridge(sb, run_sh):
+    """--chat (what the web UI starts): stdin stays open and no pty is allocated, since the
+    container's stdio is the chat bridge's wire; the launch stage reads AGENT_UI."""
+    run = calls(run_sh("--resume", "0a1b2c", "--chat", CLAUDE_CODE_OAUTH_TOKEN="t"), "run")[-1]
+    assert run[:5] == ["run", "-i", "-e", "AGENT_UI=chat", "--rm"] and "-it" not in run
+    assert "RESUME=1" in run
+    run = calls(run_sh("--run-id", "0a1b2c", CLAUDE_CODE_OAUTH_TOKEN="t"), "run")[-1]
+    assert run[:3] == ["run", "-it", "--rm"] and "AGENT_UI=chat" not in run

@@ -76,6 +76,19 @@ def test_bare_boot_drops_to_the_agent_user(image):
     assert (json.loads(settings), mode) == ({}, "root 444")
 
 
+def test_a_chat_boots_into_the_agents_bridge_and_its_sdk(image):
+    """AGENT_UI=chat (run.sh --chat): the boot ends in the agent's chat bridge, which finds its
+    SDK where install.sh put it and has it start the agent's CLI. The stand-in CLI is no agent, so
+    the bridge says on the wire that it did not start, where the page will show it."""
+    done = subprocess.run(["docker", "run", "--rm", "-i", *run_args("", "", {"AGENT_UI": "chat"}), image],
+                          input="", capture_output=True, text=True, timeout=600)
+    # Not splitlines(): to Python the record separator that leads each event ends a line too.
+    events = [json.loads(line[1:]) for line in done.stdout.split("\n") if line.startswith("\x1e")]
+    assert events[:1] == [{"type": "hello", "agent": AGENT}], done.stdout + done.stderr
+    assert [e["level"] for e in events if e["type"] == "notice"][:1] == ["error"], events
+    assert not any(e["type"] == "ready" for e in events)
+
+
 def test_the_agent_cli_and_every_plugins_tools_are_installed(image):
     tools = ["/usr/bin/gh", "docker", "gcloud", "qemu-img", "cloud-localds", "virsh", "ssh", "sudo",
              "terraform", "chromium", "/usr/local/bin/netbird", AGENT]

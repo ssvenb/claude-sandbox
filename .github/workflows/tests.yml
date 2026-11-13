@@ -17,7 +17,7 @@ jobs:
           python-version: "3.11"  # the image's python3, which runs the root helpers
       - run: pip install pytest playwright
       - run: python -m playwright install --with-deps chromium  # tests/test_web_ui.py
-      - run: python -m pytest -q tests
+      - run: python -m pytest -q -rs tests  # -rs: say why a test was skipped (no browser, no node)
 
   image:
     name: Image boot tests (${{ matrix.agent }})

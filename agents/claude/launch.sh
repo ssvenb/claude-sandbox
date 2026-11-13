@@ -12,6 +12,11 @@
 # resumed run starts a fresh conversation under the same id.
 #
 # $AGENT_TASK (run.sh --task) is the conversation's first message: the agent starts on it at once.
+# A web chat (run.sh --chat) has no terminal: the agent runs behind its chat bridge, which drives
+# it through the Claude Agent SDK and resumes the same conversation.
+if [ "${AGENT_UI:-}" = chat ]; then
+  exec node "$AGENT_DIR/chat.mjs"
+fi
 session="5a4db0c0-0000-4000-8000-000000${RUN_ID:?}"
 if [ "${RESUME:-0}" = 1 ] && [ -f "$HOME/.claude/projects/-workspace/$session.jsonl" ]; then
   set -- --resume "$session"

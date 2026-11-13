@@ -1,10 +1,12 @@
-"""web/index.html and web/session.html in a real browser: tabs, closing, favicons, CI marks.
+"""web/index.html, web/chat.html and web/session.html in a real browser: the dashboard, a session's
+chat from its first moment, tabs, closing, favicons, CI marks, day and night.
 
-The server and its pages run from a copy of web/, next to a stub run.sh: `--web` answers with the
-JSON below (what the plugins would describe, tested on their own in test_plugin_hosts.py), and a
-session is an "agent" that says it has a question (as the agent-status hook would), waits for a
-line, then exits 4; `--web-action` is logged to `actions`. `docker` does nothing (stopping a session
-removes its container), `code` is the stand-in from test_web.py. Skipped without Playwright (pip install playwright, then
+The server and its pages run from a copy of web/, next to a stand-in run.sh (tests/stubs/chat_run.py):
+`--web` answers with the JSON below (what the plugins would describe, tested on their own in
+test_plugin_hosts.py), `--web-action` is logged to `actions`, and a session is a sandbox that boots
+and then an agent behind a chat bridge, whose turn depends on what it is asked ("ask", "long", …).
+`docker` does nothing (stopping a session removes its container), `code` is the stand-in from
+test_web.py. Skipped without Playwright (pip install playwright, then
 `python -m playwright install chromium`, or a chromium on the PATH).
 """
 import json
@@ -16,21 +18,12 @@ import urllib.request
 import pytest
 
 from conftest import REPO
-from test_web import FAKE_CODE
+from test_web import FAKE_CODE, STUB
 
 sync_api = pytest.importorskip("playwright.sync_api")
 
 RUN = "abc123"  # the run the fixture's first pull request and checkout belong to
 
-RUN_SH = """#!/bin/sh
-case "$1" in
-  --web) cat "$(dirname "$0")/web.json" ;;
-  --web-action) echo "$2 $3 $4" >>"$(dirname "$0")/actions"; echo '{}' ;;
-  *) echo "agent $2 at work${4:+ on: $4}"
-     printf '\033]1337;SetUserVar=agent_status=%s\007' "$(printf question | base64)"
-     read line; exit 4 ;;
-esac
-"""
 DOCKER = "#!/bin/sh\n"
 
 
@@ -63,7 +56,7 @@ def board(tmp_path, browser):
     (sandbox / "src").mkdir()
     shutil.copy(REPO / "src/kernel.json", sandbox / "src")
     shutil.copy(REPO / ".claude-sandbox.example.json", sandbox)
-    tool(sandbox / "run.sh", RUN_SH)
+    tool(sandbox / "run.sh", STUB.read_text())
     tool(tmp_path / "bin/docker", DOCKER)
     tool(tmp_path / "bin/code", FAKE_CODE)
     project = tmp_path / "proj"
@@ -74,11 +67,11 @@ def board(tmp_path, browser):
     proc = subprocess.Popen([sandbox / "web/server.py", "--port", "0", "--projects", tmp_path / "projects"],
                             stdout=subprocess.PIPE, text=True,
                             env={"PATH": f"{tmp_path}/bin:/usr/bin:/bin", "HOME": str(tmp_path),
-                                 "SHELL": "/bin/sh", "XDG_DATA_HOME": str(tmp_path / "data")})
+                                 "SHELL": "/bin/sh", "XDG_DATA_HOME": str(tmp_path / "data"), "STUB_BOOT": "0.02"})
     base = proc.stdout.readline().split()[1]
     # Items on another origin, as GitHub's are: localhost is the same server, another origin.
     elsewhere = base.replace("127.0.0.1", "localhost")
-    (sandbox / "web.json").write_text(json.dumps({"notes": [], "checkout": f"{tmp_path}/mirrors/*-{{run_id}}",
+    (sandbox / "web.json").write_text(json.dumps({"notes": [], "agent": "claude", "checkout": f"{tmp_path}/mirrors/*-{{run_id}}",
         "live": [str(tmp_path / "ports.json")],
         "session_items": [{"run_id": RUN, "ref": "preview", "title": "The run's preview", "url": f"{elsewhere}/preview"}],
         "run_items": [
@@ -117,7 +110,7 @@ def board(tmp_path, browser):
         return s
     page.resume = resume
     page.base, page.checkout, page.ports = base, checkout, tmp_path / "ports.json"
-    page.project = project
+    page.project, page.hold, page.commands = project, sandbox / "hold", sandbox / "commands"
     yield page
     context.close()
     proc.terminate()
@@ -155,37 +148,235 @@ def icon(tab):
     return tab.eval_on_selector("link[rel=icon]", "e => decodeURIComponent(e.href)")
 
 
+ROW = "li:has(button.session)"  # a session's row in its project; a running one has a window too
+
+
+def state(board):
+    return json.load(urllib.request.urlopen(board.base + "/api/state"))["sessions"]
+
+
 def test_the_dashboard_shows_totals_ci_icon_buttons_and_its_own_icon(board):
-    assert board.title() == "Dashboard" and board.inner_text("h1") == "Dashboard"
+    assert board.title() == "Dashboard" and board.inner_text("h1") == "Nobody at work."
     assert "<rect" in icon(board)
     for name in ("New session", "Terminal", "Settings"):  # icon buttons: a glyph, named for screen readers
         button = board.query_selector(f"button[aria-label='{name}']")
         assert button.inner_text() == "" and button.query_selector("svg") and button.get_attribute("title")
+    assert board.inner_text(".head h2 small") == "claude"  # the project's agent, as run.sh --web says
     board.resume()
     board.wait_for_function("document.querySelector('.totals').innerText.includes('1\\nSessions')")
     totals = board.inner_text(".totals").split()
     assert totals == ["1", "Sessions", "1", "Issues"]  # pull requests: no column, no total
-    board.wait_for_selector("a.chip .status")
-    failing, merged = board.query_selector_all("a .status")
+    board.wait_for_selector(f"{ROW} a.chip .status")
+    failing, merged = board.query_selector_all(f"{ROW} a .status")
     assert (failing.get_attribute("class"), failing.inner_text()) == ("status fail", "✕")
     assert (merged.get_attribute("class"), merged.inner_text()) == ("status done", "⇥")
-    assert "CI: 1 of 2 checks failed" in board.get_attribute("a:has(.status.fail)", "title")
-    assert "Merged: Went in" in board.get_attribute("a:has(.status.done)", "title")
+    assert "CI: 1 of 2 checks failed" in board.get_attribute(f"{ROW} a:has(.status.fail)", "title")
+    assert "Merged: Went in" in board.get_attribute(f"{ROW} a:has(.status.done)", "title")
+
+
+def test_the_dashboard_says_what_every_agent_is_doing_the_ones_waiting_on_you_first(board):
+    board.fill(".starter textarea", "please ask me")  # starting a session is writing its first message
+    asking = opens_tab(board, lambda: board.click(".starter button[type=submit]"))
+    asking.wait_for_selector(".ask")
+    board.resume()  # a second one, idle after its boot
+    board.wait_for_selector(".window.idle")
+    board.wait_for_selector(".window.question")
+    assert board.inner_text("h1") == "1 agent waiting on you, 1 idle."
+    first, second = board.query_selector_all(".window")
+    assert "question" in first.get_attribute("class") and first.query_selector(".open").inner_text() == "please ask me"
+    assert first.query_selector(".state b").inner_text() == "Needs you"
+    assert "An earlier answer." in second.query_selector(".doing").inner_text()  # idle: what it last said
+    assert [c.text_content() for c in second.query_selector_all("a.chip")] == ["✕#3", "⇥#2", "preview"]
+    again_opens_nothing(board, lambda: board.click(".window.question .open"))  # its tab is open already
+    assert board.input_value(".starter textarea") == ""
+
+    asking.click(".ask .options button:has-text('Postgres')")
+    board.wait_for_selector(".window.question", state="detached")
+    assert board.inner_text("h1") == "2 agents idle."
 
 
 def test_a_session_has_one_tab_with_a_lamp_in_the_colour_of_what_its_agent_does(board):
     board.resume()
-    board.wait_for_selector("button.session .lamp.question")  # the stand-in asks: violet
+    board.wait_for_selector("button.session .lamp.idle")  # booted and waiting: green
     tab = opens_tab(board, lambda: board.click("button.session"))
-    tab.wait_for_selector("text=has a question")
-    assert "#c69cff" in icon(tab) and "<circle" in icon(tab)
+    assert tab.url.endswith("/chat#" + state(board)[0]["id"])
+    tab.wait_for_selector(".say:has-text('An earlier answer.')")  # a resumed run: its conversation so far
+    assert tab.inner_text(".you") == "What was said before the resume"
+    tab.wait_for_selector("header .state.idle")
+    assert "#6fd3a2" in icon(tab) and "<circle" in icon(tab)
     again_opens_nothing(board, lambda: board.click("button.session"))
 
-    tab.click(".xterm")
-    tab.keyboard.press("Enter")  # the stand-in agent exits 4
-    tab.wait_for_selector("text=exited 4")
+    tab.fill("#input", "ask me something")
+    tab.keyboard.press("Enter")
+    tab.wait_for_selector(".ask")  # the stand-in asks: violet, here and on the dashboard
+    tab.wait_for_function("decodeURIComponent(document.querySelector('link[rel=icon]').href).includes('#c69cff')")
+    board.wait_for_selector("button.session .lamp.question")
+    assert tab.inner_text("header .state") == "Needs you"
+
+    tab.on("dialog", lambda d: d.accept())
+    tab.click("button[aria-label='Stop session']")
+    tab.wait_for_selector("text=This session has ended")
     tab.wait_for_function("decodeURIComponent(document.querySelector('link[rel=icon]').href).includes('stroke')")
+    assert tab.is_disabled("#input")
     board.wait_for_selector("button[aria-label='Resume session']")
+    with tab.expect_navigation():  # resuming takes this tab to the run's new session
+        tab.click(".over button:has-text('Resume')")
+    tab.wait_for_selector("header .state.idle")
+    assert tab.url.endswith("#" + [s for s in state(board) if s["exit"] is None][0]["id"])
+
+
+def test_the_first_message_is_written_while_the_sandbox_starts_and_sent_when_it_is_ready(board):
+    board.hold.write_text("")  # the sandbox boots for as long as this is there
+    tab = opens_tab(board, lambda: board.click("button[aria-label='New session']"))
+    tab.wait_for_selector(".boot.starting .spin")  # whatever loads, turns
+    tab.wait_for_selector(".boot .line:has-text('Cloning into /workspace')")
+    assert "What should the agent do in proj?" in tab.inner_text("#welcome")
+    assert tab.inner_text("header .state") == "Starting" and "stroke-dasharray" in icon(tab)
+    assert tab.evaluate("document.activeElement.id") == "input"  # ready to type from the first moment
+    tab.fill("#input", "change main")
+    tab.keyboard.press("Enter")
+    tab.wait_for_selector(".you.queued:has-text('change main') .spin")
+    assert "Sent as soon as the sandbox is ready" in tab.inner_text(".you.queued")
+    tab.fill("#input", "and a second one")
+    tab.keyboard.press("Enter")
+    tab.wait_for_selector(".you.queued >> nth=1")
+    board.wait_for_selector(".window.starting .doing:has-text('2 messages waiting') .spin")
+    assert board.inner_text(".window .open") == "change main"  # a session is called what it was first asked
+    assert not board.commands.exists()  # nothing reached the agent yet
+
+    board.hold.unlink()
+    tab.wait_for_selector(".boot.ok:has-text('Sandbox ready')")
+    tab.wait_for_selector(".you.queued", state="detached")
+    tab.wait_for_selector(".say:has-text('Done with “and a second one”.')")
+    sent = [json.loads(line)["text"] for line in board.commands.read_text().splitlines()]
+    assert sent == ["change main", "and a second one"]  # in the order they were written
+    assert tab.title() == "change main · proj"
+    tab.click(".boot summary")  # the boot's output is kept, folded away
+    assert "🔐 gh auth login" in tab.inner_text(".boot pre")
+
+
+def test_a_chat_draws_what_the_agent_says_and_does(board):
+    tab = opens_tab(board, lambda: board.click("button[aria-label='New session']"))
+    tab.fill("#input", "change main")
+    tab.keyboard.press("Enter")
+    tab.wait_for_selector(".turn")
+    # Its prose is markdown, built as elements: a heading, a list, a table, code with a Copy button.
+    said = tab.locator(".say").last
+    assert said.locator("h2").inner_text() == "What changed"
+    assert said.locator("li >> nth=0").inner_text() == "main() now returns 2" and said.locator("li code").count() == 1
+    assert said.locator("td >> nth=1").inner_text() == "one line"
+    assert said.locator(".code pre").inner_text() == "def main():\n    return 2" and said.locator(".code .lang").inner_text() == "python"
+    link = said.locator("a")
+    assert (link.get_attribute("href"), link.get_attribute("target")) == ("https://example.com/docs", "_blank")
+    assert tab.inner_text(".think summary") == "Thought for a moment"
+
+    # What it did: a line per tool call, runs of them in one box; open one for what went in and came back.
+    lines = [" ".join(t.inner_text().split()) for t in tab.query_selector_all("#log > .tools > .tool > summary")]
+    assert lines == ["✓ Read /workspace/src/app.py", "✓ Edit /workspace/src/app.py", "✓ Subagent Check the callers",
+                     "✓ Run python -m pytest -q"]
+    tab.click(".tool:has-text('Edit') > summary")
+    diff = tab.locator(".tool:has-text('Edit') .diff")
+    assert [(r.get_attribute("class"), r.inner_text()) for r in diff.locator("span").element_handles()] == [
+        ("same", "def main():"), ("del", "    return 1"), ("add", "    return 2")]
+    tab.click(".tool:has-text('Subagent') > summary")  # a subagent's own calls, inside the call that started it
+    assert "Search main\\( in src" in " ".join(tab.inner_text(".tool:has-text('Subagent') .kids .tool summary").split())
+    tab.click(".tool:has-text('Run') > summary")
+    assert tab.inner_text(".tool:has-text('Run') .body pre >> nth=1") == "3 passed in 0.12s"
+
+    assert tab.inner_text(".turn") == "4 s, $0.10 so far, 3% of its context used"
+    assert " ".join(tab.inner_text("#plan summary").split()) == "Plan All done 3 of 3"
+    assert tab.inner_text("header .who span") == f"proj / {state(board)[0]['run_id']} / claude, fable"
+
+    assert tab.inner_text("#suggest span") == "Open a pull request for it"
+    tab.click("#input")
+    tab.keyboard.press("Tab")  # the prompt it expects next, taken with Tab
+    assert tab.input_value("#input") == "Open a pull request for it"
+    tab.fill("#input", "now fail")
+    tab.keyboard.press("Enter")
+    tab.wait_for_selector(".note.error:has-text('The API did not answer.')")
+    assert tab.locator(".tool.failed pre.err").text_content().startswith("1 failing")  # folded, and marked
+
+    tab.reload()  # a page opened later starts from the whole conversation
+    tab.wait_for_selector(".note.error")
+    assert tab.locator(".you").all_inner_texts() == ["change main", "now fail"]
+    assert tab.locator("#log > .tools > .tool").count() == 6 and tab.locator(".turn").count() == 2
+
+
+def test_a_chat_offers_the_agents_commands_and_models_and_can_interrupt_it(board):
+    tab = opens_tab(board, lambda: board.click("button[aria-label='New session']"))
+    tab.wait_for_selector("#model:not([hidden])")
+    assert tab.locator("#model option").all_inner_texts() == ["Fable (Fable 5.2)", "Opus (Opus 5.5)"]
+    tab.select_option("#model", "opus")
+    tab.select_option("#effort", "high")
+    tab.wait_for_function("document.title && document.querySelector('header .who span').innerText.endsWith('claude, opus')")
+
+    tab.type("#input", "/")  # its commands and skills, as in the terminal
+    assert tab.locator("#menu button b").all_inner_texts() == ["/compact", "/review", "/context"]
+    tab.type("#input", "re")
+    assert tab.locator("#menu button b").all_inner_texts() == ["/review"]
+    tab.keyboard.press("Enter")  # picks it; a second Enter would send
+    assert tab.input_value("#input") == "/review " and tab.is_hidden("#menu")
+    tab.fill("#input", "")
+
+    tab.fill("#input", "a long task\nover two lines")
+    tab.keyboard.press("Enter")
+    tab.wait_for_selector(".tool.running:has-text('sleep 600') .spin")
+    tab.wait_for_selector("#tail .spin")
+    assert tab.inner_text(".you") == "a long task\nover two lines"
+    assert tab.is_visible("#halt") and " ".join(tab.inner_text("#tail").split()) == "Working Run sleep 600"
+    board.wait_for_selector(".window.working .doing.tool:has-text('Bash: Wait a long time')")
+    tab.keyboard.press("Escape")  # as in the terminal
+    tab.wait_for_selector(".tool.failed:has-text('sleep 600')")
+    tab.wait_for_selector("#halt", state="hidden")
+    sent = [json.loads(line) for line in board.commands.read_text().splitlines()]
+    assert sent == [{"type": "model", "id": "opus"}, {"type": "effort", "level": "high"},
+                    {"type": "prompt", "text": "a long task\nover two lines"}, {"type": "interrupt"}]
+
+
+def test_a_question_is_answered_with_a_click_or_in_your_own_words(board):
+    tab = opens_tab(board, lambda: board.click("button[aria-label='New session']"))
+    tab.fill("#input", "ask me")
+    tab.keyboard.press("Enter")
+    tab.wait_for_selector(".ask .options button >> nth=1")
+    assert tab.inner_text(".ask .q > b") == "Which database?" and tab.inner_text(".ask .q > small") == "Storage"
+    tab.click(".ask .options button:has-text('SQLite')")
+    tab.wait_for_selector(".say:has-text('Going with SQLite.')")
+    assert " ".join(tab.inner_text(".ask.settled").split()) == "Which database? SQLite"
+
+    tab.fill("#input", "ask again")
+    tab.keyboard.press("Enter")
+    tab.wait_for_selector(".ask:not(.settled) .other input")
+    tab.fill(".ask:not(.settled) .other input", "DuckDB")
+    tab.keyboard.press("Enter")
+    tab.wait_for_selector(".say:has-text('Going with DuckDB.')")
+
+    tab.fill("#input", "ask once more")
+    tab.keyboard.press("Enter")
+    tab.click(".ask:not(.settled) button:has-text('Dismiss')")
+    tab.wait_for_selector(".say:has-text('Dismissed, so I chose myself.')")
+    assert " ".join(tab.locator(".ask.settled").last.inner_text().split()) == "Which database? Dismissed"
+
+
+def test_the_pages_follow_the_browsers_day_or_night_unless_one_is_pinned(board):
+    paper = lambda page: page.evaluate("getComputedStyle(document.body).backgroundColor")  # noqa: E731
+    board.emulate_media(color_scheme="light")
+    day = paper(board)
+    board.emulate_media(color_scheme="dark")
+    night = paper(board)
+    assert day == "rgb(233, 234, 244)" and night == "rgb(27, 29, 54)"
+    board.click(".theme button[aria-label='Day']")  # pinned: the browser's setting no longer decides
+    assert paper(board) == day and board.get_attribute(".theme button[aria-label='Day']", "aria-pressed") == "true"
+    tab = opens_tab(board, lambda: board.click("button[aria-label='New session']"))
+    tab.emulate_media(color_scheme="dark")
+    assert tab.evaluate("document.documentElement.dataset.theme") == "light"  # the chat wears it too
+    tab.click(".theme button[aria-label='Follow the browser']")
+    assert tab.evaluate("document.documentElement.dataset.theme") is None
+    assert paper(tab) == "rgb(15, 17, 35)"
+    term = opens_tab(board, lambda: board.click("button[aria-label='Terminal']"))
+    term.emulate_media(color_scheme="light")
+    term.wait_for_function("term.options.theme.background === '#fbfbfe'")  # and so does the terminal
+    term.emulate_media(color_scheme="dark")
+    term.wait_for_function("term.options.theme.background === '#0f1123'")
 
 
 def test_one_terminal_per_project_on_this_machine(board):
@@ -215,17 +406,17 @@ def test_pull_requests_show_only_on_their_runs_session_row(board):
     assert board.query_selector("a.chip") is None
     assert board.query_selector("h3:has-text('Pull requests')") is None
     board.resume()
-    board.wait_for_selector("button.session ~ a.chip.fail")
-    row = board.query_selector("li:has(button.session)")
+    board.wait_for_selector(f"{ROW} a.chip.fail")
+    row = board.query_selector(ROW)
     assert [c.text_content() for c in row.query_selector_all("a.chip")] == ["✕#3", "⇥#2", "preview"]
-    assert "Agent's work" in board.get_attribute("a.chip.fail", "title")
-    assert "CI: 1 of 2 checks failed" in board.get_attribute("a.chip.fail", "title")
+    assert "Agent's work" in board.get_attribute(f"{ROW} a.chip.fail", "title")
+    assert "CI: 1 of 2 checks failed" in board.get_attribute(f"{ROW} a.chip.fail", "title")
     assert board.query_selector("a.chip.done")  # the run's merged one, too
     assert board.query_selector("text=By hand") is None  # a pull request of no run: nowhere
-    pr = opens_tab(board, lambda: board.click("a.chip.fail"))
+    pr = opens_tab(board, lambda: board.click(f"{ROW} a.chip.fail"))
     assert pr.url.endswith("/pr/3")
-    again_opens_nothing(board, lambda: board.click("a.chip.fail"))
-    preview = opens_tab(board, lambda: board.click("a.chip:has-text('preview')"))
+    again_opens_nothing(board, lambda: board.click(".window a.chip.fail"))  # the same tab, from its window
+    preview = opens_tab(board, lambda: board.click(f"{ROW} a.chip:has-text('preview')"))
     assert preview.url.endswith("/preview")
 
 
@@ -235,14 +426,14 @@ def test_a_port_the_session_publishes_is_a_button_on_its_row_while_published(boa
     # As the central port proxy writes it: `{host}` is whatever name the page was opened by.
     board.ports.write_text(json.dumps([{"run_id": RUN, "ref": ":3000", "title": "Port 3000 of the sandbox",
                                         "url": f"http://{{host}}:{port}/published"}]))
-    board.wait_for_selector("button.session ~ a.chip:has-text(':3000')")
-    assert board.get_attribute("a.chip:has-text(':3000')", "href") == f"{board.base}/published"
-    published = opens_tab(board, lambda: board.click("a.chip:has-text(':3000')"))
+    board.wait_for_selector(f"{ROW} a.chip:has-text(':3000')")
+    assert board.get_attribute(f"{ROW} a.chip:has-text(':3000')", "href") == f"{board.base}/published"
+    published = opens_tab(board, lambda: board.click(f"{ROW} a.chip:has-text(':3000')"))
     assert published.url == f"{board.base}/published"
     board.ports.write_text("[]")  # its server stopped
     board.wait_for_selector("a.chip:has-text(':3000')", state="detached")
     board.ports.write_text(json.dumps([{"run_id": RUN, "ref": ":3000", "title": "t", "url": f"http://{{host}}:{port}/published"}]))
-    board.wait_for_selector("a.chip:has-text(':3000')")
+    board.wait_for_selector(f"{ROW} a.chip:has-text(':3000')")
     board.click("button[aria-label='Delete session']")
     closes(published, board)  # deleting the session closes its port's tab too
 
@@ -250,9 +441,9 @@ def test_a_port_the_session_publishes_is_a_button_on_its_row_while_published(boa
 def test_deleting_a_session_closes_its_tabs_and_only_its_own(board):
     board.resume()
     session = opens_tab(board, lambda: board.click("button.session"))
-    code = opens_tab(board, lambda: board.click("button[aria-label='VS Code']"))
+    code = opens_tab(board, lambda: board.click(f"{ROW} button[aria-label='VS Code']"))
     assert "/vscode/?folder=" in code.url
-    its_pr = opens_tab(board, lambda: board.click("a.chip:has-text('#3')"))
+    its_pr = opens_tab(board, lambda: board.click(f"{ROW} a.chip:has-text('#3')"))
     issue = opens_tab(board, lambda: board.click("text=A bug"))
     term = opens_tab(board, lambda: board.click("button[aria-label='Terminal']"))
 
@@ -264,7 +455,7 @@ def test_deleting_a_session_closes_its_tabs_and_only_its_own(board):
 
 def test_deleting_a_session_asks_before_closing_its_open_pull_request(board):
     board.resume()
-    board.wait_for_selector("a.chip.fail")
+    board.wait_for_selector(f"{ROW} a.chip.fail")
     board.answers.append(False)  # no: the pull request stays open
     board.click("button[aria-label='Delete session']")
     board.wait_for_selector("text=Nobody at work.")
@@ -273,7 +464,7 @@ def test_deleting_a_session_asks_before_closing_its_open_pull_request(board):
     assert not board.actions.exists()
 
     board.resume()
-    board.wait_for_selector("a.chip.fail")
+    board.wait_for_selector(f"{ROW} a.chip.fail")
     board.click("button[aria-label='Delete session']")  # yes, this time
     board.wait_for_selector("text=Nobody at work.")
     for _ in range(50):
@@ -287,11 +478,13 @@ def test_stopping_keeps_the_session_and_its_tab_and_deleting_closes_them(board):
     board.resume()
     session = opens_tab(board, lambda: board.click("button.session"))
     session.on("dialog", lambda d: d.accept())
-    its_pr = opens_tab(board, lambda: board.click("a.chip:has-text('#3')"))
+    its_pr = opens_tab(board, lambda: board.click(f"{ROW} a.chip:has-text('#3')"))
+    session.wait_for_selector(".chips a.chip.fail:has-text('#3')")  # its pull request, on its own page too
     session.click("button[aria-label='Stop session']")
-    session.wait_for_selector("text=exited")  # still open, to read how it ended
+    session.wait_for_selector("text=This session has ended")  # still open, to read how it ended
     board.wait_for_selector("button.session.ended")  # listed still, to resume, and no longer stoppable
     board.wait_for_selector("button[aria-label='Stop session']", state="detached")
+    board.wait_for_selector(".window", state="detached")  # no window: nothing runs
     assert not its_pr.is_closed()
     session.click("button[aria-label='Delete session']")  # its own page asks about #3 too
     closes(session, board)
@@ -336,10 +529,11 @@ def test_shift_drag_selects_while_the_program_has_the_mouse(board):
 
 def test_resolve_starts_a_session_on_the_items_task(board):
     session = opens_tab(board, lambda: board.click("button:has-text('Resolve')"))
-    session.wait_for_selector("text=on: Fix issue #7 now")  # run.sh --run-id <id> --task <task>
-    [s] = json.load(urllib.request.urlopen(board.base + "/api/state"))["sessions"]
-    assert s["kind"] == "run" and session.url.endswith("#" + s["id"])
-    board.wait_for_selector("button.session")
+    session.wait_for_selector(".you:has-text('Fix issue #7 now')")  # the task is the session's first message
+    session.wait_for_selector(".say:has-text('Done with “Fix issue #7 now”.')")
+    [s] = state(board)
+    assert (s["kind"], s["title"]) == ("run", "Fix issue #7 now") and session.url.endswith("/chat#" + s["id"])
+    board.wait_for_selector("button.session:has-text('Fix issue #7 now')")
 
 
 @pytest.mark.parametrize("keys", ["Control+v", "Control+Shift+v"])

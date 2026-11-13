@@ -8,3 +8,8 @@ set -eu
 
 # $AGENT_VERSION is resolved on the host (see agent_version_resolve); empty means latest.
 npm install -g "@github/copilot${AGENT_VERSION:+@$AGENT_VERSION}"
+
+# The GitHub Copilot SDK, which chat.mjs drives the CLI above with for web chats. It lives outside
+# any project; the copy of the runtime it bundles (some 200 MB) goes, since the one above is used.
+npm install --prefix /opt/agent-sdk @github/copilot-sdk
+rm -rf /opt/agent-sdk/node_modules/@github/copilot-sdk-*

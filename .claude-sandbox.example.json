@@ -1,4 +1,7 @@
 {
+  "env": {
+    "PORTS": "3000"
+  },
   "plugins": {
     "data-mounts": {
       "mounts": ["/srv/datasets:/data:ro", "~/scratch:/scratch"]

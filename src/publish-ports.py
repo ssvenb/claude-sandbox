@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""The container half of published ports: offers every port the agent's servers listen on.
+"""The container half of published ports: offers the configured ports the agent's servers listen on.
 
-Usage: publish-ports.py --log FILE [--ignore PORT]... <dir>
+Usage: publish-ports.py --log FILE --port PORT [--port PORT]... <dir>
 
 Watches this container's /proc/net/tcp and tcp6 for listening sockets of any user but root (root
 only runs the sandbox's own helpers: upstream-proxy's forwarder, gcp-auth's metadata server), and
-for each such port listens on <dir>/<port>.sock, relaying every connection to the address the
-server listens on — 127.0.0.1 for a server on every address, so one bound to localhost only is
+for each such port the project configured (PORTS, the --port arguments) listens on
+<dir>/<port>.sock, relaying every connection to the address the server listens on — 127.0.0.1 for a server on every address, so one bound to localhost only is
 published just the same. A port no longer listened on is withdrawn.
 
 <dir> is bind-mounted from the host, where the central port proxy (src/portd.py) gives each
@@ -133,10 +133,10 @@ class Offer:
             pass
 
 
-def watch(directory: str, ignore: set[int], once: bool = False) -> dict[int, Offer]:
+def watch(directory: str, ports: set[int], once: bool = False) -> dict[int, Offer]:
     offers: dict[int, Offer] = {}
     while True:
-        now = {p: a for p, a in listening().items() if p not in ignore}
+        now = {p: a for p, a in listening().items() if p in ports}
         for port in [p for p, o in offers.items() if now.get(p) != o.addr]:
             offers.pop(port).close()
             log(f":{port} withdrawn")
@@ -155,7 +155,8 @@ def watch(directory: str, ignore: set[int], once: bool = False) -> dict[int, Off
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--log", required=True)
-    ap.add_argument("--ignore", type=int, action="append", default=[], metavar="PORT")
+    ap.add_argument("--port", type=int, action="append", required=True, metavar="PORT",
+                    help="a port to publish, when something listens on it; no others are")
     ap.add_argument("dir")
     args = ap.parse_args()
     # Whatever an earlier container of this run left behind is no longer served by anyone.
@@ -170,7 +171,7 @@ def main() -> int:
     os.dup2(devnull, 0)
     os.dup2(out, 1)
     os.dup2(out, 2)
-    watch(args.dir, set(args.ignore))
+    watch(args.dir, set(args.port))
     return 0
 
 

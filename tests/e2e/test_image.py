@@ -283,12 +283,15 @@ def test_ports_the_agent_listens_on_are_offered_to_the_host_out_of_its_reach(ima
     directory run.sh mounts, which the agent itself cannot reach."""
     sockets = tmp_path / "sockets"
     sockets.mkdir()
-    probe = ("python3 -m http.server 8123 --bind 127.0.0.1 >/dev/null 2>&1 & sleep 3\n"
+    probe = ("python3 -m http.server 8123 --bind 127.0.0.1 >/dev/null 2>&1 &\n"
+             "python3 -m http.server 8125 --bind 127.0.0.1 >/dev/null 2>&1 & sleep 3\n"
              "ls /run/ports/sockets >/dev/null 2>&1 && echo reachable")
-    b = boot(image, probe=probe, mounts=[f"{sockets}:/run/ports/sockets"], PORTS_IGNORE="9229")
+    b = boot(image, probe=probe, mounts=[f"{sockets}:/run/ports/sockets"], PORTS="8123 9229")
     assert b.out == ""
     assert (sockets / "8123.sock").is_socket()
+    assert not (sockets / "8125.sock").exists()  # not configured: never published
     assert "## Ports" in b.briefing and "host.docker.internal" in b.briefing
+    assert "TCP ports: 8123, 9229." in b.briefing
 
 
 def test_without_the_ports_mount_nothing_is_published_or_said(image):

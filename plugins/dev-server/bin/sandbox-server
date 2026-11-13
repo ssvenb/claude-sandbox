@@ -1,7 +1,7 @@
 #!/bin/sh
 # sandbox-server start|stop|restart|status|log: the project's server, the command its
 # .claude-sandbox.json names (plugins["dev-server"].command, as $DEV_SERVER_COMMAND), run in /workspace in a
-# session of its own so stop ends everything it started. Its ports are published like any other.
+# session of its own so stop ends everything it started. Its ports are published when listed in PORTS.
 set -eu
 LOG=${SANDBOX_SERVER_LOG:-/tmp/sandbox-server.log}
 PID=${SANDBOX_SERVER_PID:-/tmp/sandbox-server.pid}

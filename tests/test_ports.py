@@ -93,17 +93,15 @@ def test_listening_finds_what_non_root_users_listen_on(tmp_path):
 def test_a_port_listened_on_is_offered_as_a_socket_and_withdrawn_when_it_closes(tmp_path):
     server = tcp_echo(b"svc:")
     port = server.getsockname()[1]
-    offers = publish.watch(str(tmp_path), set(), once=True)
+    offers = publish.watch(str(tmp_path), {port}, once=True)
     assert offers[port].addr == "127.0.0.1"
     conn = socket.socket(socket.AF_UNIX)
     conn.connect(str(tmp_path / f"{port}.sock"))
     assert ask(conn) == b"svc:hi"
     assert (tmp_path / f"{port}.sock").stat().st_mode & 0o777 == 0o666  # the host user connects
-    (tmp_path / "ignoring").mkdir()
-    ignoring = publish.watch(str(tmp_path / "ignoring"), {port}, once=True)
-    assert port not in ignoring
-    for offer in ignoring.values():
-        offer.close()
+    (tmp_path / "unlisted").mkdir()
+    assert publish.watch(str(tmp_path / "unlisted"), set(), once=True) == {}  # only configured ports
+    assert list((tmp_path / "unlisted").iterdir()) == []
     server.close()
     for offer in offers.values():
         offer.close()
@@ -195,12 +193,13 @@ def test_links_name_the_host_the_way_the_page_can_reach_it():
 
 def test_a_run_joins_the_central_proxy_and_the_last_one_out_stops_it(sb, short_tmp):
     sb.env["TMPDIR"] = str(short_tmp)
-    run = sb.bash("ports_start\ncat \"$PORTS_DIR/portd.pid\" >\"$PORTS_DIR/../pid\"\n"
+    run = sb.bash("PORTS='3000  5173'\nports_start\ncat \"$PORTS_DIR/portd.pid\" >\"$PORTS_DIR/../pid\"\n"
                   "for _ in $(seq 50); do [ -s \"$PORTS_DIR/ports.json\" ] && break; sleep 0.1; done\n"
                   "ls \"$PORTS_DIR/runs\"").ok()
     base = short_tmp / f"sandbox-ports-{os.getuid()}-127.0.0.1"
     assert f"{base}/runs/abc123:/run/ports/sockets" in run.mounts
     assert run.env["PORTS_BIND"] == "127.0.0.1"
+    assert run.env["PORTS"] == "3000 5173"
     assert "--add-host=host.docker.internal:host-gateway" in run.args
     assert run.out.split()[-1] == "abc123"
     # The snippet's shell ran its exit hook: the run's directory, and the proxy, are gone.
@@ -224,7 +223,7 @@ def test_a_second_run_shares_the_proxy_and_keeps_it_when_the_first_leaves(sb, sh
         base.joinpath("users").mkdir(parents=True)
         base.joinpath("runs/0a0a0a").mkdir(parents=True)
         (base / f"users/{other.pid}").write_text("0a0a0a\n")
-        sb.bash("ports_start\nports_release\ntrap - EXIT").ok()
+        sb.bash("ports_start\nports_release\ntrap - EXIT", PORTS="3000").ok()
         assert (base / "runs/0a0a0a").is_dir() and (base / "portd.pid").exists()  # still in use
         assert not (base / "runs/abc123").exists()
     finally:
@@ -236,9 +235,18 @@ def test_a_second_run_shares_the_proxy_and_keeps_it_when_the_first_leaves(sb, sh
 
 
 @pytest.mark.parametrize("env, message", [({"PORTS_BIND": "localhost; rm"}, "PORTS_BIND must be an IP"),
-                                          ({"PORTS_IGNORE": "9229,80"}, "PORTS_IGNORE must list port numbers")])
+                                          ({"PORTS": "3000,5173"}, "PORTS must list port numbers"),
+                                          ({"PORTS": "70000"}, "PORTS must list port numbers")])
 def test_settings_that_are_refused(sb, short_tmp, env, message):
     sb.bash("ports_start", TMPDIR=short_tmp, **env).dies(message)
+
+
+def test_without_configured_ports_a_run_opens_none(sb, short_tmp):
+    run = sb.bash("ports_start", TMPDIR=short_tmp).ok()
+    assert "none published" in run.out
+    assert not any("/run/ports" in m for m in run.mounts) and "PORTS" not in run.env
+    assert "--add-host=host.docker.internal:host-gateway" in run.args  # the host is still reachable
+    assert not (short_tmp / f"sandbox-ports-{os.getuid()}-127.0.0.1").exists()  # no proxy
 
 
 def test_web_lists_the_proxys_items_as_live(sb, short_tmp):

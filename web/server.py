@@ -189,6 +189,45 @@ def describe(project):
     return found
 
 
+def run_items(said, run_id):
+    """What the project's plugins put on a run's session row: its own items, run items and
+    section items tied to the run."""
+    items = [*said.get("session_items", []), *said.get("run_items", []),
+             *(i for lst in said.get("lists", []) for i in lst.get("items", []))]
+    return [i for i in items if run_id and i.get("run_id") == run_id]
+
+
+def offers(s):
+    """What deleting session s offers to tidy up: the items of its run carrying an `on_delete`
+    (its open pull request), as the plugins last described the project. Nothing while another
+    session of the run is listed: the run is not over. Caller holds `lock`."""
+    if any(o is not s and (o.project, o.run_id) == (s.project, s.run_id) for o in sessions.values()):
+        return []
+    return [i for i in run_items(described.get(s.project, {}), s.run_id) if isinstance(i.get("on_delete"), dict)]
+
+
+def tidy(s, urls, offered):
+    """For a deleted session: the `on_delete` of each item of its run whose url the page names
+    (its user said yes to each), as `run.sh --web-action`. Only what a plugin offered for this
+    very run, never what the request spells out. Returns what failed, one line each."""
+    failed = []
+    for item in offered:
+        act = item["on_delete"]
+        if item.get("url") not in urls:
+            continue
+        try:
+            done = subprocess.run([str(RUN_SH), "--web-action", str(act["plugin"]), str(act["action"]),
+                                   str(act.get("arg", ""))], cwd=s.project, capture_output=True,
+                                  text=True, timeout=120)
+            if done.returncode:
+                said = done.stderr.strip()
+                failed.append(f"{item.get('ref') or item.get('title')}: "
+                              + (said.splitlines()[-1] if said else "run.sh --web-action failed"))
+        except (OSError, KeyError, subprocess.TimeoutExpired) as e:
+            failed.append(f"{item.get('ref') or item.get('title')}: {e}")
+    return failed
+
+
 def checkout(project, run_id):
     """A run's /workspace on this machine, where a plugin of the project says it keeps one."""
     pattern = described.get(project, {}).get("checkout")
@@ -414,6 +453,14 @@ class Handler(BaseHTTPRequestHandler):
                              "sessions": live})
         elif url.path == "/api/project" and query.get("project") in known:
             self.reply(200, describe(query["project"]))
+        elif m := re.fullmatch(r"/api/sessions/(\w+)/offers", url.path):
+            # What its page asks about before deleting it, one yes/no each.
+            if s := self.session(m[1]):
+                with lock:
+                    found = offers(s)
+                self.reply(200, {"offers": [{k: i.get(k) for k in ("url", "ref", "title")}
+                                            | {"ask": str(i["on_delete"].get("ask") or f"Tidy up {i.get('ref') or i.get('title')} too?")}
+                                            for i in found]})
         elif m := re.fullmatch(r"/api/sessions/(\w+)/stream", url.path):
             if s := self.session(m[1]):
                 self.stream(s)
@@ -452,9 +499,18 @@ class Handler(BaseHTTPRequestHandler):
                 elif m[2] == "stop":  # its container goes, its entry stays: to read, to resume
                     s.stop()
                 else:  # gone from the list, stopped first if it still runs
+                    # The urls of its run's items the page's user said yes to tidying up too.
+                    req = json.loads(body) if body.strip() else {}
+                    urls = req.get("tidy") if isinstance(req, dict) else None
+                    if not isinstance(urls, list):
+                        urls = []
                     s.stop()
                     with lock:
+                        offered = offers(s)
                         drop(s)
+                    failed = tidy(s, urls, offered)
+                    self.reply(200, {"failed": failed})
+                    return
                 self.reply(200, {})
             else:
                 self.reply(404, {"error": "not found"})

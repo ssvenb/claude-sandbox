@@ -161,7 +161,12 @@ async function stop(s) {
 async function remove(s) {
   const what = s.kind === 'shell' ? 'Stop and delete this terminal?' : `Stop and delete ${label(s)} in ${name(s.project)}? Its tabs close too.`;
   if (s.exit === null && !confirm(what)) return;
-  await post(`/api/sessions/${s.id}/delete`).catch(e => alert(e.message));
+  // What a plugin offers to tidy up with it (its run's open pull request: close it) is asked
+  // about one by one, and done only on a yes.
+  const {offers} = await api(`/api/sessions/${s.id}/offers`).catch(() => ({offers: []}));
+  const tidy = offers.filter(o => confirm(o.ask)).map(o => o.url);
+  const done = await post(`/api/sessions/${s.id}/delete`, JSON.stringify({tidy})).catch(e => alert(e.message));
+  if (done?.failed?.length) alert('Not done:\n' + done.failed.join('\n'));
   tabs.postMessage(s);
   window.close();
   refresh();  // still here: this tab was not opened by the status page, so it may not close itself

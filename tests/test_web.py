@@ -367,3 +367,31 @@ def test_the_agent_status_hook_writes_its_state_to_the_agents_terminal(event, sa
     found = web.STATUS.findall(got)
     assert [base64.b64decode(f) for f in found] == ([said] if said else [])
     assert got.endswith(b"rc=0\r\n")
+
+
+def test_deleting_tidies_up_only_what_a_plugin_offered_for_that_run(tmp_path, monkeypatch):
+    """offers(): the run's items with an on_delete, none while another session of the run is
+    listed; tidy(): runs `run.sh --web-action` for those of them the page's user said yes to."""
+    from types import SimpleNamespace as NS
+    log = tmp_path / "actions"
+    run_sh = tmp_path / "run.sh"
+    run_sh.write_text(f'#!/bin/sh\necho "$*" >>"{log}"\n[ "$4" != 9 ] || {{ echo "❌ gh pr close: gone" >&2; exit 1; }}\n')
+    run_sh.chmod(0o755)
+    monkeypatch.setattr(web, "RUN_SH", run_sh)
+    close = lambda n: {"plugin": "github-auth", "action": "close-pr", "arg": n, "ask": f"Close #{n}?"}  # noqa: E731
+    monkeypatch.setitem(web.described, str(tmp_path), {"lists": [], "run_items": [
+        {"ref": "#3", "url": "u3", "run_id": "0a1b2c", "on_delete": close("3")},
+        {"ref": "#9", "url": "u9", "run_id": "0a1b2c", "on_delete": close("9")},
+        {"ref": "#2", "url": "u2", "run_id": "0a1b2c"},                          # merged: nothing to do
+        {"ref": "#4", "url": "u4", "run_id": "ffffff", "on_delete": close("4")},  # another run's
+    ]})
+    s = NS(id="a", project=str(tmp_path), run_id="0a1b2c")
+    other = NS(id="b", project=str(tmp_path), run_id="0a1b2c")
+    monkeypatch.setattr(web, "sessions", {"a": s, "b": other})
+    assert web.offers(s) == []  # the run goes on in its other session
+    monkeypatch.setattr(web, "sessions", {"a": s})
+    offered = web.offers(s)
+    assert [i["ref"] for i in offered] == ["#3", "#9"]
+    assert web.tidy(s, ["u3", "u4", "u2"], offered) == []  # only #3: u4 is not this run's, u2 offers nothing
+    assert log.read_text() == "--web-action github-auth close-pr 3\n"
+    assert web.tidy(s, ["u9"], offered) == ["#9: ❌ gh pr close: gone"]

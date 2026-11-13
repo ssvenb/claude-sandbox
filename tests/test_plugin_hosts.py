@@ -566,13 +566,14 @@ def test_upstream_proxy_on_docker_desktop_forwards_per_container(proxy_sb):
 
 # --- web stages: what plugins put on the web UI's status page ------------------------------
 
-GH_STUB = """case $1 in
-  pr) echo '[{"number": 3, "title": "t", "url": "u3", "headRefName": "claude-code/20261112-09fc4c", "isDraft": true,
+GH_STUB = r"""case "$*" in
+  *--state\ merged*) echo '[{"number": 2, "title": "m", "url": "u2", "headRefName": "claude-code/20261111-0a0a0a"}]' ;;
+  pr\ *) echo '[{"number": 3, "title": "t", "url": "u3", "headRefName": "claude-code/20261112-09fc4c", "isDraft": true,
               "statusCheckRollup": [{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SUCCESS"},
                                     {"__typename": "CheckRun", "status": "IN_PROGRESS", "conclusion": ""}]},
              {"number": 4, "title": "by hand", "url": "u4", "headRefName": "feature/login", "isDraft": false,
               "statusCheckRollup": []}]' ;;
-  issue) echo '[{"number": 7, "title": "i", "url": "u7"}]' ;;
+  issue\ *) echo '[{"number": 7, "title": "i", "url": "u7"}]' ;;
 esac
 """
 
@@ -594,11 +595,17 @@ def test_github_lists_pull_requests_and_issues_and_git_workspace_ties_them_to_ru
     assert described("github-auth git-workspace")["lists"] == []  # no origin: nothing to ask GitHub
     subprocess.run(["git", "-C", sb.cwd, "remote", "add", "origin", "https://github.com/o/r"], check=True)
     sb.stub("gh", GH_STUB)
-    prs, issues = described("github-auth git-workspace")["lists"]
-    assert prs == {"title": "Pull requests", "items": [
-        {"ref": "#3", "title": "t", "url": "u3", "branch": "claude-code/20261112-09fc4c",
+    said = described("github-auth git-workspace")
+    [issues] = said["lists"]  # pull requests have no section: they show on their run's row only
+    close = lambda n, t: {"action": "close-pr", "arg": n, "plugin": "github-auth",  # noqa: E731
+                          "ask": f'Pull request #{n}, "{t}", is still open. Close it on GitHub too? (Cancel leaves it open.)'}
+    assert said["run_items"] == [
+        {"ref": "#3", "title": "t", "url": "u3", "branch": "claude-code/20261112-09fc4c", "on_delete": close("3", "t"),
          "note": "Draft", "status": "pending", "status_text": "CI: 1 of 2 checks running", "run_id": "09fc4c"},
-        {"ref": "#4", "title": "by hand", "url": "u4", "branch": "feature/login"}]}
+        {"ref": "#4", "title": "by hand", "url": "u4", "branch": "feature/login", "on_delete": close("4", "by hand")},
+        # merged: shown on its run's row as done, with nothing left to close
+        {"ref": "#2", "title": "m", "url": "u2", "branch": "claude-code/20261111-0a0a0a",
+         "note": "Merged", "status": "done", "status_text": "Merged", "run_id": "0a0a0a"}]
     [issue] = issues["items"]
     assert issues["title"] == "Issues" and {k: issue[k] for k in ("ref", "title", "url")} == {
         "ref": "#7", "title": "i", "url": "u7"}
@@ -610,7 +617,7 @@ def test_github_lists_pull_requests_and_issues_and_git_workspace_ties_them_to_ru
     # …and to stay with its pull request until CI is green.
     assert "gh pr checks --watch" in task and "until all checks are green" in task
     # Without git-workspace nobody claims the branch, so the page offers no resume.
-    assert "run_id" not in described("github-auth")["lists"][0]["items"][0]
+    assert "run_id" not in described("github-auth")["run_items"][0]
 
 
 def test_a_failing_gh_becomes_a_note_on_the_page(sb, described):
@@ -618,7 +625,8 @@ def test_a_failing_gh_becomes_a_note_on_the_page(sb, described):
     subprocess.run(["git", "-C", sb.cwd, "remote", "add", "origin", "https://github.com/o/r"], check=True)
     sb.stub("gh", "echo 'gh: not logged in' >&2; exit 4\n")
     said = described("github-auth")
-    assert said["lists"] == [] and said["notes"] == ["gh pr list: gh: not logged in", "gh issue list: gh: not logged in"]
+    assert said["lists"] == said["run_items"] == []
+    assert said["notes"] == ["gh pr list: gh: not logged in", "gh issue list: gh: not logged in"]
 
 
 def test_the_kernel_puts_items_in_sections_or_on_a_runs_session_row(sb):
@@ -627,12 +635,37 @@ def test_the_kernel_puts_items_in_sections_or_on_a_runs_session_row(sb):
     out = sb.tmp / "web.json"
     sb.bash("""web_list Builds '[{"title": "a", "url": "ua", "job": "x/0a1b2c"}, {"title": "b", "url": "ub"}]'
 web_session_item 0a1b2c '{"title": "Preview", "url": "up", "ref": "app"}'
+PLUGIN_NAME=builds web_run_items '[{"title": "c", "url": "uc", "job": "y/0a1b2c", "on_delete": {"action": "cancel", "arg": "c"}},
+                                   {"title": "d", "url": "ud"}]'
 web_tie_items '(.job // "") | split("/") | .[1]'
 printf '%s' "$WEB_JSON" >'""" + str(out) + "'").ok()
     said = json.loads(out.read_text())
     assert said["lists"] == [{"title": "Builds", "items": [
         {"title": "a", "url": "ua", "job": "x/0a1b2c", "run_id": "0a1b2c"}, {"title": "b", "url": "ub"}]}]
     assert said["session_items"] == [{"title": "Preview", "url": "up", "ref": "app", "run_id": "0a1b2c"}]
+    # Run items: tied the same way; each on_delete names the plugin that will do it.
+    assert said["run_items"] == [{"title": "c", "url": "uc", "job": "y/0a1b2c", "run_id": "0a1b2c",
+                                  "on_delete": {"action": "cancel", "arg": "c", "plugin": "builds"}},
+                                 {"title": "d", "url": "ud"}]
+
+
+def test_a_web_action_runs_in_its_plugin_alone_and_fails_unless_done(sb):
+    """plugins_web_action sources one enabled plugin's web.sh with WEB_ACTION set; it must say
+    web_action_done, else the run fails with its first note."""
+    subprocess.run(["git", "init", "-q", sb.cwd], check=True)
+    subprocess.run(["git", "-C", sb.cwd, "remote", "add", "origin", "https://github.com/o/r"], check=True)
+    log = sb.tmp / "gh.log"
+    sb.stub("gh", f'echo "$*" >>"{log}"; [ "$3" != 9 ] || {{ echo "no such pull request" >&2; exit 1; }}\n')
+    act = lambda *args, plugins="github-auth git-workspace": sb.bash(  # noqa: E731
+        f"ENABLED_PLUGINS='{plugins}'\nplugins_web_action " + " ".join(args))
+    act("github-auth", "close-pr", "3").ok()
+    assert log.read_text().splitlines() == [
+        "pr close 3 --comment Closed from the sandbox's web UI, with the session that worked on it."]
+    act("github-auth", "close-pr", "9").dies("gh pr close: no such pull request")
+    act("github-auth", "merge-pr", "3").dies("no web action")
+    act("github-auth", "close-pr", "'3; rm -rf /'").dies("not a pull request number")
+    act("github-auth", "close-pr", "3", plugins="git-workspace").dies("not enabled")
+    assert len(log.read_text().splitlines()) == 2  # nothing ran gh for the refused ones
 
 
 def test_agent_workspace_tells_the_page_where_a_runs_checkout_is(sb, described):
@@ -655,8 +688,8 @@ def test_a_pull_requests_ci_status(sb, described, rollup, status):
     subprocess.run(["git", "init", "-q", sb.cwd], check=True)
     subprocess.run(["git", "-C", sb.cwd, "remote", "add", "origin", "https://github.com/o/r"], check=True)
     pr = {"number": 1, "title": "t", "url": "u", "headRefName": "b", "isDraft": False, "statusCheckRollup": rollup}
-    sb.stub("gh", f"[ $1 = pr ] && echo '{json.dumps([pr])}' || echo '[]'\n")
-    [item] = described("github-auth")["lists"][0]["items"]
+    sb.stub("gh", f"case \"$*\" in pr*merged*) echo '[]' ;; pr*) echo '{json.dumps([pr])}' ;; *) echo '[]' ;; esac\n")
+    [item] = described("github-auth")["run_items"]
     assert (item.get("status"), item.get("status_text")) == (status or (None, None))
 
 

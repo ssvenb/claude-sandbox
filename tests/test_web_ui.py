@@ -361,7 +361,8 @@ def test_a_session_has_one_tab_with_a_lamp_in_the_colour_of_what_its_agent_does(
     tab.wait_for_selector("text=Session ended")
     tab.wait_for_function("decodeURIComponent(document.querySelector('link[rel=icon]').href).includes('stroke')")
     assert tab.is_disabled("#input")
-    board.wait_for_selector("details.ended summary:has-text('1 ended')")  # folded away on its project's panel
+    board.wait_for_selector("details.ended summary")  # folded away on its project's panel
+    assert board.inner_text("details.ended summary") == "Ended"  # never how many
     board.click("details.ended summary")
     board.wait_for_selector("button[aria-label='Resume session']")
     with tab.expect_navigation():  # resuming takes this tab to the run's new session

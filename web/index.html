@@ -721,7 +721,7 @@ function render() {
     if (!ended.length) return '';
     const fold = h('details', {className: 'ended', open: unfolded.has(path),
                                ontoggle: () => { fold.open ? unfolded.add(path) : unfolded.delete(path); }},
-      h('summary', {}, `${ended.length} ended`),
+      h('summary', {}, 'Ended'),
       h('ul', {}, ...ended.map(s => {
         const play = h('button', {className: 'icon play', onclick: () => busy(play, () => start(path, 'resume', s.run_id)), ariaLabel: 'Resume session',
                                   title: 'Resume'}, ICON.play());

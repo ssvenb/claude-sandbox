@@ -30,7 +30,7 @@ want to build without running.
 ```bash
 mkdir -p ~/.config/claude-sandbox
 printf '%s\n' ~/code/my-repo ~/code/other-repo > ~/.config/claude-sandbox/projects
-./web/server.py           # http://127.0.0.1:8787  (--port N, --projects FILE)
+./web/server.py           # http://127.0.0.1:8787  (--port N, --projects FILE, --allow-host NAME)
 ```
 
 The home page is a dashboard of all your sandboxes: totals across them, then every listed project

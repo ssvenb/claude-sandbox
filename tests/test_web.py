@@ -113,6 +113,16 @@ def test_a_network_bind_admits_this_machines_own_names_only():
     assert "evil.example" not in names
     assert web.local_names("127.0.0.1") == {"127.0.0.1", "localhost"}
 
+
+def test_allow_host_adds_a_name_to_the_allowlist(tmp_path):
+    server = web.serve(0, tmp_path / "projects", allow_hosts=["box.vpn.example"])
+    try:
+        port = server.server_address[1]
+        assert {f"box.vpn.example:{port}", f"127.0.0.1:{port}"} <= server.hosts
+        assert f"evil.example:{port}" not in server.hosts
+    finally:
+        server.server_close()
+
 def test_the_session_page_is_served_next_to_the_status_page(ui):
     assert b"/api/project" in ui("/").read()
     assert b"/stream" in ui("/session").read()

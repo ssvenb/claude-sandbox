@@ -8,7 +8,7 @@ Runs on the HOST, as you, next to run.sh — a session is `run.sh` in a pty with
 cwd, exactly what you would type yourself. Standard library only; the page loads xterm.js from a
 CDN. Terminal output goes out as server-sent events, keystrokes come back as POSTs.
 
-    web/server.py [--port 8787] [--bind 127.0.0.1] [--projects FILE]
+    web/server.py [--port 8787] [--bind 127.0.0.1] [--allow-host NAME]... [--projects FILE]
 
 FILE lists one project directory per line (default ~/.config/claude-sandbox/projects) and is
 re-read on every request. A line may be a glob (`~/code/*`); a match ending in `.git` stands for
@@ -510,14 +510,14 @@ def local_names(bind):
     return names | {a for a in out.split() if ":" not in a}  # 0.0.0.0 is IPv4 only
 
 
-def serve(port, projects_file, bind="127.0.0.1"):
+def serve(port, projects_file, bind="127.0.0.1", allow_hosts=()):
     # Loopback by default: there is no login, so anyone who can reach the port can start
     # sandboxes as you. --bind 0.0.0.0 opens it to your network; the Host allowlist still
-    # names only this machine's own addresses, so DNS rebinding stays blocked.
+    # names only this machine's own addresses (plus any --allow-host), so DNS rebinding stays blocked.
     server = ThreadingHTTPServer((bind, port), Handler)
     server.daemon_threads = True
     port = server.server_address[1]
-    server.hosts = {f"{name}:{port}" for name in local_names(bind)}
+    server.hosts = {f"{name}:{port}" for name in local_names(bind) | set(allow_hosts)}
     server.projects_file = projects_file
     return server
 
@@ -527,11 +527,13 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--bind", default="127.0.0.1",
                         help="address to listen on; 0.0.0.0 for every interface (default: %(default)s)")
+    parser.add_argument("--allow-host", action="append", default=[], metavar="NAME",
+                        help="another name the page may be opened by, e.g. a VPN's DNS name (repeatable)")
     parser.add_argument("--projects", type=Path,
                         default=Path.home() / ".config/claude-sandbox/projects",
                         help="file listing one project directory per line (default: %(default)s)")
     args = parser.parse_args()
-    server = serve(args.port, args.projects, args.bind)
+    server = serve(args.port, args.projects, args.bind, args.allow_host)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # so `finally` cleans up on a plain kill too
     print(f"Sandboxes: http://127.0.0.1:{server.server_address[1]}  (projects: {args.projects})",
           flush=True)

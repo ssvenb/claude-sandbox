@@ -1,4 +1,4 @@
-"""The plugin and agent manifests, and the invariants CLAUDE.md states about them."""
+"""The plugin and agent manifests, and the invariants they must keep."""
 import json
 import re
 import subprocess

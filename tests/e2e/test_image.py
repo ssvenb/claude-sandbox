@@ -159,6 +159,7 @@ def test_github_auth_logs_gh_in_with_the_minted_token(image):
     assert b.out.splitlines() == ["auth login --hostname github.com --with-token | ghs_e2e",
                                   "config set -h github.com user e2e-bot",
                                   "auth setup-git --hostname github.com"]
+    assert "gh pr create" in b.briefing and "until every check is green" in b.briefing
 
 
 def test_ca_certs_joins_the_trust_store(image):

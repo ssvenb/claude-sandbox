@@ -191,6 +191,32 @@ def test_the_page_gets_what_the_projects_plugins_describe(ui):
     assert ui("/api/project?project=/etc").status == 404
 
 
+def test_a_projects_settings_are_read_and_saved_to_its_claude_sandbox_json(ui):
+    file = ui.tmp / "proj/.claude-sandbox.json"
+    got = json.load(ui("/api/config?project=" + ui.project))
+    assert (got["file"], got["exists"], got["config"]) == (str(file), False, {})
+    kvm = next(p for p in got["plugins"] if p["name"] == "kvm")  # every plugin, as its manifest says
+    assert kvm["defaultEnabled"] is False and kvm["description"] and "briefing" in kvm["example"]
+
+    config = {"env": {"CLAUDE_EFFORT": "high"}, "plugins": {"kvm": {"enabled": True, "briefing": "VMs"}},
+              "mine": [1]}  # whatever else the file holds is the page's to keep
+    saved = json.load(ui("/api/config", json.dumps({"project": ui.project, "config": config}).encode()))
+    assert saved["exists"] and saved["config"] == config == json.loads(file.read_text())
+    assert file.read_text().endswith("}\n") and list((ui.tmp / "proj").iterdir()) == [file]
+
+    for bad in ([], {"plugins": []}, {"plugins": {"kvm": "on"}}, {"plugins": {"kvm": {"enabled": "maybe"}}},
+                {"env": {"AGENT": ["claude"]}}):
+        assert ui("/api/config", json.dumps({"project": ui.project, "config": bad}).encode()).status == 400
+    assert json.loads(file.read_text()) == config  # none of them touched it
+    assert ui("/api/config", json.dumps({"project": "/etc", "config": {}}).encode()).status == 400
+    assert ui("/api/config?project=/etc").status == 404
+    assert ui("/api/config", json.dumps({"project": ui.project, "config": {}}).encode(),
+              Origin="http://evil.example").status == 403
+
+    file.write_text("{not json")  # not ours to overwrite: fixed by hand first
+    assert "not valid JSON" in json.load(ui("/api/config?project=" + ui.project))["error"]
+
+
 def test_a_runs_checkout_is_found_where_a_plugin_says_it_is(tmp_path, monkeypatch):
     (tmp_path / "proj-20261112-0a1b2c").mkdir()
     monkeypatch.setitem(web.described, "/proj", {"checkout": f"{tmp_path}/*-{{run_id}}"})

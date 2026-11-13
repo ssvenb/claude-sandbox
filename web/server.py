@@ -41,6 +41,9 @@ from urllib.parse import parse_qs, urlparse
 
 HERE = Path(__file__).resolve().parent
 RUN_SH = HERE.parent / "run.sh"
+PLUGINS = HERE.parent / "plugins"
+EXAMPLE = HERE.parent / ".claude-sandbox.example.json"  # what each plugin's section may hold
+CONFIG = ".claude-sandbox.json"  # a project's own sandbox configuration, next to its checkout
 RUN_ID = re.compile(r"[0-9a-f]{6}")
 SCROLLBACK = 256 * 1024  # bytes replayed to a browser that (re)opens a terminal
 KEEPALIVE = 15  # seconds between keepalives on a terminal's stream: how soon a closed tab is let go
@@ -188,6 +191,76 @@ def describe(project):
         found = {"lists": [], "notes": [str(e)]}
     described[project] = found
     return found
+
+
+def plugin_manifests():
+    """Every plugin the sandbox ships, as its manifest says, for the page's configuration dialog,
+    with its section from the example config as a hint of what it reads."""
+    try:
+        example = json.loads(EXAMPLE.read_text()).get("plugins", {})
+    except (OSError, ValueError):
+        example = {}
+    found = []
+    for manifest in sorted(PLUGINS.glob("*/plugin.json")):
+        try:
+            meta = json.loads(manifest.read_text())
+        except (OSError, ValueError):
+            continue
+        name = manifest.parent.name
+        found.append({"name": name, "description": meta.get("description", ""),
+                      "defaultEnabled": bool(meta.get("defaultEnabled")),
+                      "requiredAgent": meta.get("requiredAgent"), "example": example.get(name)})
+    return found
+
+
+def read_config(project):
+    """A project's .claude-sandbox.json: what it holds now ({} without one), and where it is."""
+    path = Path(project) / CONFIG
+    try:
+        config = json.loads(path.read_text())
+    except FileNotFoundError:
+        config = {}
+    except ValueError as e:
+        raise ValueError(f"{path} is not valid JSON ({e}): fix it by hand first")
+    if not isinstance(config, dict):
+        raise ValueError(f"{path} must hold a JSON object: fix it by hand first")
+    return {"file": str(path), "exists": path.exists(), "config": config, "plugins": plugin_manifests()}
+
+
+def check_config(config):
+    """What run.sh would refuse, refused before it lands in the file (it reads the rest itself)."""
+    if not isinstance(config, dict):
+        raise ValueError("the configuration must be a JSON object")
+    plugins = config.get("plugins", {})
+    if not isinstance(plugins, dict):
+        raise ValueError(".plugins must be an object keyed by plugin name")
+    for name, section in plugins.items():
+        if not isinstance(section, dict):
+            raise ValueError(f".plugins[\"{name}\"] must be an object")
+        if section.get("enabled", True) not in (True, False, 0, 1):
+            raise ValueError(f".plugins[\"{name}\"].enabled must be true or false")
+    env = config.get("env", {})
+    if not isinstance(env, dict) or any(isinstance(v, (dict, list)) for v in env.values()):
+        raise ValueError(".env must be an object of scalar values")
+
+
+def write_config(project, config):
+    """Replaces the project's .claude-sandbox.json in one step, so run.sh never reads half a file."""
+    check_config(config)
+    path = Path(project) / CONFIG
+    fd, tmp = tempfile.mkstemp(dir=project, prefix=f".{CONFIG}.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(config, f, indent=2)
+            f.write("\n")
+        try:
+            os.chmod(tmp, path.stat().st_mode & 0o777)
+        except FileNotFoundError:
+            os.chmod(tmp, 0o644)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def run_items(said, run_id):
@@ -468,6 +541,11 @@ class Handler(BaseHTTPRequestHandler):
                              "sessions": live})
         elif url.path == "/api/project" and query.get("project") in known:
             self.reply(200, describe(query["project"]))
+        elif url.path == "/api/config" and query.get("project") in known:
+            try:
+                self.reply(200, read_config(query["project"]))
+            except ValueError as e:
+                self.reply(400, {"error": str(e)})
         elif m := re.fullmatch(r"/api/sessions/(\w+)/offers", url.path):
             # What its page asks about before deleting it, one yes/no each.
             if s := self.session(m[1]):
@@ -494,6 +572,12 @@ class Handler(BaseHTTPRequestHandler):
                 if req.get("project") not in projects(self.server.projects_file):
                     raise ValueError("not a configured project")
                 self.reply(200, start(req["project"], req.get("kind"), req.get("run_id"), req.get("task")).json())
+            elif url.path == "/api/config":
+                req = json.loads(body)
+                if req.get("project") not in projects(self.server.projects_file):
+                    raise ValueError("not a configured project")
+                write_config(req["project"], req.get("config"))
+                self.reply(200, read_config(req["project"]))
             elif url.path == "/api/vscode":
                 # Only a folder this UI already knows: a session's checkout, as its plugins said.
                 with lock:

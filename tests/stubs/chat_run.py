@@ -11,6 +11,7 @@ that thinks, runs tools and answers. What the prompt says picks the turn:
     "ask"   it asks a question with two choices and says which was picked
     "fail"  a tool fails and the turn ends in an error
     "long"  it keeps working until interrupted
+    "background"  it leaves two tasks running in the background, until each is stopped
     "exit"  the sandbox goes away with status 3
 """
 import base64
@@ -83,6 +84,7 @@ emit(type="status", state="idle")
 
 stop = threading.Event()
 answers = {}
+tasks = []  # what runs in the background
 turns = 0
 
 
@@ -104,6 +106,13 @@ def turn(text):
         stop.clear()
         emit(type="result", id=f"b{n}", output="Interrupted", error=True)
         emit(type="notice", level="info", text="Interrupted.")
+    elif "background" in text:
+        emit(type="tool", id=f"b{n}", name="Bash", input={"command": "npm run dev", "run_in_background": True})
+        emit(type="result", id=f"b{n}", output="Command running in background", error=False)
+        tasks.extend([{"id": f"bg{n}a", "kind": "shell", "text": "npm run dev"},
+                      {"id": f"bg{n}b", "kind": "agent", "text": "Check the callers", "note": "Reading src/app.py"}])
+        emit(type="tasks", items=tasks)
+        say(f"a{n}", "Both run in the background.")
     elif "ask" in text:
         emit(type="ask", id=f"q{n}", questions=[{"question": "Which database?", "header": "Storage", "multi": False,
              "options": [{"label": "SQLite", "description": "One file, no server."},
@@ -162,3 +171,6 @@ for line in sys.stdin:
         answers[command["id"]] = None if command.get("cancel") else command.get("answers")
     elif command["type"] in ("model", "effort"):
         emit(**command)
+    elif command["type"] == "task":
+        tasks[:] = [t for t in tasks if t["id"] != command["id"]]
+        emit(type="tasks", items=tasks)

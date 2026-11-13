@@ -200,6 +200,28 @@ class Session:
                 "items": live_items(self.project, self.run_id) if self.exit is None and self.kind != "shell" else []}
 
 
+IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
+IMAGES, IMAGE_BYTES = 8, 5 << 20  # to a prompt, and each one's size: what the model's API takes
+
+
+def pictures(images):
+    """The pictures pasted into a prompt, checked: each its media type and its bytes in base64."""
+    if images is None:
+        return []
+    if not isinstance(images, list) or len(images) > IMAGES:
+        raise ValueError(f"a prompt takes up to {IMAGES} images")
+    for p in images:
+        if not isinstance(p, dict) or p.get("type") not in IMAGE_TYPES or not isinstance(p.get("data"), str):
+            raise ValueError("an image is a PNG, JPEG, GIF or WebP")
+        if len(p["data"]) * 3 // 4 > IMAGE_BYTES:
+            raise ValueError("an image is at most 5 MB")
+        try:
+            base64.b64decode(p["data"], validate=True)
+        except ValueError:
+            raise ValueError("an image's data is base64") from None
+    return [{"type": p["type"], "data": p["data"]} for p in images]
+
+
 def tool_label(name, given):
     """A tool call in a few words, for a session's row: what it runs, reads or looks for."""
     given = given if isinstance(given, dict) else {}
@@ -216,11 +238,12 @@ class Chat(Session):
     conversation; streamed text is folded into the block it belongs to on the way in."""
     ui = "chat"
 
-    def __init__(self, project, kind, run_id, task=None):
+    def __init__(self, project, kind, run_id, task=None, images=None):
         self.id = secrets.token_hex(4)
         self.project, self.kind, self.run_id = project, kind, run_id
         self.started, self.exit = time.time(), None
         self.listeners, self.events = [], []
+        self.tasks = []  # what its agent runs in the background right now
         self.ready, self.state, self.waiting = False, "idle", []  # prompts typed before `ready`
         self.info, self.todos, self.suggestion = {}, [], None
         self.title = self.activity = self.said = ""
@@ -231,8 +254,8 @@ class Chat(Session):
                                      start_new_session=True)  # a group of its own, to stop as one
         self.pid = self.proc.pid
         threading.Thread(target=self._pump, daemon=True).start()
-        if task:
-            self.prompt(task)
+        if task or images:
+            self.prompt(task or "", images)
 
     def _pump(self):
         for raw in self.proc.stdout:
@@ -252,7 +275,7 @@ class Chat(Session):
                     self._take({"type": "boot", "text": text})
         code = self.proc.wait()
         with lock:
-            self.exit = code
+            self.exit, self.tasks = code, []
             self._tell({"type": "exit", "code": code}, keep=True)
             for q in self.listeners:
                 q.put(None)
@@ -312,7 +335,7 @@ class Chat(Session):
                 waiting, self.waiting = self.waiting, []
                 for prompt in waiting:
                     prompt.pop("queued", None)
-                    self._send({"type": "prompt", "text": prompt["text"]})
+                    self._send({"type": "prompt", **{k: prompt[k] for k in ("text", "images") if k in prompt}})
                     self._tell({"type": "sent", "id": prompt["id"]})
                 if waiting:
                     self.state = "working"
@@ -323,6 +346,9 @@ class Chat(Session):
             return self._tell(e)
         if kind == "todos":
             self.todos = e.get("items") if isinstance(e.get("items"), list) else []
+            return self._tell(e)
+        if kind == "tasks":  # the whole set each time: a page opened later gets the latest
+            self.tasks = [t for t in e.get("items") or [] if isinstance(t, dict)] if isinstance(e.get("items"), list) else []
             return self._tell(e)
         if kind == "suggestion":
             self.suggestion = e.get("text")
@@ -348,19 +374,21 @@ class Chat(Session):
         except (OSError, ValueError):  # it ended under us: the exit event says so
             pass
 
-    def prompt(self, text):
-        """A message of the user's: to the agent at once, or kept until it is ready."""
-        if not isinstance(text, str) or not text.strip():
+    def prompt(self, text, images=None):
+        """A message of the user's, with the pictures pasted into it: to the agent at once, or kept
+        until it is ready."""
+        images = pictures(images)
+        if not isinstance(text, str) or not (text.strip() or images):
             raise ValueError("a prompt is text")
         with lock:
             if self.exit is not None:
                 raise ValueError("this session has ended: resume it to go on")
             self.sent += 1
-            event = {"type": "user", "id": f"u{self.sent}", "text": text}
-            self.title = self.title or " ".join(text.split())[:140]
+            event = {"type": "user", "id": f"u{self.sent}", "text": text, **({"images": images} if images else {})}
+            self.title = self.title or " ".join(text.split())[:140] or "Image"
             self.suggestion = None
             if self.ready:
-                self._send({"type": "prompt", "text": text})
+                self._send({"type": "prompt", "text": text, **({"images": images} if images else {})})
                 self.state = "working"
             else:
                 event["queued"] = True
@@ -369,7 +397,7 @@ class Chat(Session):
             self._tell({"type": "status", "state": self.status()})
 
     def tell(self, command):
-        """interrupt, answer, model, effort: straight to the bridge, which knows what they mean."""
+        """interrupt, answer, model, effort, task: straight to the bridge, which knows what they mean."""
         with lock:
             if command.get("type") == "answer":
                 for ask in self.events:
@@ -380,7 +408,7 @@ class Chat(Session):
 
     def snapshot(self):
         """Everything a page needs to draw the session from nothing. Caller holds `lock`."""
-        return {"type": "snapshot", "events": self.events, "info": self.info, "todos": self.todos,
+        return {"type": "snapshot", "events": self.events, "info": self.info, "todos": self.todos, "tasks": self.tasks,
                 "suggestion": self.suggestion, "ready": self.ready, "status": self.status(), "session": self.json()}
 
     def write(self, data):
@@ -745,13 +773,16 @@ def drop(s):
         s.close()
 
 
-def start(project, kind, run_id, task=None, ui=None):
+def start(project, kind, run_id, task=None, ui=None, images=None):
     """A new session, or the live one it would double. An agent's session is a chat unless
     `ui` is "terminal" (its own TUI in a pty, as `run.sh` in your terminal); a shell is a terminal."""
     if ui not in (None, "chat", "terminal"):
         raise ValueError("ui must be chat or terminal")
-    if task is not None and (kind != "run" or not isinstance(task, str) or not task.strip()):
+    images = pictures(images)
+    if (task is not None or images) and (kind != "run" or not isinstance(task or "", str) or not ((task or "").strip() or images)):
         raise ValueError("a task starts a new run, and is text")
+    if images and ui == "terminal":
+        raise ValueError("a terminal takes no images")
     if kind == "run":
         run_id = secrets.token_hex(3)
     elif kind == "shell":
@@ -769,7 +800,7 @@ def start(project, kind, run_id, task=None, ui=None):
                 return s
             if kind == "shell":
                 drop(s)
-        s = (Session if kind == "shell" or ui == "terminal" else Chat)(project, kind, run_id, task)
+        s = (Session if kind == "shell" or ui == "terminal" else Chat)(project, kind, run_id, task, *([images] if images else []))
         sessions[s.id] = s
         return s
 
@@ -918,7 +949,7 @@ class Handler(BaseHTTPRequestHandler):
                 if req.get("project") not in projects(self.server.projects_file):
                     raise ValueError("not a configured project")
                 self.reply(200, start(req["project"], req.get("kind"), req.get("run_id"), req.get("task"),
-                                      req.get("ui")).json())
+                                      req.get("ui"), req.get("images")).json())
             elif url.path == "/api/config":
                 req = json.loads(body)
                 if req.get("project") not in projects(self.server.projects_file):
@@ -934,7 +965,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("no such session, or it has no checkout on this machine")
                 vscode()
                 self.reply(200, {"folder": folder})
-            elif m := re.fullmatch(r"/api/sessions/(\w+)/(prompt|interrupt|answer|model|effort)", url.path):
+            elif m := re.fullmatch(r"/api/sessions/(\w+)/(prompt|interrupt|answer|model|effort|task)", url.path):
                 s = self.session(m[1])
                 if s is None:
                     return
@@ -944,7 +975,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(req, dict):
                     raise ValueError("the request must be a JSON object")
                 if m[2] == "prompt":
-                    s.prompt(req.get("text"))
+                    s.prompt(req.get("text"), req.get("images"))
                 else:  # only the fields a bridge reads, under the name the path gave
                     s.tell({"type": m[2], **{k: req[k] for k in ("id", "answers", "cancel", "level") if k in req}})
                 self.reply(200, {})

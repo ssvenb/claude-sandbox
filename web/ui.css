@@ -130,3 +130,12 @@ a.chip.done { border-color: color-mix(in srgb, var(--ask) 45%, transparent); }
   .lamp, .spin, button.busy::after { animation-duration: 0s !important; animation-iteration-count: 1 !important; }
   .lamp.starting, .spin, button.busy::after { animation: none !important; border-top-color: currentColor; }
 }
+
+/* Pictures pasted into a message, before it is sent and after. */
+.shots { display: flex; flex-wrap: wrap; gap: 8px; }
+.shots:empty { display: none; }
+.shots img { display: block; height: 56px; max-width: 160px; object-fit: cover; border-radius: 8px; border: 1px solid var(--rule); background: var(--sunk); }
+.shot { position: relative; }
+.shot button { position: absolute; top: -7px; right: -7px; width: 20px; height: 20px; padding: 0; display: grid; place-items: center;
+               font-size: 10px; line-height: 1; background: var(--panel); border-color: var(--rule); color: var(--muted); }
+.shot button:hover { color: var(--fail); }

@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 
 const lib = process.env.SANDBOX_LIB || '/usr/local/lib/sandbox';
-const { emit, clip, sdk, commands, executable, questions } = await import(`${lib}/chat-bridge.mjs`);
+const { emit, clip, sdk, commands, executable, questions, images } = await import(`${lib}/chat-bridge.mjs`);
 
 process.removeAllListeners('warning');  // the SDK's note that bypass mode skips canUseTool for all but the two tools consult() handles
 emit({ type: 'hello', agent: 'claude' });
@@ -39,20 +39,25 @@ function fromUser(message, parent, replay) {
     if (replay) userText(String(content ?? ''));
     return;
   }
+  // The pictures pasted into it go with its first text, as they were sent; alone when it had none.
+  let pictures = !replay || parent ? [] : images({ images: content.filter(b => b.type === 'image' && b.source?.type === 'base64')
+    .map(b => ({ type: b.source.media_type, data: b.source.data })) });
   for (const block of content) {
     if (block.type === 'tool_result')
       emit({ type: 'result', id: block.tool_use_id, output: clip(blockText(block.content)), error: !!block.is_error });
-    else if (block.type === 'text' && replay && !parent)
-      userText(block.text);
+    else if (block.type === 'text' && replay && !parent && userText(block.text, pictures))
+      pictures = [];
   }
+  if (pictures.length) emit({ type: 'user', text: '', images: pictures });
 }
 
 // Claude Code wraps what it adds to a transcript in tags; only a command and plain text are the user's.
-function userText(text) {
+// Says whether it was the user's, and so shown.
+function userText(text, pictures = []) {
   const command = /<command-name>([^<]*)<\/command-name>(?:[\s\S]*<command-args>([^<]*)<\/command-args>)?/.exec(text);
   if (command) return emit({ type: 'user', text: `${command[1]} ${command[2] || ''}`.trim() });
-  if (!text.trim() || /^\s*<[a-z-]+>/.test(text) || text.startsWith('Caveat:')) return;
-  emit({ type: 'user', text });
+  if (!text.trim() || /^\s*<[a-z-]+>/.test(text) || text.startsWith('Caveat:')) return false;
+  return emit({ type: 'user', text, ...(pictures.length && { images: pictures }) });
 }
 
 function fromAssistant(message, parent, ids) {
@@ -96,8 +101,11 @@ async function* prompts() {
     await new Promise(resolve => { wake = resolve; });
   }
 }
-const push = text => {
-  inbox.push({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null });
+const push = (text, pictures) => {
+  const content = !pictures.length ? text : [
+    ...pictures.map(p => ({ type: 'image', source: { type: 'base64', media_type: p.type, data: p.data } })),
+    ...(text ? [{ type: 'text', text }] : [])];
+  inbox.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null });
   wake?.();
 };
 
@@ -165,12 +173,14 @@ let described = describe().catch(e => emit({ type: 'notice', level: 'error', tex
 const done = commands(async c => {
   if (c.type === 'prompt' && typeof c.text === 'string') {
     emit({ type: 'status', state: 'working' });
-    push(c.text);
+    push(c.text, images(c));
   } else if (c.type === 'interrupt') {
     asking.drop();
     await q.interrupt();
   } else if (c.type === 'answer') {
     asking.answer(c);
+  } else if (c.type === 'task' && typeof c.id === 'string') {
+    await q.stopTask(c.id);  // a background task, stopped: the list says so once it is gone
   } else if (c.type === 'model' && typeof c.id === 'string') {
     await q.setModel(c.id);
     emit({ type: 'model', id: c.id });
@@ -224,6 +234,18 @@ async function turnEnded(m) {
   if (!stateful) emit({ type: 'status', state: 'idle' });  // a Claude Code that does not say so itself
 }
 
+// What runs in the background (a shell command sent there, a subagent, a monitor), as Claude Code's
+// own task list shows it: the whole set each time it changes, each task with its latest line.
+const KINDS = { local_bash: 'shell', local_agent: 'agent', local_workflow: 'workflow', mcp_task: 'tool' };
+let running = [];
+const lines = new Map();  // task id → the last thing it said it was doing
+function background() {
+  for (const id of [...lines.keys()]) if (!running.some(t => t.task_id === id)) lines.delete(id);
+  emit({ type: 'tasks', items: running.map(t => ({
+    id: t.task_id, kind: KINDS[t.task_type] || String(t.task_type || 'task').replace(/^local_/, ''),
+    text: t.description || t.subagent_type || '', ...(lines.has(t.task_id) && { note: lines.get(t.task_id) }) })) });
+}
+
 let code = 0, stateful = false;  // stateful: it reports its own state
 try {
   for await (const m of q) {
@@ -255,8 +277,16 @@ try {
         emit({ type: 'text', id: fresh(), kind: 'text', text: m.content });
       else if (m.subtype === 'informational' && m.content && m.level !== 'suggestion')
         emit({ type: 'notice', level: m.level === 'warning' ? 'warning' : 'info', text: m.content });
-      else if (m.subtype === 'task_progress' && m.tool_use_id && m.summary)
-        emit({ type: 'progress', id: m.tool_use_id, text: m.summary });
+      else if (m.subtype === 'background_tasks_changed') {
+        running = (m.tasks || []).filter(t => !t.ambient);  // housekeeping is not work
+        background();
+      } else if (m.subtype === 'task_progress' && m.summary) {
+        if (m.tool_use_id) emit({ type: 'progress', id: m.tool_use_id, text: m.summary });
+        if (running.some(t => t.task_id === m.task_id) && lines.get(m.task_id) !== m.summary) {
+          lines.set(m.task_id, m.summary);
+          background();
+        }
+      }
       else if (m.subtype === 'commands_changed')
         described = describe().catch(() => {});
     }

@@ -190,6 +190,107 @@ def test_the_dashboard_is_a_chat_bar_over_running_sessions_and_projects(board):
     assert bar["y"] + bar["height"] <= left["y"] and left["x"] + left["width"] <= right["x"]
 
 
+def test_each_side_of_the_dashboard_scrolls_on_its_own_under_a_chat_bar_that_stays(board):
+    board.set_viewport_size({"width": 1280, "height": 500})
+    board.resume()
+    # More on each side than fits: sessions on the left, a long list on the right.
+    board.evaluate("""() => {
+        const s = state.sessions[0];
+        state.sessions = Array.from({length: 30}, (_, i) => ({...s, id: 'x' + i, run_id: null}));
+        const said = plugins[state.projects[0]];
+        said.lists[0].items = Array.from({length: 40}, (_, i) => ({ref: '#' + i, title: 'Issue ' + i, url: location.origin + '/i/' + i}));
+        render();
+    }""")
+    box = lambda sel: board.locator(sel).bounding_box()
+    bar = box(".starter")
+    for side, other in ((".running", ".projects"), (".projects", ".running")):
+        assert board.eval_on_selector(side, "e => e.scrollHeight > e.clientHeight + 200")
+        board.eval_on_selector(side, "e => e.scrollTo(0, 300)")
+        assert board.eval_on_selector(side, "e => e.scrollTop") == 300
+        assert board.eval_on_selector(other, "e => e.scrollTop") == 0  # the other side stays where it was
+        board.eval_on_selector(side, "e => e.scrollTo(0, 0)")
+    board.eval_on_selector(".running", "e => e.scrollTo(0, e.scrollHeight)")
+    board.mouse.move(400, 300)
+    board.mouse.wheel(0, 2000)  # the page itself has nowhere to go
+    assert board.evaluate("[scrollY, document.documentElement.scrollHeight - innerHeight]") == [0, 0]
+    assert box(".starter") == bar
+    for side in (".running", ".projects"):  # both end at the window's bottom edge
+        assert abs(box(side)["y"] + box(side)["height"] - 500) < 1
+
+    board.set_viewport_size({"width": 600, "height": 500})  # one column: the page scrolls, the bar stays at its top
+    board.mouse.wheel(0, 900)
+    board.wait_for_function("scrollY > 300")
+    assert box(".starter")["y"] < 20
+
+
+def test_a_list_with_nothing_on_it_is_not_shown(board):
+    assert " ".join(board.inner_text(".project h4").split()) == "Issues 1"
+    board.evaluate("() => { plugins[state.projects[0]].lists[0].items = []; render(); }")  # the last issue was closed
+    assert board.query_selector(".project h4") is None and "None" not in board.inner_text(".project")
+    assert board.inner_text(".project .head h3").startswith("proj")  # the project stays, with its buttons
+
+
+PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="  # one pixel
+PASTE = """(el, data) => {
+    const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0)), files = new DataTransfer();
+    files.items.add(new File([bytes], 'shot.png', {type: 'image/png'}));
+    el.dispatchEvent(new ClipboardEvent('paste', {clipboardData: files, bubbles: true, cancelable: true}));
+}"""
+
+
+def test_images_are_pasted_into_either_chat_bar_and_sent_with_the_message(board):
+    board.focus(".starter textarea")
+    board.eval_on_selector(".starter textarea", PASTE, PNG)
+    board.eval_on_selector(".starter textarea", PASTE, PNG)
+    board.wait_for_selector(".starter .shot >> nth=1")
+    board.click(".starter .shot button[aria-label='Remove image']")  # one too many
+    assert board.locator(".starter .shot img").count() == 1
+    board.fill(".starter textarea", "what is this?")
+    tab = opens_tab(board, lambda: board.click(".starter button[type=submit]"))
+    assert board.locator(".starter .shot").count() == 0  # sent: the tray is empty again
+    tab.wait_for_selector(".you:has-text('what is this?') .shots img")
+    assert tab.get_attribute(".you img", "src") == "data:image/png;base64," + PNG
+    tab.wait_for_selector(".say:has-text('Done with “what is this?”.')")
+
+    tab.eval_on_selector("#input", PASTE, PNG)  # and one alone, in the session's own bar
+    tab.wait_for_selector("#shots .shot img")
+    tab.keyboard.press("Enter")
+    tab.wait_for_selector(".you >> nth=1")
+    assert tab.locator("#shots .shot").count() == 0 and tab.locator(".you >> nth=1").locator("img").count() == 1
+    tab.wait_for_function("document.querySelectorAll('.turn').length === 2")
+    picture = {"type": "image/png", "data": PNG}
+    assert [json.loads(line) for line in board.commands.read_text().splitlines()] == [
+        {"type": "prompt", "text": "what is this?", "images": [picture]}, {"type": "prompt", "text": "", "images": [picture]}]
+    tab.reload()  # a page opened later shows them too
+    tab.wait_for_selector(".you >> nth=1")
+    assert tab.locator(".you img").count() == 2
+
+
+def test_what_runs_in_the_background_has_a_panel_of_its_own_where_each_task_can_be_stopped(board):
+    tab = opens_tab(board, lambda: board.click("button[aria-label='New session']"))
+    tab.wait_for_selector(".boot.ok")
+    assert tab.is_hidden("#tasks")  # nothing in the background: no panel
+    tab.fill("#input", "run it in the background")
+    tab.keyboard.press("Enter")
+    tab.wait_for_selector("#tasks summary:has-text('2 running')")
+    tab.wait_for_selector("header .state.idle")  # the turn is over; they run on, apart from the conversation
+    assert " ".join(tab.inner_text("#tasks summary").split()) == "Background npm run dev · Check the callers 2 running"
+    assert tab.locator("#log #tasks").count() == 0 and tab.locator("#dock #tasks").count() == 1
+    tab.click("#tasks summary")
+    assert [" ".join(t.split()) for t in tab.locator("#tasks li").all_inner_texts()] == [
+        "shell npm run dev", "agent Check the callers Reading src/app.py"]
+    tab.reload()  # a page opened later has them too
+    tab.wait_for_selector("#tasks summary:has-text('2 running')")
+    tab.click("#tasks summary")
+    tab.click("#tasks li:has-text('npm run dev') button[aria-label='Stop task']")
+    tab.wait_for_selector("#tasks summary:has-text('1 running')")
+    assert tab.locator("#tasks li").count() == 1 and tab.is_visible("#tasks li")  # still unfolded
+    tab.click("#tasks li button[aria-label='Stop task']")
+    tab.wait_for_selector("#tasks", state="hidden")
+    sent = [json.loads(line) for line in board.commands.read_text().splitlines()]
+    assert sent[1:] == [{"type": "task", "id": "bg1a"}, {"type": "task", "id": "bg1b"}]
+
+
 def test_the_project_and_the_start_button_stay_put_while_the_first_message_grows(board):
     button = lambda: board.locator(".starter button[type=submit]").bounding_box()  # noqa: E731
     before, field = button(), board.locator(".starter .field").bounding_box()
@@ -201,7 +302,12 @@ def test_the_project_and_the_start_button_stay_put_while_the_first_message_grows
 
 def test_a_running_session_is_a_window_with_its_stop_button_top_right(board):
     board.resume()
-    assert board.inner_text(".window .state") == "Idle"  # how it is doing, and nothing else
+    # How it is doing is the colour along its top, and nothing else: no lamp, no word for it.
+    assert board.query_selector(".window .lamp, .window .spin, .window .state") is None and "Idle" not in board.inner_text(".window")
+    assert board.eval_on_selector(".window.idle", "e => getComputedStyle(e, '::before').backgroundColor") == \
+        board.evaluate("(() => { const p = document.createElement('p'); p.style.color = 'var(--ok)'; document.body.append(p);"
+                       " const c = getComputedStyle(p).color; p.remove(); return c; })()")
+    assert board.get_attribute(".window", "aria-label").endswith(": idle, waiting for its next task")  # said to a screen reader
     stop, card = board.locator(".window button[aria-label='Stop session']").bounding_box(), board.locator(".window").bounding_box()
     assert stop["y"] - card["y"] < 20 and card["x"] + card["width"] - stop["x"] - stop["width"] < 20
     board.click(".window button[aria-label='Stop session']")
@@ -217,7 +323,6 @@ def test_the_dashboard_shows_the_sessions_waiting_on_you_first(board):
     board.wait_for_selector(".window.question")
     first, second = board.query_selector_all(".window")
     assert "question" in first.get_attribute("class") and first.query_selector(".open").inner_text() == "please ask me"
-    assert first.query_selector(".state b").inner_text() == "Needs you"
     assert "An earlier answer." in second.query_selector(".doing").inner_text()  # idle: what it last said
     assert [c.text_content() for c in second.query_selector_all("a.chip")] == ["✕#3", "⇥#2", "preview"]
     again_opens_nothing(board, lambda: board.click(".window.question .open"))  # its tab is open already
@@ -230,7 +335,7 @@ def test_the_dashboard_shows_the_sessions_waiting_on_you_first(board):
 
 def test_a_session_has_one_tab_with_a_lamp_in_the_colour_of_what_its_agent_does(board):
     board.resume()
-    board.wait_for_selector(".window .lamp.idle")  # booted and waiting: green
+    board.wait_for_selector(".window.idle")  # booted and waiting: green
     tab = opens_tab(board, lambda: board.click(".window .open"))
     assert tab.url.endswith("/chat#" + state(board)[0]["id"])
     tab.wait_for_selector(".say:has-text('An earlier answer.')")  # a resumed run: its conversation so far
@@ -243,7 +348,7 @@ def test_a_session_has_one_tab_with_a_lamp_in_the_colour_of_what_its_agent_does(
     tab.keyboard.press("Enter")
     tab.wait_for_selector(".ask")  # the stand-in asks: violet, here and on the dashboard
     tab.wait_for_function("decodeURIComponent(document.querySelector('link[rel=icon]').href).includes('#c69cff')")
-    board.wait_for_selector(".window .lamp.question")
+    board.wait_for_selector(".window.question")
     assert tab.inner_text("header .state") == "Needs you"
 
     tab.on("dialog", lambda d: d.accept())
@@ -275,7 +380,8 @@ def test_the_first_message_is_written_while_the_sandbox_starts_and_sent_when_it_
     tab.fill("#input", "and a second one")
     tab.keyboard.press("Enter")
     tab.wait_for_selector(".you.queued >> nth=1")
-    board.wait_for_selector(".window.starting .doing:has-text('Starting, 2 messages waiting') .spin")
+    board.wait_for_selector(".window.starting .doing:text-is('2 messages waiting')")
+    assert board.query_selector(".window .spin") is None  # its colour says it starts
     assert board.inner_text(".window .open") == "change main"  # a session is called what it was first asked
     assert not board.commands.exists()  # nothing reached the agent yet
 
@@ -303,7 +409,7 @@ def test_a_chat_draws_what_the_agent_says_and_does(board):
     assert said.locator(".code pre").inner_text() == "def main():\n    return 2" and said.locator(".code .lang").inner_text() == "python"
     link = said.locator("a")
     assert (link.get_attribute("href"), link.get_attribute("target")) == ("https://example.com/docs", "_blank")
-    assert tab.inner_text(".think summary") == "Thought"
+    assert tab.inner_text(".think") == "Thought" and tab.query_selector("details.think, .think summary") is None  # a line: nothing to open
 
     # What it did: a line per tool call, runs of them in one box; open one for what went in and came back.
     lines = [" ".join(t.inner_text().split()) for t in tab.query_selector_all("#log > .tools > .tool > summary")]
@@ -358,7 +464,7 @@ def test_a_chat_offers_the_agents_commands_and_models_and_can_interrupt_it(board
     tab.wait_for_selector(".tool.running:has-text('sleep 600') .spin")  # the step it is on turns
     # and nothing else: not a line at the bottom, nor the thinking before it, though it only streamed
     assert tab.locator(".spin").count() == 1 and tab.query_selector("#tail") is None
-    assert tab.inner_text(".think summary") == "Thought"
+    assert tab.inner_text(".think") == "Thought"
     assert tab.inner_text(".you") == "a long task\nover two lines"
     assert tab.is_visible("#halt")
     board.wait_for_selector(".window.working .doing.tool:has-text('Bash: Wait a long time')")

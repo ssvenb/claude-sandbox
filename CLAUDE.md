@@ -46,12 +46,14 @@ sockets a non-root user listens on — any address, loopback included — and of
 root-only so the agent cannot plant a socket of its own there. One central proxy on the host,
 `src/portd.py`, shared by every sandbox of every project
 (`${TMPDIR:-/tmp}/sandbox-ports-<uid>-<PORTS_BIND>`), gives each such socket a port on
-`$PORTS_BIND` (default `127.0.0.1`) — the same number while free, else any free one, kept for the
+`$PORTS_BIND` (default `127.0.0.1`; under `web/server.py --bind ADDR`, that address, so a port
+the page shows is reachable from wherever the page is) — the same number while free, else any free one, kept for the
 run while the proxy lives — and relays to it. `src/lib/host-ports.sh` manages it: the first
 `run.sh` starts it, each registers `users/<pid>` (holding its RUN_ID) and `runs/<RUN_ID>/` under
 `lock`, and the proxy exits once no `run.sh` using it is alive. It writes what it publishes to
 `ports.json`, and as web items to `items.json`, which `run.sh --web` hands the page with
-`web_live_items`: a published port is a button on its session's row within seconds. The host
+`web_live_items`: a published port is a button on its session's row within seconds, linking to
+the host name the page was opened by (`{host}`), unless the proxy is bound to one address. The host
 itself is `host.docker.internal` from inside; its localhost is out of reach.
 
 ## Agents
@@ -251,7 +253,7 @@ only required while that one is in use.
 | `AGENT_VERSION` | core | Version of the agent's CLI baked into the image; empty (default) resolves the registry's latest on every run |
 | `PROJECT_CONFIG_FILE` | core | Per-project configuration: `env` block, plugin sections, plugin `enabled` switches (default `$HOST_CWD/.claude-sandbox.json`; optional) |
 | `PROJECT_ENV_FILE` | core | The worked-on repo's `.env`, scanned for the sandbox settings and plugin settings it keeps there (default `$HOST_CWD/.env`; `/dev/null` loads nothing) |
-| `PORTS_BIND` | core | Address the central port proxy publishes the sandboxes' ports on (default `127.0.0.1`; `0.0.0.0` for the whole network) |
+| `PORTS_BIND` | core | Address the central port proxy publishes the sandboxes' ports on (default `127.0.0.1`, or `web/server.py`'s `--bind` address for its sessions; `0.0.0.0` for the whole network) |
 | `PORTS_IGNORE` | core | Space-separated ports never published |
 | `CLAUDE_CODE_OAUTH_TOKEN` | agents/claude | Claude Code OAuth token for API auth (required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does) |
 | `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low`, `medium` (default), `high`, `xhigh`, `max` |

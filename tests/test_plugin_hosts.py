@@ -607,6 +607,8 @@ def test_github_lists_pull_requests_and_issues_and_git_workspace_ties_them_to_ru
     task = issue["start"]["task"]
     assert task.startswith("Resolve GitHub issue #7: i (u7).")
     assert "gh issue view 7 --comments" in task and 'Closes #7' in task
+    # …and to stay with its pull request until CI is green.
+    assert "gh pr checks --watch" in task and "until all checks are green" in task
     # Without git-workspace nobody claims the branch, so the page offers no resume.
     assert "run_id" not in described("github-auth")["lists"][0]["items"][0]
 

@@ -47,6 +47,7 @@ github_ci='def ci:
 github_web_list "Pull requests" pr number,title,url,headRefName,isDraft,statusCheckRollup \
   "$github_ci"' {ref: "#\(.number)", title, url, branch: .headRefName}
     + (if .isDraft then {note: "Draft"} else {} end) + ci'
-# Resolve: a session told to fix the issue, reading it in full itself (the title is all we send).
+# Resolve: a session told to fix the issue, reading it in full itself (the title is all we send),
+# and to see its pull request's CI through to green.
 github_web_list "Issues" issue number,title,url '{ref: "#\(.number)", title, url, start: {label: "Resolve",
-  task: "Resolve GitHub issue #\(.number): \(.title) (\(.url)). Read it in full first, with its comments: `gh issue view \(.number) --comments`. Then fix it: make the change, add or update tests and run them, commit, push your branch and open a pull request whose description says \"Closes #\(.number)\"."}}'
+  task: "Resolve GitHub issue #\(.number): \(.title) (\(.url)). Read it in full first, with its comments: `gh issue view \(.number) --comments`. Then fix it: make the change, add or update tests and run them, commit, push your branch and open a pull request whose description says \"Closes #\(.number)\". Then watch its CI until every check has finished (`gh pr checks --watch`); when one fails, read why (`gh run view <run-id> --log-failed`), fix it, push and watch again, until all checks are green."}}'

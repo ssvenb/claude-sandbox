@@ -59,12 +59,13 @@ def test_a_projects_terminal_runs_there_streams_and_is_one_per_project(ui):
     assert (ended["id"], ended["exit"]) == (s["id"], 3)
     again = json.load(ui("/api/sessions", json.dumps(ask).encode()))  # the next one replaces it
     assert [x["id"] for x in json.load(ui("/api/state"))["sessions"]] == [again["id"]] != [s["id"]]
-    ui(f"/api/sessions/{again['id']}/close", b"")  # stops it
+    ui(f"/api/sessions/{again['id']}/stop", b"")  # stops it, and keeps it listed
     for _ in range(50):
         if json.load(ui("/api/state"))["sessions"][0]["exit"] is not None:
             break
         time.sleep(0.1)
-    ui(f"/api/sessions/{again['id']}/close", b"")  # and, ended, removes it
+    assert [x["id"] for x in json.load(ui("/api/state"))["sessions"]] == [again["id"]]
+    ui(f"/api/sessions/{again['id']}/delete", b"")  # and, ended, removes it
     assert json.load(ui("/api/state"))["sessions"] == []
 
 
@@ -239,40 +240,40 @@ def test_vscode_settings_are_applied_over_the_ones_already_there(tmp_path, monke
     assert "// mine" in file.read_text()
 
 
-def test_closing_a_sessions_last_tab_stops_it_and_a_reload_does_not(tmp_path, monkeypatch):
+def test_a_session_outlives_its_tabs_until_stopped_or_deleted(tmp_path, monkeypatch):
     docker = tmp_path / "docker"
     docker.write_text(f'#!/bin/sh\necho "$*" >>"{tmp_path}/docker-calls"\n')
     docker.chmod(0o755)
     monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
     monkeypatch.setattr(web, "command", lambda *_: ["sleep", "30"])
     monkeypatch.setattr(web, "KEEPALIVE", 0.2)
-    monkeypatch.setattr(web, "TAB_GRACE", 1)
     (tmp_path / "projects").write_text(f"{tmp_path}\n")
     server = web.serve(0, tmp_path / "projects")
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_address[1]}"
-    agent = web.start(str(tmp_path), "resume", "0a1b2c")
-    terminal = web.start(str(tmp_path), "shell", None)
+    post = lambda path: urllib.request.urlopen(urllib.request.Request(  # noqa: E731
+        base + path, b"", headers={"Origin": base}), timeout=5)
+    stopped = web.start(str(tmp_path), "resume", "0a1b2c")
+    deleted = web.start(str(tmp_path), "resume", "3d4e5f")
     try:
-        def tab(s):  # a browser tab on the session: its stream, open until closed
-            return urllib.request.urlopen(f"{base}/api/sessions/{s.id}/stream", timeout=5)
+        urllib.request.urlopen(f"{base}/api/sessions/{stopped.id}/stream", timeout=5).close()
+        for _ in range(10):  # a few keepalives: the closed tab is long noticed
+            time.sleep(0.1)
+        assert (stopped.exit, stopped.listeners) == (None, [])  # the tab is let go, the session runs on
 
-        tab(agent).close()
-        reloaded = tab(agent)  # back well within the grace: a reload, the session keeps running
-        time.sleep(1.5)
-        assert agent.exit is None
-        reloaded.close()
-        tab(terminal).close()
+        post(f"/api/sessions/{stopped.id}/stop")
+        post(f"/api/sessions/{deleted.id}/delete")  # still running: stopped first
         calls = tmp_path / "docker-calls"
-        for _ in range(50):  # noticed at the next keepalive, stopped after the grace
-            if agent.exit is not None and calls.exists():
+        for _ in range(50):
+            if None not in (stopped.exit, deleted.exit) and len(calls.read_text().splitlines()) == 2:
                 break
             time.sleep(0.1)
-        assert agent.exit is not None
-        assert calls.read_text() == "rm -f sandbox-0a1b2c\n"  # the container goes with it
-        assert terminal.exit is None  # the project's terminal waits to be attached again
+        assert sorted(calls.read_text().splitlines()) == ["rm -f sandbox-0a1b2c", "rm -f sandbox-3d4e5f"]
+        assert list(web.sessions) == [stopped.id]  # the stopped one stays listed, to read and resume
+        with pytest.raises(OSError):
+            os.fstat(deleted.fd)  # its pty closed once it had ended
     finally:
-        agent.stop()
-        terminal.stop()
+        stopped.stop()
+        deleted.stop()
         server.shutdown()
         web.sessions.clear()

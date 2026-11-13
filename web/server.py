@@ -43,8 +43,7 @@ HERE = Path(__file__).resolve().parent
 RUN_SH = HERE.parent / "run.sh"
 RUN_ID = re.compile(r"[0-9a-f]{6}")
 SCROLLBACK = 256 * 1024  # bytes replayed to a browser that (re)opens a terminal
-KEEPALIVE = 5  # seconds between keepalives on a terminal's stream: how soon a closed tab is noticed
-TAB_GRACE = 10  # seconds a session outlives its last tab, so a reload does not stop it
+KEEPALIVE = 15  # seconds between keepalives on a terminal's stream: how soon a closed tab is let go
 
 sessions = {}
 described = {}  # project → what describe() last said about it
@@ -115,6 +114,8 @@ class Session:
             self.exit = code
             for q in self.listeners:
                 q.put(None)
+            if self.id not in sessions:  # deleted while it ran: drop() left its pty to us
+                os.close(self.fd)
 
     def write(self, data):
         while data and self.exit is None:
@@ -243,17 +244,10 @@ def vscode():
         raise ValueError("`code serve-web` did not start listening")
 
 
-def stop_if_orphaned(s):
-    """Its last tab closed: stop the session, container and all, unless a tab came back."""
-    with lock:
-        orphaned = s.exit is None and not s.listeners
-    if orphaned:
-        s.stop()
-
-
 def drop(s):
-    """Forget an ended session. Caller holds `lock`."""
-    if sessions.pop(s.id, None):
+    """Forget a session. Caller holds `lock`. A live one is stopped first, and its pty closed by
+    its pump once it has ended, never under it."""
+    if sessions.pop(s.id, None) and s.exit is not None:
         os.close(s.fd)
 
 
@@ -417,7 +411,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("no such session, or it has no checkout on this machine")
                 vscode()
                 self.reply(200, {"folder": folder})
-            elif m := re.fullmatch(r"/api/sessions/(\w+)/(input|resize|close)", url.path):
+            elif m := re.fullmatch(r"/api/sessions/(\w+)/(input|resize|stop|delete)", url.path):
                 s = self.session(m[1])
                 if s is None:
                     return
@@ -425,9 +419,10 @@ class Handler(BaseHTTPRequestHandler):
                     s.write(body)
                 elif m[2] == "resize":
                     s.resize(int(query["cols"]), int(query["rows"]))
-                elif s.exit is None:
+                elif m[2] == "stop":  # its container goes, its entry stays: to read, to resume
                     s.stop()
-                else:  # closing an ended session drops it from the list
+                else:  # gone from the list, stopped first if it still runs
+                    s.stop()
                     with lock:
                         drop(s)
                 self.reply(200, {})
@@ -465,12 +460,10 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             pass
         finally:
+            # A closed tab only lets go of the stream: the session runs on until told to stop.
             with lock:
                 if q in s.listeners:
                     s.listeners.remove(q)
-                orphaned = s.kind != "shell" and s.exit is None and not s.listeners
-            if orphaned:  # a terminal is kept: the next click on its button attaches to it again
-                threading.Timer(TAB_GRACE, stop_if_orphaned, [s]).start()
 
 
 def local_names(bind):

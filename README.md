@@ -53,17 +53,19 @@ project and its part of the page goes with it.
 
 A session opens in a browser tab of its own — the agent's own TUI, so its slash commands and
 suggestions work as they do in your terminal. Clicking a session whose tab is already open brings
-that tab to the front instead of opening a second one. Stopping a session closes its tabs too: its
+that tab to the front instead of opening a second one. A session runs until you end it: closing its
+tab, or the whole browser, leaves it running, and clicking it opens it again. Each session has two
+buttons for that, on the dashboard and in its tab. **Stop** (the red square) removes its container
+and keeps it listed, its tab showing how it ended, so you can read it and resume it with the play button. **Delete**
+(the trash can) stops it if it still runs, removes it from the list and closes its tabs: its
 terminal, VS Code and its pull request (the last two only while the dashboard that opened them has
-not been reloaded). It works the other way round as well: closing a session's tab stops the session
-and removes its container, once no tab of it has come back for 10 seconds — so a reload keeps it.
-A project's terminal is kept instead: its button attaches to it again.
+not been reloaded).
 
 In a terminal tab, **Ctrl+C** copies the selection (and interrupts as usual when nothing is
 selected), **Ctrl+Shift+C** always copies, **Ctrl+V** and **Ctrl+Shift+V** paste; where the program has taken the mouse, as the agent's
 interface does, select with **Shift+drag**.
 
-**Code** on a session opens VS Code in the browser on that run's checkout (the `agent-workspace`
+The VS Code icon on a session opens VS Code in the browser on that run's checkout (the `agent-workspace`
 mirror of `/workspace`), again one tab per run. It needs VS Code on the host (`code` on the PATH:
 the .deb/.rpm or snap install, or the standalone CLI): the first click starts one `code serve-web`,
 accepting the VS Code Server license terms on your behalf, and it stops with the web UI. Its data
@@ -345,7 +347,7 @@ calls describe.
 | `web_list TITLE JSON_ARRAY` | a column of links; each item is `{title, url}` plus optional `ref` (a short id shown first, `#12`), `note` (`Draft`), `status` (`ok`, `fail` or `pending`: a mark before it, e.g. CI) with its `status_text`, `start` (`{label, task}`: a button starting a session on `task`, e.g. an issue's Resolve), and any field a later plugin may read |
 | `web_note TEXT` | one line saying why there is nothing to list |
 | `web_map_items JQ_FILTER` | rewrites every item listed so far (by plugins of a lower `priority`); an item given a `run_id` gets an **Open** or **Resume** button for that run |
-| `web_checkout GLOB` | where a run's `/workspace` is on this machine, `{run_id}` standing for the run; adds **Code** (VS Code) to its session |
+| `web_checkout GLOB` | where a run's `/workspace` is on this machine, `{run_id}` standing for the run; adds the VS Code button to its session |
 
 ```bash
 # plugins/github-auth/web.sh lists the pull requests with their `branch`;

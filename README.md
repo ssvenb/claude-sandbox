@@ -39,7 +39,7 @@ its first message, with the project it is for beside it. Under it, on the left, 
 answer first; each says what it was asked and what it is doing right now, with its pull request,
 its ports and, top right, its stop button); with nothing running that side is not there, and the
 projects take the width. On the right is every listed **project** with what its plugins list (its
-issues), its ended sessions folded away at the foot of its panel, a **+** button for a
+issues), its ended sessions at the foot of its panel, a **+** button for a
 new session (`run.sh --chat` in that directory) and a terminal
 button (**>_**) for a shell on this machine in the project — one per project, its tab brought to
 the front when it is already open. The gear button opens the project's settings, saved to its

@@ -145,12 +145,9 @@ def closes(tab, board, within=10):
 
 
 def delete(board):
-    """Deletes the one session, as the dashboard lets you: stop its window, then delete it where its project folds the ended ones."""
+    """Deletes the one session, as the dashboard lets you: stop its window, then delete it where its project lists the ended ones."""
     board.click(".window button[aria-label='Stop session']")
-    board.wait_for_selector("details.ended")
-    if not board.locator("details.ended[open]").count():  # once unfolded, it stays so
-        board.click("details.ended summary")
-    board.click("details.ended button[aria-label='Delete session']")
+    board.click("ul.ended button[aria-label='Delete session']")
 
 
 def icon(tab):
@@ -158,7 +155,7 @@ def icon(tab):
 
 
 ROW = ".window"  # a running session, under its project on the left
-NOBODY = ".board:not(:has(.running)):not(:has(details.ended))"  # no session left, running or ended
+NOBODY = ".board:not(:has(.running)):not(:has(ul.ended))"  # no session left, running or ended
 
 
 def state(board):
@@ -361,9 +358,8 @@ def test_a_session_has_one_tab_with_a_lamp_in_the_colour_of_what_its_agent_does(
     tab.wait_for_selector("text=Session ended")
     tab.wait_for_function("decodeURIComponent(document.querySelector('link[rel=icon]').href).includes('stroke')")
     assert tab.is_disabled("#input")
-    board.wait_for_selector("details.ended summary:has-text('1 ended')")  # folded away on its project's panel
-    board.click("details.ended summary")
-    board.wait_for_selector("button[aria-label='Resume session']")
+    board.wait_for_selector("ul.ended button[aria-label='Resume session']")  # listed on its project's panel
+    assert board.query_selector("details") is None and board.query_selector("text=1 ended") is None  # with nothing to unfold
     with tab.expect_navigation():  # resuming takes this tab to the run's new session
         tab.click(".over button:has-text('Resume')")
     tab.wait_for_selector("header .state.idle")
@@ -630,11 +626,10 @@ def test_stopping_keeps_the_session_and_its_tab_and_deleting_closes_them(board):
     session.wait_for_selector("text=Session ended")  # still open, to read how it ended
     board.wait_for_selector(".window", state="detached")  # no window: nothing runs
     board.wait_for_selector("button[aria-label='Stop session']", state="detached")
-    board.click("details.ended summary")  # listed still, folded on its project's panel, to resume or delete
-    assert board.inner_text("details.ended button.session") == "Session " + RUN
-    assert [c.text_content() for c in board.query_selector_all("details.ended a.chip")] == ["✕#3", "⇥#2", "preview"]
-    board.wait_for_timeout(3500)  # unfolded still after the page's next refresh
-    assert board.is_visible("details.ended button[aria-label='Resume session']")
+    board.wait_for_selector("ul.ended button.session")  # listed still, on its project's panel, to resume or delete
+    assert board.inner_text("ul.ended button.session") == "Session " + RUN
+    assert [c.text_content() for c in board.query_selector_all("ul.ended a.chip")] == ["✕#3", "⇥#2", "preview"]
+    assert board.is_visible("ul.ended button[aria-label='Resume session']")
     assert not its_pr.is_closed()
     session.click("button[aria-label='Delete session']")  # its own page asks about #3 too
     closes(session, board)

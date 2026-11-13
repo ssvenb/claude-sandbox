@@ -621,6 +621,20 @@ def test_a_failing_gh_becomes_a_note_on_the_page(sb, described):
     assert said["lists"] == [] and said["notes"] == ["gh pr list: gh: not logged in", "gh issue list: gh: not logged in"]
 
 
+def test_the_kernel_puts_items_in_sections_or_on_a_runs_session_row(sb):
+    """web_list makes a section, web_session_item puts an item on a run's row, web_tie_items hands
+    a section's items to the run its filter names (null or "" leaves one where it is)."""
+    out = sb.tmp / "web.json"
+    sb.bash("""web_list Builds '[{"title": "a", "url": "ua", "job": "x/0a1b2c"}, {"title": "b", "url": "ub"}]'
+web_session_item 0a1b2c '{"title": "Preview", "url": "up", "ref": "app"}'
+web_tie_items '(.job // "") | split("/") | .[1]'
+printf '%s' "$WEB_JSON" >'""" + str(out) + "'").ok()
+    said = json.loads(out.read_text())
+    assert said["lists"] == [{"title": "Builds", "items": [
+        {"title": "a", "url": "ua", "job": "x/0a1b2c", "run_id": "0a1b2c"}, {"title": "b", "url": "ub"}]}]
+    assert said["session_items"] == [{"title": "Preview", "url": "up", "ref": "app", "run_id": "0a1b2c"}]
+
+
 def test_agent_workspace_tells_the_page_where_a_runs_checkout_is(sb, described):
     assert described("agent-workspace")["checkout"] == f"{sb.home}/.agent-workspaces/*-{{run_id}}"
     sb.dotenv("AGENT_WORKSPACE_DIR=/srv/mirrors\n")  # the project's own setting, as for a run

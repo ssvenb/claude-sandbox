@@ -88,24 +88,43 @@ trap plugins_run_exit_hooks EXIT
 # The web UI knows nothing about GitHub, branches or mirrors: it draws what the enabled plugins of
 # a project describe here. WEB_JSON is that description, printed by `run.sh --web`.
 
-WEB_JSON='{"lists":[],"notes":[]}'
+WEB_JSON='{"lists":[],"notes":[],"session_items":[]}'
 
-# web_list <title> <json-array>: a column of links on the project's band. Each item is
-# {title, url} plus optional `ref` (a short id shown first, "#12"), `note` ("Draft"), `status`
+# The page has two places for what a plugin shows: a section of the project's band (web_list),
+# and a session's own row, next to its VS Code button (web_session_item, web_tie_items). An item
+# is {title, url} plus optional `ref` (a short id shown first, "#12"), `note` ("Draft"), `status`
 # ("ok", "fail" or "pending", e.g. a pull request's CI) with its `status_text`, and anything a
-# later plugin may want to read, such as the `branch` of a pull request. `start` ({label, task})
-# puts a button on the item that starts a session with `task` as the agent's first message.
+# later plugin may want to read, such as the `branch` of a pull request. On a session's row it is
+# a button opening `url` in a tab of its own, showing its status mark and `ref`.
+
+# web_list <title> <json-array>: a section of links on the project's band. `start` ({label, task})
+# puts a button on an item that starts a session with `task` as the agent's first message.
 web_list() {
   WEB_JSON=$(jq -c --arg title "$1" --argjson items "$2" \
     '.lists += [{title: $title, items: $items}]' <<<"$WEB_JSON")
 }
 
+# web_session_item <run_id> <json-item>: an element on that run's session row, shown while the
+# page lists a session of the run.
+web_session_item() {
+  WEB_JSON=$(jq -c --arg run_id "$1" --argjson item "$2" \
+    '.session_items += [$item + {run_id: $run_id}]' <<<"$WEB_JSON")
+}
+
 # web_note <text>: one line shown with the project, for what kept a plugin from listing anything.
 web_note() { WEB_JSON=$(jq -c --arg note "$1" '.notes += [$note]' <<<"$WEB_JSON"); }
 
-# web_map_items <jq-filter>: rewrite every item listed so far, by plugins of a lower priority. An
-# item given a `run_id` belongs to that run: the page offers to open or resume it.
+# web_map_items <jq-filter>: rewrite every item listed so far, by plugins of a lower priority.
 web_map_items() { WEB_JSON=$(jq -c ".lists[].items[] |= ($1)" <<<"$WEB_JSON"); }
+
+# web_tie_items <jq-filter>: hand items listed so far to the run the filter names for each (a
+# RUN_ID; null or "" leaves the item where it is). A tied item moves from its section to its
+# run's session row while the page lists a session of that run; with none, it stays in its
+# section with a Resume button.
+web_tie_items() {
+  WEB_JSON=$(jq -c ".lists[].items[] |= (. as \$i | (\$i | $1) as \$r
+    | if (\$r // \"\") == \"\" then \$i else \$i + {run_id: \$r} end)" <<<"$WEB_JSON")
+}
 
 # web_checkout <glob>: where a run's /workspace is on this machine, `{run_id}` standing for the
 # run. The page offers to open the directory it matches in VS Code.

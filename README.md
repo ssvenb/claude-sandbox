@@ -342,17 +342,26 @@ switches — but nothing is validated, built or started, so keep it quick and ne
 something a run would need. The web UI itself knows nothing about any plugin: it draws what these
 calls describe.
 
-| Call | Puts on the project's band |
-|------|----------------------------|
-| `web_list TITLE JSON_ARRAY` | a column of links; each item is `{title, url}` plus optional `ref` (a short id shown first, `#12`), `note` (`Draft`), `status` (`ok`, `fail` or `pending`: a mark before it, e.g. CI) with its `status_text`, `start` (`{label, task}`: a button starting a session on `task`, e.g. an issue's Resolve), and any field a later plugin may read |
+The page has two places for what a plugin shows: **sections** of the project's band (pull
+requests, issues, …) and a **session's row**, next to its VS Code button, where an item is a small
+button with its status mark and `ref` that opens its `url` in a tab of its own (a run's pull
+request, with its CI). An item is `{title, url}` plus optional `ref` (a short id shown first,
+`#12`), `note` (`Draft`), `status` (`ok`, `fail` or `pending`: a mark before it, e.g. CI) with its
+`status_text`, and any field a later plugin may read.
+
+| Call | Puts on the page |
+|------|------------------|
+| `web_list TITLE JSON_ARRAY` | a section of items; an item's `start` (`{label, task}`) is a button starting a session on `task`, e.g. an issue's Resolve |
+| `web_session_item RUN_ID JSON_ITEM` | an item on that run's session row, shown while the page lists a session of the run |
+| `web_tie_items JQ_FILTER` | hands items listed so far (by plugins of a lower `priority`) to the run the filter names for each (a RUN_ID; `null` or `""` leaves the item be): such an item moves onto that run's session row while one is listed, else stays in its section with a **Resume** button |
+| `web_map_items JQ_FILTER` | rewrites every item listed so far (by plugins of a lower `priority`) |
 | `web_note TEXT` | one line saying why there is nothing to list |
-| `web_map_items JQ_FILTER` | rewrites every item listed so far (by plugins of a lower `priority`); an item given a `run_id` gets an **Open** or **Resume** button for that run |
 | `web_checkout GLOB` | where a run's `/workspace` is on this machine, `{run_id}` standing for the run; adds the VS Code button to its session |
 
 ```bash
-# plugins/github-auth/web.sh lists the pull requests with their `branch`;
-# plugins/git-workspace/web.sh, which owns the branch naming, then claims its own:
-web_map_items 'if (.branch // "") | test("^.+/[0-9]{8}-[0-9a-f]{6}$") then .run_id = .branch[-6:] else . end'
+# plugins/github-auth/web.sh lists the pull requests, with their CI and `branch`, as a section;
+# plugins/git-workspace/web.sh, which owns the branch naming, then ties its own to their runs:
+web_tie_items 'if (.branch // "") | test("^.+/[0-9]{8}-[0-9a-f]{6}$") then .branch[-6:] else null end'
 ```
 
 ### Project configuration — `.claude-sandbox.json`

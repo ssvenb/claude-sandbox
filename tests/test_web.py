@@ -518,8 +518,9 @@ def test_prompts_typed_while_the_sandbox_starts_wait_and_reach_the_agent_in_orde
     assert [(e["text"], e.get("queued")) for e in s.events if e["type"] == "user"] == [
         ("first, please", True), ("then ask me", True)]
     assert s.json()["waiting"] == 2 and not (chat.tmp / "commands").exists()  # nothing sent yet
-    chat.until(s, lambda s: s.ready)
-    sent = [json.loads(line) for line in (chat.tmp / "commands").read_text().splitlines()]
+    commands = chat.tmp / "commands"  # what the stand-in agent was sent, as it reads it
+    chat.until(s, lambda s: s.ready and commands.exists() and len(commands.read_text().splitlines()) == 2)
+    sent = [json.loads(line) for line in commands.read_text().splitlines()]
     assert sent == [{"type": "prompt", "text": "first, please"}, {"type": "prompt", "text": "then ask me"}]
     assert not any(e.get("queued") for e in s.events) and s.json()["waiting"] == 0
     chat.until(s, lambda s: s.status() == "question")

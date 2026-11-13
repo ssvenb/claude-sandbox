@@ -98,8 +98,3 @@ const tip = i => [(i.ref ? i.ref + ' ' : '') + (i.note ? i.note + ': ' : '') + i
 // What a plugin publishes for a running session (its servers' ports), to link from wherever this
 // page was opened: `{host}` in its url is this page's own host name.
 const here = i => ({...i, url: i.url.replaceAll('{host}', location.hostname)});
-
-const ago = t => {
-  const s = Math.max(0, Date.now() / 1000 - t);
-  return s < 90 ? 'just now' : s < 5400 ? `${Math.round(s / 60)} min` : s < 129600 ? `${Math.round(s / 3600)} h` : `${Math.round(s / 86400)} d`;
-};

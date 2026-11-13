@@ -36,7 +36,7 @@
 <div id="stage">
   <div id="term"></div>
   <div id="wait"><span class="loading"><span class="spin"></span>Connecting to the terminal</span></div>
-  <div id="empty" hidden><div><b>This session is gone</b>It was removed, or the server restarted. <a href="/">See what is running</a></div></div>
+  <div id="empty" hidden><div><b>Session gone</b><a href="/">Dashboard</a></div></div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
@@ -122,14 +122,14 @@ tabs.onmessage = e => {
 // Closing this tab leaves the session running; only these buttons end it. Stop removes its
 // container and keeps this tab, to read how it ended. Delete forgets it and closes its tabs.
 async function stop(s) {
-  const what = s.kind === 'shell' ? 'Stop this terminal?' : `Stop ${label(s)} in ${name(s.project)}? Its container is removed.`;
+  const what = s.kind === 'shell' ? 'Stop this terminal?' : 'Stop this session?';
   if (!confirm(what)) return;
   await post(`/api/sessions/${s.id}/stop`).catch(e => alert(e.message));
   refresh();
 }
 
 async function remove(s) {
-  const what = s.kind === 'shell' ? 'Stop and delete this terminal?' : `Stop and delete ${label(s)} in ${name(s.project)}? Its tabs close too.`;
+  const what = s.kind === 'shell' ? 'Stop and delete this terminal?' : 'Stop and delete this session?';
   if (s.exit === null && !confirm(what)) return;
   // What a plugin offers to tidy up with it (its run's open pull request: close it) is asked
   // about one by one, and done only on a yes.

@@ -139,6 +139,8 @@ const q = query({
     systemPrompt: { type: 'preset', preset: 'claude_code', ...(briefing && { append: briefing }) },
     ...(resumed ? { resume: session } : { sessionId: session }),
     stderr: text => process.stderr.write(text),
+    // Claude Code says when a turn is over (session_state_changed) only when asked to.
+    env: { ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1' },
     // Asked only for the two tools that exist to consult a person, which Claude Code holds for
     // an answer even with every permission granted: a question with choices, a plan to approve.
     canUseTool: consult,
@@ -219,9 +221,10 @@ async function turnEnded(m) {
     turn.context = { used: usage.totalTokens, max: usage.maxTokens };
   } catch {}
   emit(turn);
+  if (!stateful) emit({ type: 'status', state: 'idle' });  // a Claude Code that does not say so itself
 }
 
-let code = 0;
+let code = 0, stateful = false;  // stateful: it reports its own state
 try {
   for await (const m of q) {
     const parent = m.parent_tool_use_id || undefined;
@@ -238,8 +241,10 @@ try {
       if (m.subtype === 'init') {
         if (m.model !== model) emit({ type: 'model', id: model = m.model });
         await described;
-      } else if (m.subtype === 'session_state_changed')
+      } else if (m.subtype === 'session_state_changed') {
+        stateful = true;
         emit({ type: 'status', state: { idle: 'idle', running: 'working', requires_action: 'question' }[m.state] });
+      }
       else if (m.subtype === 'status' && m.status === 'compacting')
         emit({ type: 'notice', level: 'info', text: 'Compacting the conversation…' });
       else if (m.subtype === 'compact_boundary')

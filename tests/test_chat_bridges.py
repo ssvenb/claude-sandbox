@@ -104,7 +104,8 @@ def test_claude_is_started_as_the_terminal_would_and_its_messages_become_chat_ev
         "allowDangerouslySkipPermissions": True, "includePartialMessages": True, "promptSuggestions": True,
         "agentProgressSummaries": True, "effort": "high", "canUseTool": "function", "stderr": "function",
         "systemPrompt": {"type": "preset", "preset": "claude_code", "append": "Brief."},
-        "sessionId": "5a4db0c0-0000-4000-8000-0000000a1b2c"}
+        "sessionId": "5a4db0c0-0000-4000-8000-0000000a1b2c",
+        "env": ["CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS"]}  # or it never says a turn is over
     assert options["cwd"].endswith("/work")
 
     b.say(type="prompt", text="do it")
@@ -135,6 +136,15 @@ def test_claude_is_started_as_the_terminal_would_and_its_messages_become_chat_ev
     b.say(type="effort", level="bogus")  # not a level: ignored
     b.until(lambda e: e["type"] == "effort")
     assert b.calls()[-3:] == [{"interrupt": True}, {"model": "opus"}, {"settings": {"effortLevel": "max"}}]
+    b.close()
+
+
+def test_a_claude_that_does_not_report_its_state_is_idle_once_its_turn_ends(tmp_path):
+    b = Bridge("claude", tmp_path, CLAUDE_TURN, FAKE_STATELESS="1")
+    b.until(lambda e: e["type"] == "ready")
+    b.say(type="prompt", text="do it")
+    b.until(lambda e: e["type"] == "turn")
+    assert b.until(lambda e: e["type"] == "status") == {"type": "status", "state": "idle"}
     b.close()
 
 

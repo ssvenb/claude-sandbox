@@ -33,12 +33,13 @@ printf '%s\n' ~/code/my-repo ~/code/other-repo > ~/.config/claude-sandbox/projec
 ./web/server.py           # http://127.0.0.1:8787  (--port N, --projects FILE, --allow-host NAME)
 ```
 
-The home page is a dashboard of all your sandboxes. It reads top down, from what needs you to
-what is merely there: one sentence on what every agent is doing ("1 agent waiting on you, 2 at
-work, 3 idle."), a box to start a session by writing its first message, a **window** per running
-session (the ones waiting on your answer first; each says what it was asked and what it is doing
-right now, with its pull request, ports, VS Code and stop buttons), then every listed project
-with all its sessions, a **+** button for a new session (`run.sh --chat` in that directory) and a terminal
+The home page is a dashboard of all your sandboxes. On top is a box to start a session by writing
+its first message, with the project it is for beside it. Under it, on the left, is what is
+**running now**, grouped by project: a **window** per running session (the ones waiting on your
+answer first; each says what it was asked and what it is doing right now, with its pull request,
+its ports and, top right, its stop button), and the project's ended sessions folded away below
+them. On the right is every listed **project** with what its plugins list (its issues), a **+** button for a
+new session (`run.sh --chat` in that directory) and a terminal
 button (**>_**) for a shell on this machine in the project — one per project, its tab brought to
 the front when it is already open. The gear button opens the project's settings, saved to its
 `.claude-sandbox.json`: a form drawn from what the sandbox, each agent and each plugin declare (see
@@ -96,17 +97,17 @@ button sends.
 A session runs until you end it: closing its
 tab, or the whole browser, leaves it running, and clicking it opens it again with the whole
 conversation. Each session has two
-buttons for that, on the dashboard and in its tab. **Stop** (the red square) removes its container
-and keeps it listed, its tab showing how it ended, so you can read it and resume it with the play button. **Delete**
-(the trash can) stops it if it still runs, removes it from the list and closes its tabs: its
-chat, VS Code and its pull request (the last two only while the dashboard that opened them has
+buttons for that. **Stop** (the red square, on its window and in its tab) removes its container
+and keeps it listed among its project's ended sessions, its tab showing how it ended, so you can read it and resume it with the play button. **Delete**
+(the trash can, in its tab and on an ended session) stops it if it still runs, removes it from the list and closes its tabs: its
+chat, VS Code and its pull request (the last two only while the page that opened them has
 not been reloaded).
 
 In a project's terminal tab, **Ctrl+C** copies the selection (and interrupts as usual when nothing is
 selected), **Ctrl+Shift+C** always copies, **Ctrl+V** and **Ctrl+Shift+V** paste; where the program has taken the mouse, as the agent's
 interface does, select with **Shift+drag**.
 
-The VS Code icon on a session opens VS Code in the browser on that run's checkout (the `agent-workspace`
+The VS Code icon in a session's tab opens VS Code in the browser on that run's checkout (the `agent-workspace`
 mirror of `/workspace`), again one tab per run. It needs VS Code on the host (`code` on the PATH:
 the .deb/.rpm or snap install, or the standalone CLI): the first click starts one `code serve-web`,
 accepting the VS Code Server license terms on your behalf, and it stops with the web UI. Its data
@@ -425,8 +426,8 @@ switches — but nothing is validated, built or started, so keep it quick and ne
 something a run would need. The web UI itself knows nothing about any plugin: it draws what these
 calls describe.
 
-The page has two places for what a plugin shows: **sections** of the project's band (pull
-requests, issues, …) and a **session's row**, next to its VS Code button, where an item is a small
+The page has two places for what a plugin shows: **sections** of the project's panel (pull
+requests, issues, …) and a **session's window**, where an item is a small
 button with its status mark and `ref` that opens its `url` in a tab of its own (a run's pull
 request, with its CI). An item is `{title, url}` plus optional `ref` (a short id shown first,
 `#12`), `note` (`Draft`), `status` (`ok`, `fail` or `pending`: a mark before it, e.g. CI) with its

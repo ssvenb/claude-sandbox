@@ -71,11 +71,8 @@
   .window .chips { display: flex; gap: 6px; min-width: 0; overflow: hidden; }
   .window .chips:empty { display: none; }
   .window .chips > * { position: relative; z-index: 1; }
-  /* A project's ended sessions, folded away at the foot of its panel. */
-  details.ended { margin-top: 8px; }
-  details.ended > summary { display: inline-block; cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; padding: 2px 0; }
-  details.ended > summary::-webkit-details-marker { display: none; }
-  details.ended > summary:hover { color: var(--ink); }
+  /* A project's ended sessions, at the foot of its panel. */
+  ul.ended { margin-top: 8px; }
 
   /* The right: a panel per project, its buttons, then what its plugins list (issues, …). */
   .project { padding: 14px 16px 12px; background: var(--panel); border: 1px solid var(--rule); border-radius: 14px; }
@@ -686,7 +683,6 @@ function windowOf(s, items) {
     h('div', {className: 'chips'}, ...items.map(chip(s))));
 }
 
-const unfolded = new Set();  // the projects whose ended sessions are unfolded, across redraws
 function render() {
   const sig = JSON.stringify([state, plugins]);
   if (sig === drawn) return;
@@ -715,14 +711,11 @@ function render() {
     return h('div', {className: 'group'}, h('h3', {title: path}, name(path)),
       h('div', {className: 'windows'}, ...running.map(s => windowOf(s, tiedTo(s)))));
   }).filter(Boolean);
-  // A project's ended sessions, folded away at the foot of its panel on the right.
+  // A project's ended sessions, at the foot of its panel on the right.
   const endedOf = path => {
     const ended = agents.filter(s => s.project === path && s.exit !== null).reverse();
     if (!ended.length) return '';
-    const fold = h('details', {className: 'ended', open: unfolded.has(path),
-                               ontoggle: () => { fold.open ? unfolded.add(path) : unfolded.delete(path); }},
-      h('summary', {}, `${ended.length} ended`),
-      h('ul', {}, ...ended.map(s => {
+    return h('ul', {className: 'ended'}, ...ended.map(s => {
         const play = h('button', {className: 'icon play', onclick: () => busy(play, () => start(path, 'resume', s.run_id)), ariaLabel: 'Resume session',
                                   title: 'Resume'}, ICON.play());
         return h('li', {},
@@ -731,8 +724,7 @@ function render() {
           ...tiedTo(s).map(chip(s)),
           s.run_id && !live(s.run_id) ? play : '',
           h('button', {className: 'icon', onclick: () => remove(s), ariaLabel: 'Delete session', title: 'Delete'}, ICON.trash()));
-      })));
-    return fold;
+      }));
   };
 
   // The right: each project, its buttons, and what its plugins list (issues, …): the page only

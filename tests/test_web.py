@@ -1,4 +1,5 @@
-"""web/server.py: sessions in ptys, streamed to the page; only our own page may drive it."""
+"""web/server.py: chats on pipes and terminals in ptys, streamed to the page; only our own page
+may drive it."""
 import base64
 import json
 import os
@@ -86,6 +87,9 @@ def test_sandbox_sessions_run_run_sh_under_an_id_the_ui_knows():
     assert web.command("resume", "0a1b2c") == [str(REPO / "run.sh"), "--resume", "0a1b2c"]
     assert web.command("run", "0a1b2c", "Fix #7") == [str(REPO / "run.sh"), "--run-id", "0a1b2c",
                                                        "--task", "Fix #7"]
+    assert web.command("resume", "0a1b2c", None, True) == [str(REPO / "run.sh"), "--resume", "0a1b2c", "--chat"]
+    with pytest.raises(ValueError, match="ui must be chat or terminal"):
+        web.start("/p", "run", None, None, "tui")
     for kind, run_id, task in (("shell", None, "x"), ("resume", "0a1b2c", "x"), ("run", None, 7),
                                ("run", None, "  ")):
         with pytest.raises(ValueError, match="a task starts a new run"):
@@ -134,6 +138,10 @@ def test_allow_host_adds_a_name_to_the_allowlist(tmp_path):
 def test_the_session_page_is_served_next_to_the_status_page(ui):
     assert b"/api/project" in ui("/").read()
     assert b"/stream" in ui("/session").read()
+    assert b"/events" in ui("/chat").read()
+    for shared, kind in (("/ui.css", "text/css"), ("/ui.js", "text/javascript")):
+        got = ui(shared)
+        assert got.status == 200 and got.headers["Content-Type"].startswith(kind)
 
 
 # Stands in for `code serve-web`: echoes each request's head back as the response body.
@@ -309,8 +317,8 @@ def test_a_session_outlives_its_tabs_until_stopped_or_deleted(tmp_path, monkeypa
     base = f"http://127.0.0.1:{server.server_address[1]}"
     post = lambda path: urllib.request.urlopen(urllib.request.Request(  # noqa: E731
         base + path, b"", headers={"Origin": base}), timeout=5)
-    stopped = web.start(str(tmp_path), "resume", "0a1b2c")
-    deleted = web.start(str(tmp_path), "resume", "3d4e5f")
+    stopped = web.start(str(tmp_path), "resume", "0a1b2c", ui="terminal")
+    deleted = web.start(str(tmp_path), "resume", "3d4e5f", ui="terminal")
     try:
         urllib.request.urlopen(f"{base}/api/sessions/{stopped.id}/stream", timeout=5).close()
         for _ in range(10):  # a few keepalives: the closed tab is long noticed
@@ -347,7 +355,7 @@ def test_a_sessions_status_is_what_its_agent_last_said_else_whether_output_flows
     script.write_text("#!/bin/sh\nstty -echo\nwhile read f; do cat \"$f\"; done\n")
     script.chmod(0o755)
     monkeypatch.setattr(web, "command", lambda *_: [str(script)])
-    s = web.start(str(tmp_path), "resume", "0a1b2c")
+    s = web.start(str(tmp_path), "resume", "0a1b2c", ui="terminal")
 
     def says(*chunks, then):
         for chunk in chunks:
@@ -455,7 +463,166 @@ def test_a_running_sessions_live_items_are_read_afresh_on_every_poll(tmp_path, m
     assert web.live_items(str(tmp_path), "0a1b2c") == [port]
     assert web.live_items(str(tmp_path), None) == []
     s = NS(project=str(tmp_path), run_id="0a1b2c", exit=None, kind="resume", id="a", started=0,
-           status=lambda: None)
+           ui="terminal", status=lambda: None)
     assert web.Session.json(s)["items"] == [port]
     s.exit = 0
     assert web.Session.json(s)["items"] == []
+
+
+# ---- chats: an agent behind its chat bridge, `run.sh --chat` on pipes ----------------------------
+
+STUB = REPO / "tests/stubs/chat_run.py"  # a sandbox that boots, then an agent speaking chat events
+
+
+@pytest.fixture
+def chat(tmp_path, monkeypatch):
+    """Starts chat sessions on the stub in place of run.sh; `chat.until(s, test)` waits for it."""
+    stub = tmp_path / "run.sh"
+    shutil.copy(STUB, stub)
+    stub.chmod(0o755)
+    docker = tmp_path / "bin/docker"
+    docker.parent.mkdir()
+    docker.write_text("#!/bin/sh\n")
+    docker.chmod(0o755)
+    monkeypatch.setattr(web, "RUN_SH", stub)
+    monkeypatch.setenv("PATH", f"{tmp_path}/bin:/usr/bin:/bin")
+    monkeypatch.setenv("STUB_BOOT", "0.05")
+    started = []
+
+    def start(kind="run", run_id=None, task=None):
+        s = web.start(str(tmp_path), kind, run_id, task)
+        started.append(s)
+        return s
+
+    def until(s, test, within=10):
+        for _ in range(within * 50):
+            with web.lock:
+                if test(s):
+                    return
+            time.sleep(0.02)
+        raise AssertionError(f"still {s.status()}: {s.events[-3:]}")
+    start.until, start.tmp = until, tmp_path
+    yield start
+    for s in started:
+        s.stop()
+    for s in started:
+        s.proc.wait(5)
+    web.sessions.clear()
+
+
+def test_prompts_typed_while_the_sandbox_starts_wait_and_reach_the_agent_in_order(chat, monkeypatch):
+    monkeypatch.setenv("STUB_BOOT", "0.2")
+    s = chat(task="first, please")  # a task is simply the first message
+    assert (s.ui, s.status(), s.json()["title"]) == ("chat", "starting", "first, please")
+    s.prompt("then ask me")
+    assert [(e["text"], e.get("queued")) for e in s.events if e["type"] == "user"] == [
+        ("first, please", True), ("then ask me", True)]
+    assert s.json()["waiting"] == 2 and not (chat.tmp / "commands").exists()  # nothing sent yet
+    chat.until(s, lambda s: s.ready)
+    sent = [json.loads(line) for line in (chat.tmp / "commands").read_text().splitlines()]
+    assert sent == [{"type": "prompt", "text": "first, please"}, {"type": "prompt", "text": "then ask me"}]
+    assert not any(e.get("queued") for e in s.events) and s.json()["waiting"] == 0
+    chat.until(s, lambda s: s.status() == "question")
+    boot = next(e for e in s.events if e["type"] == "boot")
+    assert "🤖 Agent: claude" in boot["text"] and "Cloning into /workspace" in boot["text"]  # one entry, every line
+    assert s.info["model"] == "fable" and [c["name"] for c in s.info["commands"]][0] == "compact"
+
+
+def test_a_chat_keeps_the_conversation_for_a_page_opened_later(chat):
+    s = chat()
+    chat.until(s, lambda s: s.ready)
+    assert s.status() == "idle"
+    s.prompt("change it")
+    chat.until(s, lambda s: s.status() == "idle" and any(e["type"] == "turn" for e in s.events))
+    snap = json.loads(json.dumps(s.snapshot()))
+    kinds = [e["type"] for e in snap["events"]]
+    assert "delta" not in kinds and kinds.count("user") == 1  # streamed text is folded into its block
+    answer = next(e for e in snap["events"] if e["type"] == "text" and e["id"] == "a1")
+    assert answer["text"].startswith("Done with “change it”.")
+    edit = next(e for e in snap["events"] if e["type"] == "tool" and e["name"] == "Edit")
+    assert (edit["done"], edit["error"], edit["output"]) == (True, False, "The file has been updated.")
+    assert next(e for e in snap["events"] if e.get("parent"))["name"] == "Grep"  # a subagent's call, under its parent
+    assert snap["todos"][-1] == {"text": "Run the tests", "status": "done"}
+    assert snap["suggestion"] == "Open a pull request for it"
+    told = s.json()
+    assert (told["cost"], told["context"], told["status"]) == (0.1, {"used": 30000, "max": 1000000}, "idle")
+    assert told["said"].endswith("for more.") and told["activity"] == ""
+    s.prompt("again")
+    assert s.snapshot()["suggestion"] is None  # it was for the turn before
+
+
+def test_a_chat_streams_its_events_and_takes_answers_and_interrupts(chat, tmp_path):
+    (tmp_path / "projects").write_text(f"{tmp_path}\n")
+    server = web.serve(0, tmp_path / "projects")
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+
+    def post(path, body=None, origin=base):
+        req = urllib.request.Request(base + path, json.dumps(body or {}).encode(), headers={"Origin": origin})
+        try:
+            return urllib.request.urlopen(req, timeout=5).status
+        except urllib.error.HTTPError as e:
+            return e.code
+    try:
+        s = json.load(urllib.request.urlopen(urllib.request.Request(base + "/api/sessions", json.dumps(
+            {"project": str(tmp_path), "kind": "run"}).encode())))
+        assert s["ui"] == "chat" and s["status"] == "starting"
+        live = web.sessions[s["id"]]
+        events = urllib.request.urlopen(f"{base}/api/sessions/{s['id']}/events", timeout=10)
+
+        def read(until):
+            for line in events:
+                if line.startswith(b"data: "):
+                    event = json.loads(line[6:])
+                    if until(event):
+                        return event
+        assert read(lambda e: True)["type"] == "snapshot"  # the page starts from the whole session
+        assert read(lambda e: e["type"] == "ready")["efforts"] == ["low", "medium", "high"]
+        assert post(f"/api/sessions/{s['id']}/prompt", {"text": "ask me"}) == 200
+        asked = read(lambda e: e["type"] == "ask")
+        assert read(lambda e: e["type"] == "status")["state"] == "question"
+        assert post(f"/api/sessions/{s['id']}/answer", {"id": asked["id"], "answers": {"Which database?": "SQLite"}}) == 200
+        assert read(lambda e: e["type"] == "text" and e["id"] == "a1")["text"] == "Going with **SQLite**."
+        with web.lock:  # the answer is kept with its question, for a page opened later
+            assert [(e["answers"], e.get("done")) for e in live.events if e["type"] == "ask"] == [
+                ({"Which database?": "SQLite"}, True)]
+        read(lambda e: e["type"] == "status" and e["state"] == "idle")
+
+        assert post(f"/api/sessions/{s['id']}/prompt", {"text": "a long one"}) == 200
+        read(lambda e: e["type"] == "tool" and e["name"] == "Bash")
+        assert live.json()["activity"] == "Bash: Wait a long time"
+        assert post(f"/api/sessions/{s['id']}/interrupt") == 200
+        assert read(lambda e: e["type"] == "result" and e["id"] == "b2")["error"] is True
+        assert post(f"/api/sessions/{s['id']}/model", {"id": "opus"}) == 200
+        assert read(lambda e: e["type"] == "model")["id"] == "opus"
+
+        assert post(f"/api/sessions/{s['id']}/prompt", {"text": "  "}) == 400          # not a message
+        assert post(f"/api/sessions/{s['id']}/input") == 400                           # a chat has no keys
+        assert urllib.request.urlopen(f"{base}/api/sessions/{s['id']}/stream", timeout=5).status == 0
+    except urllib.error.HTTPError as e:
+        assert e.code == 400  # nor a terminal's stream
+        assert post(f"/api/sessions/{s['id']}/prompt", {"text": "x"}, "http://evil.example") == 403  # nor another site's page
+    finally:
+        server.shutdown()
+
+
+def test_a_chat_that_ends_says_so_and_takes_no_more_prompts(chat, monkeypatch):
+    s = chat(task="now exit")
+    chat.until(s, lambda s: s.exit is not None)
+    assert (s.exit, s.status(), s.events[-1]) == (3, None, {"type": "exit", "code": 3})
+    with pytest.raises(ValueError, match="has ended"):
+        s.prompt("anyone there?")
+    monkeypatch.setenv("STUB_BOOT_FAILS", "1")
+    failed = chat(task="never delivered")  # the boot fails: what it printed is all there is to show
+    chat.until(failed, lambda s: s.exit is not None)
+    assert not failed.ready and failed.exit == 1
+    assert "GH_PRIVATE_KEY_FILE not found" in next(e for e in failed.events if e["type"] == "boot")["text"]
+    assert [e.get("queued") for e in failed.events if e["type"] == "user"] == [True]
+
+
+def test_a_resumed_chat_replays_what_was_said_before(chat):
+    s = chat("resume", "0a1b2c")
+    chat.until(s, lambda s: s.ready)
+    assert [(e["type"], e["text"]) for e in s.events if e["type"] in ("user", "text")] == [
+        ("user", "What was said before the resume"), ("text", "An earlier answer.")]
+    assert chat("resume", "0a1b2c") is s  # one live session per run

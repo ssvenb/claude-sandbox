@@ -2,126 +2,131 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Dashboard</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231b1d36'/%3E%3Crect x='6' y='6' width='9' height='9' rx='2' fill='%23f2b84b'/%3E%3Crect x='17' y='6' width='9' height='9' rx='2' fill='%233a3e6e'/%3E%3Crect x='6' y='17' width='9' height='9' rx='2' fill='%233a3e6e'/%3E%3Crect x='17' y='17' width='9' height='9' rx='2' fill='%23f2b84b'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="/ui.css">
+<script src="/ui.js"></script>
 <style>
-  :root { --dusk: #1b1d36; --night: #0f1123; --rule: #2e3158; --paper: #e6e4f2; --haze: #8c8fb3;
-          --lamp: #f2b84b; --link: #9aa5ff; --ok: #6fd3a2; --fail: #ff7b8a; --ask: #c69cff; color-scheme: dark; }
-  * { box-sizing: border-box; }
-  button { font: inherit; font-size: 14px; color: var(--paper); background: transparent;
-           border: 1px solid var(--rule); border-radius: 999px; padding: 3px 12px; cursor: pointer; }
-  button:hover { border-color: var(--haze); }
-  button:focus-visible, a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
-  body { margin: 0; padding: 36px 32px 64px; background: var(--dusk);
-         color: var(--paper); font: 15px/1.45 "Bricolage Grotesque", system-ui, sans-serif; }
-  .top { display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap; margin-bottom: 28px; }
-  h1 { font-size: 40px; font-weight: 700; letter-spacing: -.025em; line-height: 1; margin: 0; }
+  /* The dashboard reads top down, from what needs you to what is merely there: one sentence on
+     what every agent is doing, a place to start a new one, a window per session that is running
+     (the ones waiting on you first), then each project with all its sessions, pull requests and
+     issues. */
+  body { padding: 30px 32px 72px; }
+  main { max-width: 1320px; margin: 0 auto; }
+  .top { display: flex; align-items: flex-start; gap: 20px; }
+  .top > div:first-child { flex: 1; min-width: 0; }
+  h1 { font-size: clamp(30px, 4.4vw, 50px); font-weight: 700; letter-spacing: -.03em; line-height: 1.04; margin: 0;
+       text-wrap: balance; }
+  h1 .ask { color: var(--ask); }
+  h1 .lit { color: var(--lamp); }
+  h1 .quiet { color: var(--muted); }
   /* Totals over every project, one per column the projects show, in the same order. */
-  .totals { display: flex; flex-wrap: wrap; gap: 12px 44px; margin: -6px 0 26px; }
-  .total { display: flex; align-items: baseline; gap: 8px; }
-  .total b { font-size: 30px; font-weight: 650; letter-spacing: -.02em; line-height: 1;
-             font-variant-numeric: tabular-nums; }
-  .total b.lit { color: var(--lamp); }
-  .total span { color: var(--haze); }
+  .totals { display: flex; flex-wrap: wrap; gap: 4px 26px; margin: 12px 0 0; color: var(--muted); }
+  .total { display: flex; align-items: baseline; gap: 6px; }
+  .total b { color: var(--ink); font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums; }
 
-  /* One panel per project, darker than the page: a lit window per project, rules only inside. */
-  section { margin-top: 16px; padding: 22px 26px 26px; background: var(--night); border-radius: 16px; }
-  .head { display: flex; align-items: center; gap: 12px 24px; flex-wrap: wrap; }
-  h2 { flex: 1 1 auto; font-size: 24px; font-weight: 650; letter-spacing: -.015em;
-       line-height: 1.2; margin: 0; overflow-wrap: break-word; }
+  /* Starting a session is writing its first message: the sandbox boots behind it. */
+  .starter { display: flex; align-items: flex-end; gap: 8px; margin: 26px 0 0; padding: 8px 8px 8px 14px; background: var(--panel);
+             border: 1.5px solid var(--rule); border-radius: 18px; box-shadow: var(--shadow); max-width: 860px; }
+  .starter:focus-within { border-color: var(--lamp); }
+  .starter textarea { flex: 1; min-width: 0; min-height: 36px; max-height: 30vh; resize: none; border: 0; outline: 0 !important;
+                      background: transparent; padding: 6px 0; font-size: 16px; line-height: 1.5; }
+  .starter select { border-color: transparent; background: var(--sunk); max-width: 220px; font-weight: 550; height: 36px; cursor: pointer; }
+  .starter .in { color: var(--muted); padding-bottom: 7px; }
+  .starter button { height: 36px; padding: 0 16px; white-space: nowrap; }
+
+  h2.band { margin: 34px 0 12px; font-size: 15px; font-weight: 600; color: var(--muted); letter-spacing: 0; }
+  /* A window per running session, lit in the colour of what its agent is doing. */
+  .windows { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
+  .window { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 6px; min-height: 148px; padding: 14px 16px 10px;
+            background: var(--panel); border: 1px solid var(--rule); border-radius: 14px; text-align: left; min-width: 0; }
+  .window::before { content: ""; position: absolute; inset: -1px -1px auto -1px; height: 4px; border-radius: 14px 14px 0 0; background: var(--rule); }
+  .window.working::before, .window.starting::before { background: var(--lamp-fill); }
+  .window.question::before { background: var(--ask); }
+  .window.idle::before { background: var(--ok); }
+  .window.question { border-color: var(--ask); }
+  .window .state { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+  .window.working .state b, .window.starting .state b { color: var(--lamp); }
+  .window.question .state b { color: var(--ask); }
+  .window.idle .state b { color: var(--ok); }
+  .window .state b { font-weight: 600; }
+  .window .state span:last-child { margin-left: auto; color: var(--muted); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .window button.open { all: unset; cursor: pointer; font-size: 17px; font-weight: 650; letter-spacing: -.012em; line-height: 1.25;
+                        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .window button.open::after { content: ""; position: absolute; inset: 0; border-radius: 14px; }  /* the whole window opens it */
+  .window button.open:focus-visible::after { outline: 2px solid var(--link); outline-offset: 2px; }
+  .window:hover { border-color: var(--muted); }
+  .window.question:hover { border-color: var(--ask); }
+  .window .doing { color: var(--muted); font-size: 13.5px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2;
+                   -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; align-self: start; }
+  .window .doing.tool { font-family: var(--mono); font-size: 12px; }
+  .window .foot { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0 -6px; }
+  .window .foot > * { position: relative; z-index: 1; }  /* above the window's own click */
+  .window .foot .chips { display: flex; gap: 6px; flex: 1; min-width: 0; overflow: hidden; padding-left: 6px; }
+
+  /* One panel per project. */
+  section { margin-top: 14px; padding: 20px 24px 22px; background: var(--panel); border: 1px solid var(--rule); border-radius: 16px; }
+  .head { display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap; }
+  .head h2 { flex: 1 1 auto; font-size: 23px; font-weight: 650; letter-spacing: -.018em; line-height: 1.2; margin: 0;
+             overflow-wrap: break-word; min-width: 0; }
+  .head h2 small { margin-left: 10px; color: var(--muted); font-size: 13px; font-weight: 400; letter-spacing: 0; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; }
   .notes { margin-top: 6px; }
-  .columns { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 16px 36px;
-             margin-top: 18px; }
+  .notes p { color: var(--muted); font-size: 13px; }
+  .columns { display: grid; grid-template-columns: minmax(0, 1.25fr) repeat(auto-fit, minmax(0, 1fr)); grid-auto-flow: column;
+             grid-auto-columns: minmax(0, 1fr); gap: 16px 36px; margin-top: 16px; }
   /* A column's heading carries its count, so an empty one reads as quiet, not missing. */
-  h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; padding-bottom: 8px;
-       border-bottom: 1px solid var(--rule); font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
-  h3 .count { min-width: 22px; padding: 0 7px; border-radius: 999px; background: #ffffff0d;
-              color: var(--haze); font-size: 12px; font-weight: 500; line-height: 20px; text-align: center;
+  h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; padding-bottom: 8px;
+       border-bottom: 1px solid var(--rule); font-size: 15px; font-weight: 600; letter-spacing: -.005em; }
+  h3 .count { min-width: 22px; padding: 0 7px; border-radius: 999px; background: var(--sunk);
+              color: var(--muted); font-size: 12px; font-weight: 500; line-height: 20px; text-align: center;
               font-variant-numeric: tabular-nums; }
-  h3 .count.lit { background: #f2b84b24; color: var(--lamp); }
+  h3 .count.lit { background: var(--lamp-wash); color: var(--lamp); }
   ul { list-style: none; margin: 0; padding: 0; }
-  li { display: flex; align-items: center; gap: 6px; min-height: 32px; }
+  li { display: flex; align-items: center; gap: 6px; min-height: 34px; }
   li > :first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
                       white-space: nowrap; text-align: left; }
-  p { margin: 4px 0; color: var(--haze); font-size: 13px; }
-
-  button.primary { color: var(--night); background: var(--lamp); border-color: var(--lamp); font-weight: 600; }
-  button.primary:hover { filter: brightness(1.1); }
-  /* Round icon buttons on a project's row: the gear its settings, >_ its terminal, + a new session. */
-  button.glyph { width: 34px; height: 34px; padding: 0; display: inline-grid; place-items: center; }
-  button.glyph svg { width: 18px; height: 18px; }
-  button.icon { border-color: transparent; color: var(--haze); padding: 3px 8px; }
-  button.icon:hover { color: var(--paper); }
-  button.icon svg { width: 16px; height: 16px; display: block; }
-  button.icon.stop { color: var(--fail); }
-  button.icon.stop:hover { color: #ff9aa5; }
-  button.icon.play { color: var(--ok); }
-  button.icon.play:hover { color: #a3e6c4; }
-  button.icon.vscode { color: #3ea6f0; }
-  button.icon.vscode:hover { color: #7cc4f7; }
-  /* A session is a window in the dark: lit while its agent is at work. */
-  button.session { border-radius: 8px; border-color: transparent; padding: 5px 10px 5px 0;
-                   font-variant-numeric: tabular-nums; }
-  button.session:hover { color: var(--lamp); }
-  .lamp { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 10px;
-          border: 1.5px solid var(--haze); }
-  /* Its colour is what the agent is doing: amber and glowing at work, green when idle, a violet
-     blink when it waits on an answer. Ended: an empty ring. */
-  .lamp.working { border-color: var(--lamp); background: var(--lamp); animation: glow 2.6s ease-in-out infinite; }
-  .lamp.idle { border-color: var(--ok); background: var(--ok); }
-  .lamp.question { border-color: var(--ask); background: var(--ask); animation: ask 1.1s ease-in-out infinite; }
-  @keyframes glow { 0%, 100% { box-shadow: 0 0 0 0 #f2b84b00; } 50% { box-shadow: 0 0 10px 2px #f2b84b99; } }
-  @keyframes ask { 0%, 100% { box-shadow: 0 0 0 0 #c69cff00; opacity: 1; } 50% { box-shadow: 0 0 10px 3px #c69cffaa; opacity: .55; } }
-  .ended { color: var(--haze); }
-  a { color: var(--paper); text-decoration: none; padding: 4px 0; }
-  a:hover { color: var(--link); }
+  .columns p { color: var(--muted); font-size: 13px; }
+  button.session { display: flex; align-items: center; gap: 10px; border-radius: 8px; border-color: transparent; padding: 5px 8px 5px 0; }
+  button.session:hover .name { color: var(--lamp); }
+  button.session .name { overflow: hidden; text-overflow: ellipsis; }
+  button.session .run { color: var(--muted); font-size: 12px; font-family: var(--mono); flex: none; }
+  .ended .name { color: var(--muted); }
+  li a { color: var(--ink); text-decoration: none; padding: 4px 0; }
+  li a:hover { color: var(--link); }
   a .num { color: var(--link); font-variant-numeric: tabular-nums; margin-right: 8px; }
-  a .draft { color: var(--haze); }
-  /* An item's status (a pull request's CI): a mark ahead of its number, the details on hover. */
-  .status { display: inline-block; width: 14px; margin-right: 6px; text-align: center; font-weight: 700; }
-  .status.ok { color: var(--ok); }
-  .status.fail { color: var(--fail); }
-  .status.pending { color: var(--lamp); }
-  .status.done { color: var(--ask); }
-  /* An item on a session's row (its pull request): a small button, its status mark and ref. */
-  a.chip { display: inline-flex; align-items: center; padding: 2px 9px 2px 5px; border-radius: 999px;
-           border: 1px solid var(--rule); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-  a.chip:hover { border-color: var(--haze); color: var(--paper); }
-  a.chip .status { margin-right: 3px; }
-  a.chip.ok { border-color: #6fd3a266; }
-  a.chip.fail { border-color: #ff7b8a66; }
-  a.chip.pending { border-color: #f2b84b66; }
-  a.chip.done { border-color: #c69cff66; }
+  a .draft { color: var(--muted); }
+  .empty { margin-top: 30px; padding: 28px; border: 1px dashed var(--rule); border-radius: 16px; color: var(--muted); max-width: 70ch; }
+  .empty b { display: block; color: var(--ink); font-size: 19px; margin-bottom: 4px; }
 
   /* A project's sandbox settings (its .claude-sandbox.json), drawn from what the kernel, the
      agents and the plugins declare: one card each, a control per setting. */
   dialog { width: min(820px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0;
-           background: var(--night); color: var(--paper); border: 1px solid var(--rule); border-radius: 16px; }
-  dialog::backdrop { background: #0008; }
+           background: var(--panel); color: var(--ink); border: 1px solid var(--rule); border-radius: 16px; box-shadow: var(--shadow); }
+  dialog::backdrop { background: #0b0c1a99; }
   dialog form { display: flex; flex-direction: column; max-height: calc(100vh - 50px); }
   dialog header, dialog footer { padding: 18px 24px; }
   dialog header { display: grid; gap: 4px; border-bottom: 1px solid var(--rule); }
-  dialog header h2 { font-size: 22px; }
+  dialog header h2 { font-size: 22px; margin: 0; font-weight: 650; letter-spacing: -.015em; }
+  dialog header p, dialog .body p { color: var(--muted); font-size: 13px; }
   dialog header .tools { display: flex; gap: 10px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
   dialog header .tools input[type=search] { flex: 1 1 200px; }
   .modes { display: inline-flex; border: 1px solid var(--rule); border-radius: 999px; padding: 2px; }
-  .modes button { border: 0; padding: 2px 12px; color: var(--haze); }
-  .modes button[aria-pressed=true] { background: var(--rule); color: var(--paper); }
+  .modes button { border: 0; padding: 2px 12px; color: var(--muted); }
+  .modes button[aria-pressed=true] { background: var(--sunk); color: var(--ink); box-shadow: inset 0 0 0 1px var(--rule); }
   dialog footer { display: flex; align-items: center; gap: 10px; justify-content: flex-end;
                   border-top: 1px solid var(--rule); }
   dialog footer .error { flex: 1; color: var(--fail); margin: 0; white-space: pre-wrap; }
   dialog .body { overflow-y: auto; padding: 8px 24px 16px; }
-  dialog .body > h4 { margin: 18px 0 2px; color: var(--haze); font-size: 12px; font-weight: 600;
-                      letter-spacing: .08em; text-transform: uppercase; }
+  dialog .body > h4 { margin: 18px 0 2px; color: var(--muted); font-size: 13px; font-weight: 600; }
   .card { margin-top: 10px; padding: 12px 16px 14px; border: 1px solid var(--rule); border-radius: 12px; }
   .card.off { opacity: .72; }
   .card .row { display: flex; align-items: center; gap: 12px; }
   .card .row b { flex: 1; font-weight: 600; }
-  .card .row .agent { color: var(--haze); font-size: 12px; font-weight: 400; margin-left: 6px; }
+  .card .row .agent { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 6px; }
   .card > p { margin: 2px 0 0; }
   .card .fields { display: grid; gap: 14px; margin-top: 12px; }
   .card .fields:empty { display: none; }
@@ -129,7 +134,7 @@
   .field > .label { display: flex; align-items: center; gap: 8px; height: 24px; font-size: 14px; font-weight: 500; }
   .field > .label label { flex: 1; }
   .field > .label .req { color: var(--lamp); margin-left: 2px; }
-  .field > .label code, .card .row code { color: var(--haze); font-size: 11px; font-weight: 400; }
+  .field > .label code, .card .row code { color: var(--muted); font-size: 11px; font-weight: 400; }
   .field > p { margin: 0; font-size: 12px; }
   .field.bool { grid-template-columns: 1fr auto; align-items: center; column-gap: 12px; }
   .field.bool > .label { grid-column: 1; }
@@ -138,25 +143,22 @@
   .control { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .control > input, .control > select, .control > textarea, .control > .entries,
   .control > fieldset, .control > .chips { flex: 1; min-width: 0; }
-  .reset { border-color: transparent; color: var(--haze); padding: 0 8px; font-size: 12px; line-height: 20px; }
-  .reset:hover { color: var(--paper); }
-  .default { color: var(--haze); font-size: 12px; }
-  input, select, textarea { font: inherit; font-size: 13px; color: var(--paper); background: var(--dusk);
-                            border: 1px solid var(--rule); border-radius: 8px; padding: 6px 9px; }
-  input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--link); outline-offset: 0; }
-  input::placeholder, textarea::placeholder { color: #8c8fb399; }
-  textarea { display: block; width: 100%; min-height: 64px; resize: vertical; }
-  .mono, textarea.json { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .reset { border-color: transparent; color: var(--muted); padding: 0 8px; font-size: 12px; line-height: 20px; }
+  .reset:hover { color: var(--ink); }
+  .default { color: var(--muted); font-size: 12px; }
+  dialog input, dialog select, dialog textarea { font-size: 13px; }
+  dialog textarea { display: block; width: 100%; min-height: 64px; resize: vertical; }
+  .mono, textarea.json { font-family: var(--mono); }
   .bad { border-color: var(--fail) !important; }
   /* A switch: on is lit; while it only shows the default, it is drawn hollow. */
   button.switch { position: relative; width: 42px; height: 24px; padding: 0; flex: none;
-                  background: var(--dusk); border-color: var(--rule); }
+                  background: var(--sunk); border-color: var(--rule); }
   button.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
-                         border-radius: 50%; background: var(--haze); transition: transform .15s; }
+                         border-radius: 50%; background: var(--muted); transition: transform .15s; }
   button.switch[aria-checked=true] { background: var(--ok); border-color: var(--ok); }
-  button.switch[aria-checked=true]::after { transform: translateX(18px); background: var(--night); }
+  button.switch[aria-checked=true]::after { transform: translateX(18px); background: var(--panel); }
   button.switch.unset { background: transparent; }
-  button.switch.unset[aria-checked=true] { background: #6fd3a233; border-color: var(--ok); }
+  button.switch.unset[aria-checked=true] { background: var(--ok-wash); border-color: var(--ok); }
   button.switch.unset[aria-checked=true]::after { background: var(--ok); }
   /* Lists and maps: a row per entry, its own remove button; objects in a list are cards of their own. */
   .entries { display: grid; gap: 6px; }
@@ -164,13 +166,14 @@
   .entry > input { flex: 1; min-width: 0; }
   .entry > input.key { flex: 0 1 40%; }
   .add { justify-self: start; font-size: 13px; color: var(--link); border-style: dashed; }
-  .remove { border-color: transparent; color: var(--haze); padding: 2px 8px; }
+  .remove { border-color: transparent; color: var(--muted); padding: 2px 8px; }
   .remove:hover { color: var(--fail); }
-  .item { padding: 10px 12px 12px; border: 1px solid var(--rule); border-radius: 10px; background: #ffffff05; }
+  .item { padding: 10px 12px 12px; border: 1px solid var(--rule); border-radius: 10px; background: var(--sunk); }
   .item > .row { display: flex; align-items: center; gap: 8px; }
   .item > .row b { flex: 1; font-weight: 600; font-size: 14px; }
   .item .fields { margin-top: 8px; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
   .item .fields > .wide { grid-column: 1 / -1; }
+  .item input, .item select, .item textarea { background: var(--panel); }
   fieldset.object { margin: 0; padding: 8px 12px 12px; border: 1px solid var(--rule); border-radius: 10px; }
   fieldset.object > .fields { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -179,50 +182,37 @@
   .chips label:has(input:checked) { border-color: var(--link); color: var(--link); }
   .chips input { margin: 0; accent-color: var(--link); }
   .kept { font-size: 12px; }
-  .hidden { display: none !important; }
 
   @media (max-width: 900px) {
-    body { padding: 24px 16px 48px; }
-    section { padding: 18px 16px 22px; border-radius: 12px; }
-    .totals { gap: 8px 22px; }
-    .total b { font-size: 24px; }
-    .total { gap: 6px; }
-    .columns { grid-auto-flow: row; gap: 22px; }
+    body { padding: 20px 14px 48px; }
+    section { padding: 16px 14px 18px; border-radius: 12px; }
+    .columns { grid-template-columns: minmax(0, 1fr); grid-auto-flow: row; gap: 22px; }
+    .starter { flex-wrap: wrap; }
+    .starter textarea { flex-basis: 100%; }
+    .starter select { flex: 1; max-width: none; }
+    .window { min-height: 0; }
+    .top { gap: 10px; }
+    h2.band { margin-top: 26px; }
+    button.session .run { display: none; }
+    dialog { width: 100vw; max-width: 100vw; max-height: 100dvh; height: 100dvh; margin: 0; border-radius: 0; border: 0; }
+    dialog form { max-height: 100dvh; height: 100%; }
+    dialog .body { flex: 1; }
     dialog header, dialog footer { padding: 14px 16px; }
     dialog .body { padding: 4px 16px 12px; }
     .card { padding: 10px 12px 12px; }
   }
-  @media (prefers-reduced-motion: reduce) { .lamp { animation: none !important; } }
 </style>
 </head>
 <body>
-<main id="board"></main>
+<main id="board"><p class="loading"><span class="spin"></span>Reading your projects</p></main>
 <dialog id="config"></dialog>
 <script>
-const $ = id => document.getElementById(id);
-// Everything is built with textContent, never innerHTML: PR titles are other people's text.
-const h = (tag, props = {}, ...kids) => {
-  const e = Object.assign(document.createElement(tag), props);
-  e.append(...kids);
-  return e;
-};
-const api = async (path, opts) => {
-  const r = await fetch(path, opts), j = await r.json();
-  if (!r.ok) throw new Error(j.error);
-  return j;
-};
-const post = (path, body) => api(path, {method: 'POST', body});
-const name = path => path.replace(/\/+$/, '').split('/').pop();
-const label = s => s.kind === 'shell' ? 'terminal' : s.run_id + (s.kind === 'resume' ? ' (resumed)' : '');
-
+window.name = 'sandbox-dashboard';  // where a chat's way back lands
 let state = {projects: [], sessions: []}, plugins = {}, drawn = '';
 
 // What a project's plugins put on a run's session row: items they added there themselves, and
 // items they tied to a run (a pull request on the run's branch), from their sections or listed
 // for runs only (which show nowhere else).
-// What a plugin publishes for a running session (its servers' ports), to link from wherever this
-// page was opened: `{host}` in its url is this page's own host name.
-const here = i => ({...i, url: i.url.replaceAll('{host}', location.hostname)});
 const liveItems = s => (s.items || []).map(here);
 const runItems = said => [...said.lists.flatMap(list => list.items), ...(said.run_items || [])]
   .filter(i => i.run_id).concat(said.session_items || []);
@@ -263,16 +253,18 @@ function item(e, i) {
   if (w && fresh(w)) w.location.replace(i.url);
 }
 
+// A session's page: its chat, or the terminal of one that runs in a pty.
+const page = s => (s.ui === 'chat' ? '/chat#' : '/session#') + s.id;
 function show(s) {
   const w = tab('session-' + s.id);
-  if (w && fresh(w)) w.location.replace('/session#' + s.id);
+  if (w && fresh(w)) w.location.replace(page(s));
 }
 
 async function start(project, kind, run_id, task) {
   const w = window.open('about:blank');  // its name is the session's id, which the server picks
   try {
     const s = await post('/api/sessions', JSON.stringify({project, kind, run_id, task}));
-    if (w) { w.name = 'session-' + s.id; opened[w.name] = w; w.location.replace('/session#' + s.id); }
+    if (w) { w.name = 'session-' + s.id; opened[w.name] = w; w.location.replace(page(s)); }
     refresh();
   } catch (e) { w?.close(); alert(e.message); }
 }
@@ -288,38 +280,15 @@ async function terminal(project) {
   } catch (e) { w.close(); alert(e.message); }
 }
 
-// Icon buttons' glyphs: drawn, so they keep the button's colour.
-const svg = (d, extra = '') => {
-  const e = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  e.setAttribute('viewBox', '0 0 20 20');
-  e.setAttribute('aria-hidden', 'true');
-  e.innerHTML = `<path d="${d}" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>${extra}`;
-  return e;
-};
-const SAYS = {working: 'working', idle: 'idle, waiting for its next task', question: 'waiting on your answer'};
-const PLUS = 'M10 4v12M4 10h12', PROMPT = 'M4 6l4 4-4 4M10 15h6';
-// A session's own row, as on a recorder: resume it (play), stop it (the red square); delete it,
-// VS Code on its checkout.
-const TRASH = 'M3.5 5.5h13M8 5.5V3.5h4v2M5.5 5.5l.8 11h7.4l.8-11M8.5 8.5v5M11.5 8.5v5';
-const filled = (inner, viewBox = '0 0 20 20') => {
-  const e = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  e.setAttribute('viewBox', viewBox);
-  e.setAttribute('aria-hidden', 'true');
-  e.innerHTML = inner;
-  return e;
-};
-const GEAR = () => filled('<g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></g>', '0 0 24 24');
-const PLAY = () => filled('<path d="M6 4.2v11.6a.8.8 0 0 0 1.2.7l9.3-5.8a.8.8 0 0 0 0-1.4L7.2 3.5a.8.8 0 0 0-1.2.7z" fill="currentColor"/>');
-const STOP = () => filled('<rect x="4.5" y="4.5" width="11" height="11" rx="2" fill="currentColor"/>');
-const VSCODE = () => filled('<path fill="currentColor" fill-rule="evenodd" d="M17 1.5 22 4v16l-5 2.5-9.4-8.6-4.3 3.3L2 16.5v-9l1.3-.7 4.3 3.3zm0 5.7L10.7 12l6.3 4.8z"/>', '0 0 24 24');
-
-async function code(s) {
+async function code(s, button) {
   const w = tab('code-' + s.workspace);
   if (!w || !fresh(w)) return;
-  try {
-    const v = await post('/api/vscode', JSON.stringify({session: s.id}));
-    w.location.replace('/vscode/?folder=' + encodeURIComponent(v.folder));
-  } catch (e) { w.close(); alert(e.message); }
+  await busy(button, async () => {  // the first one starts `code serve-web`, which takes a moment
+    try {
+      const v = await post('/api/vscode', JSON.stringify({session: s.id}));
+      w.location.replace('/vscode/?folder=' + encodeURIComponent(v.folder));
+    } catch (e) { w.close(); alert(e.message); }
+  });
 }
 
 // Stopping removes the container and keeps the session listed, its tab showing how it ended, so
@@ -686,10 +655,6 @@ async function configure(path) {
   filter.focus();
 }
 
-const mark = i => i.status ? h('span', {className: 'status ' + i.status, ariaLabel: i.status_text || i.status},
-  {ok: '✓', fail: '✕', pending: '●', done: '⇥'}[i.status] || '') : '';
-const tip = i => [(i.ref ? i.ref + ' ' : '') + (i.note ? i.note + ': ' : '') + i.title + (i.branch ? ` (${i.branch})` : ''),
-  i.status_text].filter(Boolean).join('\n');
 // An item on a session's row: opens in its own tab, as in a section.
 const chip = i => h('a', {className: 'chip ' + (i.status || ''), href: i.url, target: '_blank', rel: 'noopener',
                           onclick: e => item(e, i), title: tip(i)}, mark(i), i.ref || i.title);
@@ -697,8 +662,62 @@ const chip = i => h('a', {className: 'chip ' + (i.status || ''), href: i.url, ta
 const column = (title, items, row, none, lit) => h('div', {},
   h('h3', {}, title, h('span', {className: 'count' + (lit ? ' lit' : '')}, String(items.length))),
   items.length ? h('ul', {}, ...items.map(row)) : h('p', {}, none));
-const resume = (path, run_id) =>
-  h('button', {onclick: () => start(path, 'resume', run_id), title: 'Same branch, same conversation'}, 'Resume');
+const resume = (path, run_id) => {
+  const b = h('button', {onclick: () => busy(b, () => start(path, 'resume', run_id)), title: 'Same branch, same conversation'}, 'Resume');
+  return b;
+};
+
+// What every agent is doing, in one sentence: the ones waiting on you first.
+function lede(agents) {
+  const n = st => agents.filter(s => s.status === st).length;
+  const parts = [[n('question'), 'ask', 'waiting on you'], [n('working'), 'lit', 'at work'],
+                 [n('starting'), 'lit', 'starting'], [n('idle'), 'quiet', 'idle']].filter(p => p[0]);
+  if (!parts.length) return h('h1', {}, 'Nobody at work.');
+  const h1 = h('h1');
+  parts.forEach(([k, cls, what], i) => h1.append(
+    h('span', {className: cls}, i ? `${k} ${what}` : `${k} ${k === 1 ? 'agent' : 'agents'} ${what}`), i < parts.length - 1 ? ', ' : '.'));
+  return h1;
+}
+
+// The first message of a new session, and the project it is for. One form for the page's whole
+// life (rebuilt only when the projects change), so what is being written survives a redraw.
+let starterForm = null, starterFor = '';
+function starter() {
+  const projects = state.projects;
+  if (starterForm && starterFor === projects.join()) return starterForm;
+  starterFor = projects.join();
+  const text = h('textarea', {rows: 1, name: 'task', placeholder: 'What should an agent work on?', ariaLabel: 'First message of a new session',
+    value: starterForm?.elements.task.value || '', oninput: () => grow(),
+    onkeydown: e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); starterForm.requestSubmit(); } }});
+  const grow = () => { text.style.height = 'auto'; text.style.height = Math.min(text.scrollHeight, innerHeight * .3) + 'px'; };
+  const pick = h('select', {name: 'project', ariaLabel: 'Project'}, ...projects.map(p => h('option', {value: p}, name(p))));
+  const go = h('button', {type: 'submit', className: 'primary'}, 'Start session');
+  starterForm = h('form', {className: 'starter', onsubmit: e => {
+    e.preventDefault();
+    const task = text.value.trim();
+    text.value = '';
+    grow();
+    busy(go, () => start(projects.length > 1 ? pick.value : projects[0], 'run', undefined, task || undefined));
+  }}, text, projects.length > 1 ? h('span', {className: 'in'}, 'in') : '', projects.length > 1 ? pick : '', go);
+  return starterForm;
+}
+
+// A running session as a window: how it is doing, what it was asked, what it is at right now.
+function windowOf(s, items) {
+  const doing = s.status === 'starting' ? h('div', {className: 'doing'}, spinner(s.waiting ? `Starting its sandbox, ${s.waiting} message${s.waiting > 1 ? 's' : ''} waiting` : 'Starting its sandbox'))
+    : s.status === 'question' ? h('div', {className: 'doing'}, 'It asked you something and waits for the answer.')
+    : s.status === 'working' && s.activity ? h('div', {className: 'doing tool'}, s.activity)
+    : h('div', {className: 'doing'}, (s.said || '').replace(/[#*`>|]/g, '').replace(/\s+/g, ' ').slice(0, 180) || (s.status === 'working' ? 'Thinking' : 'Waiting for its first task.'));
+  const vs = h('button', {className: 'icon vscode', onclick: () => code(s, vs), ariaLabel: 'VS Code', title: `VS Code on this run's checkout, ${s.workspace}`}, ICON.vscode());
+  return h('article', {className: 'window ' + s.status},
+    h('div', {className: 'state'}, h('span', {className: 'lamp ' + s.status}), h('b', {}, SHORT[s.status]),
+      h('span', {title: s.project}, `${name(s.project)}, ${ago(s.started)}`)),
+    h('button', {className: 'open', onclick: () => show(s), title: s.title || 'Open the session'}, titled(s)),
+    doing,
+    h('div', {className: 'foot'}, h('div', {className: 'chips'}, ...items.map(chip)),
+      s.workspace ? vs : '',
+      h('button', {className: 'icon stop', onclick: () => stop(s), ariaLabel: 'Stop session', title: 'Stop: remove its container, keep it listed'}, ICON.stop())));
+}
 
 function render() {
   const sig = JSON.stringify([state, plugins]);
@@ -711,65 +730,79 @@ function render() {
     return of.find(s => s.exit === null) || of.pop();
   };
   const agents = state.sessions.filter(s => s.kind !== 'shell');  // terminals are not sessions
-  const running = agents.some(s => s.exit === null);
   const totals = new Map([['Sessions', agents.length]]);
   for (const said of Object.values(plugins))
     for (const list of said.lists) totals.set(list.title, (totals.get(list.title) || 0) + list.items.length);
+  const tiedTo = s => {
+    const said = plugins[s.project];
+    return (s.run_id && said && holder(s.project, s.run_id) === s ? runItems(said).filter(i => i.run_id === s.run_id) : []).concat(liveItems(s));
+  };
+  const urgency = {question: 0, working: 1, starting: 2, idle: 3};
+  const running = agents.filter(s => s.exit === null).sort((a, b) => urgency[a.status] - urgency[b.status] || b.started - a.started);
+  // The starter form is moved, not rebuilt: put the caret back where it was.
+  const typing = document.activeElement?.closest?.('.starter') && document.activeElement;
+  const caret = typing?.selectionStart !== undefined ? [typing.selectionStart, typing.selectionEnd] : null;
 
   $('board').replaceChildren(
-    h('div', {className: 'top'}, h('h1', {}, 'Dashboard')),
-    h('div', {className: 'totals'}, ...[...totals].map(([title, n]) => h('div', {className: 'total'},
-      h('b', {className: title === 'Sessions' && running ? 'lit' : ''}, String(n)), h('span', {}, title)))),
+    h('div', {className: 'top'}, h('div', {}, lede(running),
+      h('div', {className: 'totals'}, ...[...totals].map(([title, n]) => h('div', {className: 'total'}, h('b', {}, String(n)), h('span', {}, title))))),
+      themeSwitch()),
+    state.projects.length ? starter() : '',
+    running.length ? h('h2', {className: 'band'}, 'Running now') : '',
+    running.length ? h('div', {className: 'windows'}, ...running.map(s => windowOf(s, tiedTo(s)))) : '',
+    state.projects.length ? h('h2', {className: 'band'}, 'Projects') : '',
     ...state.projects.map(path => {
       const mine = agents.filter(s => s.project === path), said = plugins[path];
-      const tied = said ? runItems(said) : [];
-      const onRow = s => s.run_id && holder(path, s.run_id) === s ? tied.filter(i => i.run_id === s.run_id) : [];
+      const gear = h('button', {className: 'glyph', onclick: () => busy(gear, () => configure(path)), title: 'Plugins and settings for this project (.claude-sandbox.json)',
+                                ariaLabel: 'Settings'}, ICON.gear());
+      const shell = h('button', {className: 'glyph', onclick: () => busy(shell, () => terminal(path)), title: 'Terminal on this machine, in the project',
+                                 ariaLabel: 'Terminal'}, ICON.prompt());
+      const add = h('button', {className: 'glyph primary', onclick: () => busy(add, () => start(path, 'run')), title: 'New session',
+                               ariaLabel: 'New session'}, ICON.plus());
       return h('section', {},
         h('div', {className: 'head'},
-          h('h2', {title: path}, name(path)),
-          h('div', {className: 'actions'},
-            h('button', {className: 'glyph', onclick: () => configure(path), title: 'Plugins and settings for this project (.claude-sandbox.json)',
-                         ariaLabel: 'Settings'}, GEAR()),
-            h('button', {className: 'glyph', onclick: () => terminal(path), title: 'Terminal on this machine, in the project',
-                         ariaLabel: 'Terminal'}, svg(PROMPT)),
-            h('button', {className: 'glyph primary', onclick: () => start(path, 'run'), title: 'New session',
-                         ariaLabel: 'New session'}, svg(PLUS)))),
+          h('h2', {title: path}, name(path), said?.agent ? h('small', {}, said.agent) : ''),
+          h('div', {className: 'actions'}, gear, shell, add)),
         h('div', {className: 'notes'},
-          ...(said ? said.notes.map(note => h('p', {}, note)) : [h('p', {}, 'Reading the project…')])),
+          ...(said ? said.notes.map(note => h('p', {}, note)) : [h('p', {className: 'loading'}, h('span', {className: 'spin'}), 'Reading the project')])),
         h('div', {className: 'columns'},
-        column('Sessions', mine, s => h('li', {},
-          h('button', {className: 'session' + (s.exit === null ? '' : ' ended'), onclick: () => show(s), title: 'Open its terminal in a tab'},
-            h('span', {className: 'lamp ' + (s.status || ''), title: SAYS[s.status] || 'ended'}),
-            label(s) + (s.exit === null ? '' : `, exited ${s.exit}`) + (s.status === 'question' ? ', has a question' : '')),
-          ...onRow(s).concat(liveItems(s)).map(chip),
-          s.exit !== null && s.run_id && !live(s.run_id)
-            ? h('button', {className: 'icon play', onclick: () => start(path, 'resume', s.run_id), ariaLabel: 'Resume session',
-                           title: 'Resume: same branch, same conversation'}, PLAY()) : '',
-          s.workspace ? h('button', {className: 'icon vscode', onclick: () => code(s), ariaLabel: 'VS Code',
-                                     title: `VS Code on this run's checkout, ${s.workspace}`}, VSCODE()) : '',
-          s.exit === null ? h('button', {className: 'icon stop', onclick: () => stop(s), ariaLabel: 'Stop session',
-                                         title: 'Stop: remove its container, keep it listed'}, STOP()) : '',
-          h('button', {className: 'icon', onclick: () => remove(s), ariaLabel: 'Delete session',
-                       title: 'Delete: forget it, stopping it first'}, svg(TRASH))),
-          'Nobody at work.', mine.some(s => s.exit === null)),
+        column('Sessions', mine, s => {
+          const play = h('button', {className: 'icon play', onclick: () => busy(play, () => start(path, 'resume', s.run_id)), ariaLabel: 'Resume session',
+                                    title: 'Resume: same branch, same conversation'}, ICON.play());
+          const vs = h('button', {className: 'icon vscode', onclick: () => code(s, vs), ariaLabel: 'VS Code',
+                                  title: `VS Code on this run's checkout, ${s.workspace}`}, ICON.vscode());
+          return h('li', {},
+            h('button', {className: 'session' + (s.exit === null ? '' : ' ended'), onclick: () => show(s), title: s.title || 'Open the session in a tab'},
+              h('span', {className: 'lamp ' + (s.status || ''), title: SAYS[s.status] || 'ended'}),
+              h('span', {className: 'name'}, (s.title || label(s)) + (s.exit === null ? '' : `, exited ${s.exit}`) + (s.status === 'question' ? ', has a question' : '')),
+              s.title ? h('span', {className: 'run'}, s.run_id) : ''),
+            ...tiedTo(s).map(chip),
+            s.exit !== null && s.run_id && !live(s.run_id) ? play : '',
+            s.workspace ? vs : '',
+            s.exit === null ? h('button', {className: 'icon stop', onclick: () => stop(s), ariaLabel: 'Stop session',
+                                           title: 'Stop: remove its container, keep it listed'}, ICON.stop()) : '',
+            h('button', {className: 'icon', onclick: () => remove(s), ariaLabel: 'Delete session',
+                         title: 'Delete: forget it, stopping it first'}, ICON.trash()));
+        }, 'No sessions yet. Start one with the + above.', mine.some(s => s.exit === null)),
         // What the project's plugins list (issues, …): the page only draws it. An item a plugin
         // tied to a run is on that run's session row instead, while one is listed; with none, it
         // offers to resume the run. Items listed for runs only (pull requests) have no section.
         ...(said ? said.lists : []).map(list => column(list.title,
-          list.items.filter(i => !(i.run_id && holder(path, i.run_id))), i =>
-          h('li', {},
-            h('a', {href: i.url, target: '_blank', rel: 'noopener', onclick: e => item(e, i), title: tip(i)},
-              mark(i), i.ref ? h('span', {className: 'num'}, i.ref) : '',
-              i.note ? h('span', {className: 'draft'}, i.note + ': ') : '', i.title),
-            i.run_id ? resume(path, i.run_id) : '',
-            // A new session on a task the plugin wrote for this item (an issue's Resolve).
-            i.start ? h('button', {onclick: () => start(path, 'run', undefined, i.start.task), title: i.start.task},
-                        i.start.label) : ''),
-          'None open.'))));
+          list.items.filter(i => !(i.run_id && holder(path, i.run_id))), i => {
+            const go = i.start && h('button', {onclick: () => busy(go, () => start(path, 'run', undefined, i.start.task)), title: i.start.task}, i.start.label);
+            return h('li', {},
+              h('a', {href: i.url, target: '_blank', rel: 'noopener', onclick: e => item(e, i), title: tip(i)},
+                mark(i), i.ref ? h('span', {className: 'num'}, i.ref) : '',
+                i.note ? h('span', {className: 'draft'}, i.note + ': ') : '', i.title),
+              i.run_id ? resume(path, i.run_id) : '',
+              // A new session on a task the plugin wrote for this item (an issue's Resolve).
+              go || '');
+          }, 'None open.'))));
     }));
   if (!state.projects.length)
-    $('board').append(h('p', {},
-      `No projects yet. List their directories, one per line, in ${state.projects_file}`));
+    $('board').append(h('div', {className: 'empty'}, h('b', {}, 'No projects yet'),
+      `List the directories of the repos your agents work on, one per line, in ${state.projects_file}. They show up here on the next refresh.`));
+  if (typing) { typing.focus(); if (caret && typing.setSelectionRange) typing.setSelectionRange(...caret); }
 }
 
 async function load(path) {

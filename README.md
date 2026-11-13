@@ -33,8 +33,12 @@ printf '%s\n' ~/code/my-repo ~/code/other-repo > ~/.config/claude-sandbox/projec
 ./web/server.py           # http://127.0.0.1:8787  (--port N, --projects FILE, --allow-host NAME)
 ```
 
-The home page is a dashboard of all your sandboxes: totals across them, then every listed project
-with its sessions, a **+** button for a new session (`run.sh` in that directory) and a terminal
+The home page is a dashboard of all your sandboxes. It reads top down, from what needs you to
+what is merely there: one sentence on what every agent is doing ("1 agent waiting on you, 2 at
+work, 3 idle."), a box to start a session by writing its first message, a **window** per running
+session (the ones waiting on your answer first; each says what it was asked and what it is doing
+right now, with its pull request, ports, VS Code and stop buttons), then every listed project
+with all its sessions, a **+** button for a new session (`run.sh --chat` in that directory) and a terminal
 button (**>_**) for a shell on this machine in the project — one per project, its tab brought to
 the front when it is already open. The gear button opens the project's settings, saved to its
 `.claude-sandbox.json`: a form drawn from what the sandbox, each agent and each plugin declare (see
@@ -59,17 +63,46 @@ described. `github-auth` lists the pull requests and issues, `git-workspace` rec
 branches among them, `agent-workspace` says where a run's checkout is — switch one off for a
 project and its part of the page goes with it.
 
-A session opens in a browser tab of its own — the agent's own TUI, so its slash commands and
-suggestions work as they do in your terminal. Clicking a session whose tab is already open brings
-that tab to the front instead of opening a second one. A session runs until you end it: closing its
-tab, or the whole browser, leaves it running, and clicking it opens it again. Each session has two
+A session opens in a browser tab of its own, as a **chat**: your messages, the agent's answers
+(markdown, streamed as it writes), what it thought, and a line per tool call that opens to show
+what went in and what came back — an edit as a diff, a command with its output, a subagent with
+its own calls inside. Its plan sits above the composer, a question it asks you is a card with its
+choices, and the composer offers the agent's own slash commands and skills as you type `/`, its
+models and effort levels, and a stop button (or **Esc**) to interrupt it. Clicking a session whose
+tab is already open brings that tab to the front instead of opening a second one.
+
+The chat is there from the first moment. While the image builds and the sandbox boots, the page
+shows what the boot prints, and whatever you write is kept by the server and handed to the agent,
+in order, the moment it is ready — an issue's **Resolve** is simply a session whose first message
+is already written.
+
+The agent runs behind a **chat bridge** instead of its TUI: `agents/<name>/chat.mjs`, started by
+the agent's `launch.sh` when `run.sh` is given `--chat`. The bridge drives the same CLI the
+terminal would, through the vendor's own SDK — the
+[Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-typescript) for `claude`, the
+[GitHub Copilot SDK](https://www.npmjs.com/package/@github/copilot-sdk) for `copilot` — so settings, hooks,
+MCP servers, skills, slash commands and the run's conversation are the ones the terminal has, and
+a run started in one can be resumed in the other. What differs per agent ends at the bridge: each
+translates its SDK's messages into one set of chat events ([src/lib/chat-bridge.mjs](src/lib/chat-bridge.mjs)
+lists them) on the container's stdout, and takes prompts, answers, interrupts and model changes on
+its stdin, so the page knows no agent. An agent without a `chat.mjs` cannot be started with
+`--chat`; `{"ui": "terminal"}` in the request that starts a session (`POST /api/sessions`) runs
+its TUI in a terminal tab instead, as before.
+
+The pages follow your browser's light or dark setting; the switch in their header pins one. They
+are laid out for a phone as well as a desk: on a touch keyboard Enter starts a new line and the
+button sends.
+
+A session runs until you end it: closing its
+tab, or the whole browser, leaves it running, and clicking it opens it again with the whole
+conversation. Each session has two
 buttons for that, on the dashboard and in its tab. **Stop** (the red square) removes its container
 and keeps it listed, its tab showing how it ended, so you can read it and resume it with the play button. **Delete**
 (the trash can) stops it if it still runs, removes it from the list and closes its tabs: its
-terminal, VS Code and its pull request (the last two only while the dashboard that opened them has
+chat, VS Code and its pull request (the last two only while the dashboard that opened them has
 not been reloaded).
 
-In a terminal tab, **Ctrl+C** copies the selection (and interrupts as usual when nothing is
+In a project's terminal tab, **Ctrl+C** copies the selection (and interrupts as usual when nothing is
 selected), **Ctrl+Shift+C** always copies, **Ctrl+V** and **Ctrl+Shift+V** paste; where the program has taken the mouse, as the agent's
 interface does, select with **Shift+drag**.
 
@@ -88,7 +121,8 @@ agent's home directory, so it only outlives the container while `claude-home` / 
 mounts it from the host (both on by default); without them a resumed run starts a new conversation
 on the old branch.
 
-Needs only `python3` on the host (and `gh` for the PR list); the page loads xterm.js from a CDN.
+Needs only `python3` on the host (and `gh` for the PR list); the pages load their fonts, and the
+terminal page xterm.js, from a CDN.
 It listens on loopback only and has no login — use an SSH tunnel to reach it from elsewhere.
 Sessions belong to the server process: stopping it stops them.
 
@@ -109,6 +143,7 @@ run.sh (host)
             ├─ the agent's agent-init.sh (seeds its own config for a non-interactive boot)
             ├─ each enabled plugin's agent-init.sh (auth, /workspace, guardrails, briefing)
             └─ the agent's launch.sh → $AGENT_LAUNCH_CMD + flags + [briefing]
+                                       (run.sh --chat: → node chat.mjs, the agent behind its chat bridge)
 ```
 
 Two variables steer the tail of that sequence:
@@ -142,6 +177,7 @@ An agent is a directory under `agents/<name>/`. Only `agent.json` is required; t
 | `host.sh` | you | on the host, **after** every plugin's `host.sh` |
 | `agent-init.sh` | `node` | in the container, before the plugins' agent stage |
 | `launch.sh` | `node` | last: turns `$AGENT_PROMPT` into flags and starts the agent |
+| `chat.mjs` | `node` | in place of the agent's TUI for a web chat (`run.sh --chat`): drives the agent through its SDK and speaks the chat events of [src/lib/chat-bridge.mjs](src/lib/chat-bridge.mjs) on stdio |
 
 `agent.json` carries `name`, `description`, `managedSettings` — the path the agent reads its
 managed (enterprise) policy from, which is where plugin `settings.json` fragments are merged.

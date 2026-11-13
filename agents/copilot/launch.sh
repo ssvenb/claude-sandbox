@@ -10,6 +10,11 @@
 #
 # $AGENT_TASK (run.sh --task) is the user's task: it closes that first message, which then asks
 # for it to be done instead of for a wait.
+# A web chat (run.sh --chat) has no terminal: the agent runs behind its chat bridge, which drives
+# it through the GitHub Copilot SDK and resumes the same conversation.
+if [ "${AGENT_UI:-}" = chat ]; then
+  exec node "$AGENT_DIR/chat.mjs"
+fi
 session="sandbox-${RUN_ID:?}"
 if [ -n "$AGENT_TASK" ]; then
   AGENT_PROMPT="${AGENT_PROMPT:+$AGENT_PROMPT

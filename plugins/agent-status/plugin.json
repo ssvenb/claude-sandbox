@@ -1,6 +1,6 @@
 {
   "name": "agent-status",
-  "description": "Hooks that tell the terminal whether the agent is working, idle or waiting on a question, for the web UI's status dots.",
+  "description": "Hooks that tell the terminal whether the agent is working, idle or waiting on a question, for the web UI's status dots on a session that runs in a terminal (a chat's bridge reports it itself).",
   "priority": 30,
   "defaultEnabled": true,
   "requiredAgent": "claude",

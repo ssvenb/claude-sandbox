@@ -97,6 +97,18 @@ def test_claude_resume_continues_the_runs_conversation_when_it_was_kept(sb, save
     assert argv()[1:3] == [flag, CLAUDE_SESSION]
 
 
+@pytest.mark.parametrize("agent", ["claude", "copilot"])
+def test_a_chat_launches_the_agents_bridge_instead_of_its_tui(sb, agent):
+    """AGENT_UI=chat (run.sh --chat): the bridge takes the agent's place, with the briefing, the
+    run and the resume flag in its environment; the agent's own CLI is the SDK's to start."""
+    out = sb.tmp / "node"
+    sb.stub("node", f'printf "%s\\n" "$1" "$AGENT_PROMPT" "$RUN_ID" "$RESUME" >"{out}"\n')
+    sb.stub("fake-agent", "exit 9\n")
+    sb.sh("agent_run_stage launch", AGENT=agent, AGENT_UI="chat", AGENT_LAUNCH_CMD="fake-agent",
+          AGENT_PROMPT="Context.", RUN_ID="0a1b2c", RESUME="1").ok()
+    assert out.read_text().splitlines() == [f"{REPO}/agents/{agent}/chat.mjs", "Context.", "0a1b2c", "1"]
+
+
 def test_copilot_is_prepared_for_an_unattended_boot(sb):
     run = sb.sh('agent_run_stage agent-init\necho "$COPILOT_AUTO_UPDATE $COPILOT_HOME $COPILOT_ALLOW_ALL"',
                 AGENT="copilot").ok()

@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Web UI to orchestrate sandboxes: a status page listing the configured projects with their
-sessions and whatever their enabled plugins have to show (`run.sh --web`: open pull requests and
-issues, say); a terminal page per session, each in its own tab; and VS Code in the browser
-(`code serve-web`) on a run's checkout.
+"""Web UI to orchestrate sandboxes: a dashboard of the configured projects with their sessions and
+whatever their enabled plugins have to show (`run.sh --web`: open pull requests and issues, say);
+a chat page per session, each in its own tab; a terminal page for a project's shell; and VS Code
+in the browser (`code serve-web`) on a run's checkout.
 
-Runs on the HOST, as you, next to run.sh — a session is `run.sh` in a pty with the project as its
-cwd, exactly what you would type yourself. Standard library only; the page loads xterm.js from a
-CDN. Terminal output goes out as server-sent events, keystrokes come back as POSTs.
+Runs on the HOST, as you, next to run.sh — a session is `run.sh --chat` with the project as its
+cwd: the agent behind its chat bridge (agents/<name>/chat.mjs), whose events (src/lib/chat-bridge.mjs)
+come out of run.sh's stdout and go to the page as server-sent events, while prompts come back as
+POSTs. The page is there from the first moment: what is typed while the sandbox still builds and
+boots waits here and is handed to the agent the moment it is ready. A project's terminal is your
+shell in a pty. Standard library only; the terminal page loads xterm.js from a CDN.
 
     web/server.py [--port 8787] [--bind 127.0.0.1] [--allow-host NAME]... [--projects FILE]
 
@@ -53,14 +56,23 @@ KEEPALIVE = 15  # seconds between keepalives on a terminal's stream: how soon a 
 # its output, `ESC ] 1337 ; SetUserVar=agent_status=<base64> BEL` (or ST in place of BEL).
 STATUS = re.compile(rb"\x1b\]1337;SetUserVar=agent_status=([A-Za-z0-9+/=]*)(?:\x07|\x1b\\)")
 STATES = {"working", "idle", "question"}
+RS = b"\x1e"  # leads each chat event on a chat session's stdout; any other line is boot output
+ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|[\x00-\x08\x0b-\x1f]")
+BOOT_LINES = 400  # of boot output kept for the page
+EVENTS = 20000  # chat events kept per session, the oldest dropped first
 QUIET = 3  # seconds without output after which an agent that reports nothing counts as idle
 # A TUI at work redraws (its spinner, its timer) all the time, so "working" this long without a byte
 # of output means it was interrupted before it could say it stopped (Esc fires no Stop hook).
 STALE = 30
 
+# The pages and what they share. Read on every request, so an edit shows on reload.
+PAGES = {"/": ("index.html", "text/html; charset=utf-8"), "/session": ("session.html", "text/html; charset=utf-8"),
+         "/chat": ("chat.html", "text/html; charset=utf-8"), "/ui.css": ("ui.css", "text/css; charset=utf-8"),
+         "/ui.js": ("ui.js", "text/javascript; charset=utf-8")}
+
 sessions = {}
 described = {}  # project → what describe() last said about it
-lock = threading.Lock()  # guards `sessions` and every session's buf/listeners/exit
+lock = threading.RLock()  # guards `sessions` and every session's buf/listeners/exit
 
 
 def projects(file):
@@ -87,13 +99,17 @@ def projects(file):
     return list(dict.fromkeys(found))  # a project listed twice shows once
 
 
-def command(kind, run_id, task=None):
+def command(kind, run_id, task=None, chat=False):
     if kind == "shell":  # the project's terminal: your own shell, on this machine, in the project
         return [os.environ.get("SHELL", "/bin/sh")]
-    return [str(RUN_SH), "--resume" if kind == "resume" else "--run-id", run_id] + (["--task", task] if task else [])
+    return [str(RUN_SH), "--resume" if kind == "resume" else "--run-id", run_id] \
+        + (["--task", task] if task else []) + (["--chat"] if chat else [])
 
 
 class Session:
+    """A terminal: a project's shell, or an agent's own TUI (`"ui": "terminal"`), in a pty."""
+    ui = "terminal"
+
     def __init__(self, project, kind, run_id, task=None):
         self.id = secrets.token_hex(4)
         self.project, self.kind, self.run_id = project, kind, run_id
@@ -140,7 +156,7 @@ class Session:
             for q in self.listeners:
                 q.put(None)
             if self.id not in sessions:  # deleted while it ran: drop() left its pty to us
-                os.close(self.fd)
+                self.close()
 
     def write(self, data):
         while data and self.exit is None:
@@ -174,10 +190,225 @@ class Session:
             return "idle"
         return self.said or ("working" if quiet < QUIET else "idle")
 
+    def close(self):
+        """Lets go of what an ended session still holds. Caller holds `lock`."""
+        os.close(self.fd)
+
     def json(self):
-        return {**{k: getattr(self, k) for k in ("id", "project", "kind", "run_id", "started", "exit")},
+        return {**{k: getattr(self, k) for k in ("id", "project", "kind", "run_id", "started", "exit", "ui")},
                 "status": self.status(), "workspace": checkout(self.project, self.run_id),
                 "items": live_items(self.project, self.run_id) if self.exit is None and self.kind != "shell" else []}
+
+
+def tool_label(name, given):
+    """A tool call in a few words, for a session's row: what it runs, reads or looks for."""
+    given = given if isinstance(given, dict) else {}
+    for key in ("description", "command", "file_path", "path", "pattern", "query", "url", "prompt"):
+        if isinstance(given.get(key), str) and given[key].strip():
+            return f"{name}: {given[key].strip().splitlines()[0]}"[:160]
+    return name
+
+
+class Chat(Session):
+    """An agent behind its chat bridge: `run.sh --chat` on pipes. Its stdout is boot output until
+    the bridge speaks, then chat events (src/lib/chat-bridge.mjs), each line led by RS. Every
+    event is kept in `events` so a page opened later (or again) starts from the whole
+    conversation; streamed text is folded into the block it belongs to on the way in."""
+    ui = "chat"
+
+    def __init__(self, project, kind, run_id, task=None):
+        self.id = secrets.token_hex(4)
+        self.project, self.kind, self.run_id = project, kind, run_id
+        self.started, self.exit = time.time(), None
+        self.listeners, self.events = [], []
+        self.ready, self.state, self.waiting = False, "idle", []  # prompts typed before `ready`
+        self.info, self.todos, self.suggestion = {}, [], None
+        self.title = self.activity = self.said = ""
+        self.cost, self.context, self.sent = None, None, 0
+        self.blocks, self.tools, self.boot = {}, {}, None  # where streamed text, results and boot lines go
+        self.proc = subprocess.Popen(command(kind, run_id, None, True), cwd=project, stdin=subprocess.PIPE,
+                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                     start_new_session=True)  # a group of its own, to stop as one
+        self.pid = self.proc.pid
+        threading.Thread(target=self._pump, daemon=True).start()
+        if task:
+            self.prompt(task)
+
+    def _pump(self):
+        for raw in self.proc.stdout:
+            if raw.startswith(RS):
+                try:
+                    event = json.loads(raw[1:])
+                except ValueError:
+                    continue
+                if isinstance(event, dict) and isinstance(event.get("type"), str):
+                    with lock:
+                        self._take(event)
+                continue
+            # A progress line redraws itself with carriage returns: its last state is what counts.
+            text = ANSI.sub("", raw.decode(errors="replace").rstrip("\r\n").split("\r")[-1]).rstrip()
+            if text:
+                with lock:
+                    self._take({"type": "boot", "text": text})
+        code = self.proc.wait()
+        with lock:
+            self.exit = code
+            self._tell({"type": "exit", "code": code}, keep=True)
+            for q in self.listeners:
+                q.put(None)
+
+    def _tell(self, event, keep=False):
+        """To every open page, and into the log when a page opened later needs it too."""
+        if keep:
+            self.events.append(event)
+            del self.events[:-EVENTS]
+        for q in self.listeners:
+            q.put(event)
+
+    def _take(self, e):
+        """One event from the bridge (or a line of boot output). Caller holds `lock`."""
+        kind = e["type"]
+        if kind == "boot":  # one growing entry, so the log is not a line per build step
+            if self.boot is None or self.events[-1:] != [self.boot]:
+                self.boot = {"type": "boot", "text": ""}
+                self.events.append(self.boot)
+            self.boot["text"] = "\n".join((self.boot["text"] + "\n" + e["text"]).lstrip("\n").splitlines()[-BOOT_LINES:])
+            return self._tell(e)
+        if kind in ("delta", "text"):
+            block = self.blocks.get(e.get("id"))
+            if block is None:
+                block = self.blocks[e.get("id")] = {**e, "type": "text", "text": ""}
+                self.events.append(block)
+            block["text"] = block["text"] + e.get("text", "") if kind == "delta" else e.get("text", "")
+            if block.get("kind") != "thinking" and not block.get("parent"):
+                self.said = block["text"].strip()[-400:]
+            return self._tell(e)
+        if kind == "tool":
+            tool = self.tools.get(e.get("id"))
+            if tool is None:
+                tool = self.tools[e.get("id")] = dict(e)
+                self.events.append(tool)
+            else:
+                tool.update(e)
+            if not e.get("parent"):
+                self.activity = tool_label(str(e.get("name")), e.get("input"))
+            return self._tell(e)
+        if kind == "result":
+            tool = self.tools.get(e.get("id"))
+            if tool is not None:
+                tool.update(output=e.get("output", ""), error=bool(e.get("error")), done=not e.get("partial"))
+            return self._tell(e)
+        if kind == "status":
+            if e.get("state") in STATES:
+                self.state = e["state"]
+                if self.state != "working":
+                    self.activity = ""
+            return self._tell({"type": "status", "state": self.status()})
+        if kind == "ready":
+            self.info = {**self.info, **{k: v for k, v in e.items() if k != "type" and v is not None}}
+            first, self.ready = not self.ready, True
+            self._tell({"type": "ready", **self.info})
+            if first:  # what was typed while the sandbox started, in the order it was typed
+                waiting, self.waiting = self.waiting, []
+                for prompt in waiting:
+                    prompt.pop("queued", None)
+                    self._send({"type": "prompt", "text": prompt["text"]})
+                    self._tell({"type": "sent", "id": prompt["id"]})
+                if waiting:
+                    self.state = "working"
+                self._tell({"type": "status", "state": self.status()})
+            return
+        if kind in ("model", "effort"):
+            self.info[kind] = e.get("id" if kind == "model" else "level")
+            return self._tell(e)
+        if kind == "todos":
+            self.todos = e.get("items") if isinstance(e.get("items"), list) else []
+            return self._tell(e)
+        if kind == "suggestion":
+            self.suggestion = e.get("text")
+            return self._tell(e)
+        if kind == "asked":
+            for ask in self.events:
+                if ask.get("type") == "ask" and ask.get("id") == e.get("id"):
+                    ask["done"] = True
+            return self._tell(e)
+        if kind == "turn":
+            if isinstance(e.get("cost"), (int, float)):
+                self.cost = e["cost"]
+            if isinstance(e.get("context"), dict):
+                self.context = e["context"]
+        if kind in ("hello", "progress"):
+            return self._tell(e)
+        self._tell(e, keep=True)  # user, ask, turn, notice, and whatever a bridge adds
+
+    def _send(self, command):
+        try:
+            self.proc.stdin.write(json.dumps(command).encode() + b"\n")
+            self.proc.stdin.flush()
+        except (OSError, ValueError):  # it ended under us: the exit event says so
+            pass
+
+    def prompt(self, text):
+        """A message of the user's: to the agent at once, or kept until it is ready."""
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("a prompt is text")
+        with lock:
+            if self.exit is not None:
+                raise ValueError("this session has ended: resume it to go on")
+            self.sent += 1
+            event = {"type": "user", "id": f"u{self.sent}", "text": text}
+            self.title = self.title or " ".join(text.split())[:140]
+            self.suggestion = None
+            if self.ready:
+                self._send({"type": "prompt", "text": text})
+                self.state = "working"
+            else:
+                event["queued"] = True
+                self.waiting.append(event)
+            self._tell(event, keep=True)
+            self._tell({"type": "status", "state": self.status()})
+
+    def tell(self, command):
+        """interrupt, answer, model, effort: straight to the bridge, which knows what they mean."""
+        with lock:
+            if command.get("type") == "answer":
+                for ask in self.events:
+                    if ask.get("type") == "ask" and ask.get("id") == command.get("id"):
+                        ask["answers"] = None if command.get("cancel") else command.get("answers")
+            if self.ready and self.exit is None:
+                self._send(command)
+
+    def snapshot(self):
+        """Everything a page needs to draw the session from nothing. Caller holds `lock`."""
+        return {"type": "snapshot", "events": self.events, "info": self.info, "todos": self.todos,
+                "suggestion": self.suggestion, "ready": self.ready, "status": self.status(), "session": self.json()}
+
+    def write(self, data):
+        raise ValueError("a chat takes prompts, not keystrokes")
+
+    resize = write
+
+    def close(self):
+        pass
+
+    def stop(self):
+        if self.exit is None:
+            try:
+                self.proc.stdin.close()
+            except OSError:
+                pass
+        super().stop()
+
+    def status(self):
+        """starting until the agent is ready, then what its bridge says: working, idle, question."""
+        if self.exit is not None:
+            return None
+        return self.state if self.ready else "starting"
+
+    def json(self):
+        return {**super().json(), "title": self.title, "activity": self.activity, "said": self.said,
+                "agent": self.info.get("agent"), "model": self.info.get("model"), "cost": self.cost,
+                "context": self.context, "waiting": len(self.waiting), "todos": self.todos}
 
 
 def describe(project):
@@ -511,10 +742,14 @@ def drop(s):
     """Forget a session. Caller holds `lock`. A live one is stopped first, and its pty closed by
     its pump once it has ended, never under it."""
     if sessions.pop(s.id, None) and s.exit is not None:
-        os.close(s.fd)
+        s.close()
 
 
-def start(project, kind, run_id, task=None):
+def start(project, kind, run_id, task=None, ui=None):
+    """A new session, or the live one it would double. An agent's session is a chat unless
+    `ui` is "terminal" (its own TUI in a pty, as `run.sh` in your terminal); a shell is a terminal."""
+    if ui not in (None, "chat", "terminal"):
+        raise ValueError("ui must be chat or terminal")
     if task is not None and (kind != "run" or not isinstance(task, str) or not task.strip()):
         raise ValueError("a task starts a new run, and is text")
     if kind == "run":
@@ -534,7 +769,7 @@ def start(project, kind, run_id, task=None):
                 return s
             if kind == "shell":
                 drop(s)
-        s = Session(project, kind, run_id, task)
+        s = (Session if kind == "shell" or ui == "terminal" else Chat)(project, kind, run_id, task)
         sessions[s.id] = s
         return s
 
@@ -636,10 +871,8 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         query = {k: v[0] for k, v in parse_qs(url.query).items()}
         known = projects(self.server.projects_file)
-        if url.path == "/":
-            self.reply(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
-        elif url.path == "/session":
-            self.reply(200, (HERE / "session.html").read_bytes(), "text/html; charset=utf-8")
+        if url.path in PAGES:
+            self.reply(200, (HERE / PAGES[url.path][0]).read_bytes(), PAGES[url.path][1])
         elif url.path == "/api/state":
             with lock:
                 live = [s.json() for s in sessions.values()]
@@ -662,7 +895,14 @@ class Handler(BaseHTTPRequestHandler):
                                             for i in found]})
         elif m := re.fullmatch(r"/api/sessions/(\w+)/stream", url.path):
             if s := self.session(m[1]):
+                if s.ui != "terminal":
+                    return self.reply(400, {"error": "a chat has events, not a stream"})
                 self.stream(s)
+        elif m := re.fullmatch(r"/api/sessions/(\w+)/events", url.path):
+            if s := self.session(m[1]):
+                if s.ui != "chat":
+                    return self.reply(400, {"error": "a terminal has a stream, not events"})
+                self.events(s)
         else:
             self.reply(404, {"error": "not found"})
 
@@ -677,7 +917,8 @@ class Handler(BaseHTTPRequestHandler):
                 req = json.loads(body)
                 if req.get("project") not in projects(self.server.projects_file):
                     raise ValueError("not a configured project")
-                self.reply(200, start(req["project"], req.get("kind"), req.get("run_id"), req.get("task")).json())
+                self.reply(200, start(req["project"], req.get("kind"), req.get("run_id"), req.get("task"),
+                                      req.get("ui")).json())
             elif url.path == "/api/config":
                 req = json.loads(body)
                 if req.get("project") not in projects(self.server.projects_file):
@@ -693,6 +934,20 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("no such session, or it has no checkout on this machine")
                 vscode()
                 self.reply(200, {"folder": folder})
+            elif m := re.fullmatch(r"/api/sessions/(\w+)/(prompt|interrupt|answer|model|effort)", url.path):
+                s = self.session(m[1])
+                if s is None:
+                    return
+                if s.ui != "chat":
+                    raise ValueError("a terminal takes keystrokes, not prompts")
+                req = json.loads(body) if body.strip() else {}
+                if not isinstance(req, dict):
+                    raise ValueError("the request must be a JSON object")
+                if m[2] == "prompt":
+                    s.prompt(req.get("text"))
+                else:  # only the fields a bridge reads, under the name the path gave
+                    s.tell({"type": m[2], **{k: req[k] for k in ("id", "answers", "cancel", "level") if k in req}})
+                self.reply(200, {})
             elif m := re.fullmatch(r"/api/sessions/(\w+)/(input|resize|stop|delete)", url.path):
                 s = self.session(m[1])
                 if s is None:
@@ -721,6 +976,40 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(404, {"error": "not found"})
         except (ValueError, KeyError, OSError, struct.error) as e:
             self.reply(400, {"error": str(e)})
+
+    def events(self, s):
+        """A chat's events: the conversation so far in one snapshot, then each event as it comes."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        q = queue.Queue()
+        with lock:  # snapshot and subscription in one step, so no event is lost or doubled
+            first = json.dumps(s.snapshot()).encode()
+            if s.exit is None:
+                s.listeners.append(q)
+            else:
+                q.put(None)
+        try:
+            self.wfile.write(b"data: " + first + b"\n\n")
+            self.wfile.flush()
+            while True:
+                try:
+                    event = q.get(timeout=KEEPALIVE)
+                except queue.Empty:
+                    self.wfile.write(b": keepalive\n\n")  # also how a closed tab is noticed
+                    self.wfile.flush()
+                    continue
+                if event is None:
+                    break
+                self.wfile.write(b"data: " + json.dumps(event).encode() + b"\n\n")
+                self.wfile.flush()
+        except OSError:
+            pass
+        finally:
+            with lock:
+                if q in s.listeners:
+                    s.listeners.remove(q)
 
     def stream(self, s):
         self.send_response(200)

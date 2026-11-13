@@ -25,11 +25,12 @@ cd "$(dirname "$0")"
 # shellcheck source=src/lib/host-ports.sh
 . src/lib/host-ports.sh
 
-usage() { echo "Usage: $0 [--resume <RUN_ID> | --run-id <RUN_ID> | --web | --web-action <PLUGIN> <ACTION> <ARG>] [--task TEXT]   (RUN_ID is 6 hex chars)" >&2; exit "${1:-1}"; }
+usage() { echo "Usage: $0 [--resume <RUN_ID> | --run-id <RUN_ID> | --web | --web-action <PLUGIN> <ACTION> <ARG>] [--task TEXT] [--chat]   (RUN_ID is 6 hex chars)" >&2; exit "${1:-1}"; }
 RESUME=0
 WEB=0
 WEB_ACTION_ARGS=()
 TASK=""
+CHAT=0
 GIVEN_ID=0
 RUN_ID=""
 while [ $# -gt 0 ]; do
@@ -47,10 +48,15 @@ while [ $# -gt 0 ]; do
     # The agent's first message, so it starts working without anyone typing (the web UI's Resolve).
     --task) TASK="${2:-}"; shift; [ $# -eq 0 ] || shift
       [ -n "$TASK" ] || { echo "--task needs the task's text." >&2; usage; } ;;
+    # No terminal: the agent runs behind its chat bridge (agents/<name>/chat.mjs) and this
+    # process's stdin and stdout carry the chat's commands and events (src/lib/chat-bridge.mjs).
+    # What the web UI starts; prompts arrive as commands, so there is no --task with it.
+    --chat) CHAT=1; shift ;;
     -h|--help) usage 0 ;;
     *) echo "Unknown argument: $1" >&2; usage ;;
   esac
 done
+[ -z "$TASK" ] || [ "$CHAT" = 0 ] || { echo "--chat takes its prompts as commands; it has no --task." >&2; usage; }
 [ -z "$TASK" ] || [ "$RESUME" = 0 ] || { echo "--task starts a fresh run; it cannot resume one." >&2; usage; }
 if [ "$GIVEN_ID" = 1 ]; then
   case "$RUN_ID" in
@@ -95,6 +101,8 @@ if [ "$WEB" = 1 ]; then
     '. + {agent: $agent, plugins: ($plugins | split(" "))}' <<<"$WEB_JSON" >&3
   exit 0
 fi
+[ "$CHAT" = 0 ] || [ -f "agents/$AGENT/chat.mjs" ] \
+  || { echo "❌ The $AGENT agent has no chat bridge (agents/$AGENT/chat.mjs): start it without --chat." >&2; exit 1; }
 plugins_validate
 plugins_host_stage
 agent_host_stage
@@ -115,7 +123,9 @@ docker build -t "$IMAGE" \
   --build-arg ENABLED_PLUGINS="$ENABLED_PLUGINS" \
   ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"} .
 
-docker run -it --rm \
+# A chat has no terminal to attach: its stdio is the bridge's wire, which a pty would mangle.
+[ "$CHAT" = 1 ] && TTY=(-i -e AGENT_UI=chat) || TTY=(-it)
+docker run "${TTY[@]}" --rm \
   -e RUN_ID="$RUN_ID" \
   -e RUN_DATE="$RUN_DATE" \
   -e RESUME="$RESUME" \

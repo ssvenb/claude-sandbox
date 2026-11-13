@@ -277,3 +277,83 @@ def test_a_session_outlives_its_tabs_until_stopped_or_deleted(tmp_path, monkeypa
         deleted.stop()
         server.shutdown()
         web.sessions.clear()
+
+
+def marker(state):
+    return b"\x1b]1337;SetUserVar=agent_status=" + base64.b64encode(state.encode()) + b"\x07"
+
+
+def test_a_sessions_status_is_what_its_agent_last_said_else_whether_output_flows(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    script = tmp_path / "agent"
+    # Says each line of `out` it is given, raw: the agent-status hook's marker among other output,
+    # the second one split over two writes.
+    script.write_text("#!/bin/sh\nstty -echo\nwhile read f; do cat \"$f\"; done\n")
+    script.chmod(0o755)
+    monkeypatch.setattr(web, "command", lambda *_: [str(script)])
+    s = web.start(str(tmp_path), "resume", "0a1b2c")
+
+    def says(*chunks, then):
+        for chunk in chunks:
+            seen = len(s.buf)
+            out.write_bytes(chunk)
+            s.write(f"{out}\n".encode())
+            for _ in range(100):  # until the agent has said all of it
+                if len(s.buf) >= seen + len(chunk):
+                    break
+                time.sleep(0.05)
+        assert s.status() == then, bytes(s.buf)
+
+    try:
+        assert s.status() == "working"  # nothing said yet, and its output just started
+        s.output -= web.QUIET
+        assert s.status() == "idle"  # quiet: nothing to do
+        says(b"text " + marker("question") + b" more", then="question")
+        m = marker("idle")
+        says(m[:9], m[9:], then="idle")
+        says(marker("bogus"), marker("working"), then="working")
+        s.output -= web.STALE + 1  # working, yet silent this long: it was interrupted
+        assert s.status() == "idle"
+        assert s.json()["status"] == "idle"
+    finally:
+        s.stop()
+        for _ in range(50):
+            if s.exit is not None:
+                break
+            time.sleep(0.1)
+        web.sessions.clear()
+    assert s.status() is None  # ended
+
+
+@pytest.mark.parametrize("event, said", [
+    ({"hook_event_name": "UserPromptSubmit"}, b"working"),
+    ({"hook_event_name": "PreToolUse", "tool_name": "Bash"}, b"working"),
+    ({"hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion"}, b"question"),
+    ({"hook_event_name": "PostToolUse", "tool_name": "AskUserQuestion"}, b"working"),
+    ({"hook_event_name": "Notification", "notification_type": "permission_prompt"}, b"question"),
+    ({"hook_event_name": "Notification", "notification_type": "idle_prompt"}, b"idle"),
+    ({"hook_event_name": "Stop"}, b"idle"),
+    ({"hook_event_name": "SessionStart"}, b""),
+])
+def test_the_agent_status_hook_writes_its_state_to_the_agents_terminal(event, said):
+    """The hook finds the terminal through its parent (here, the shell holding the pty) and writes
+    the marker the server reads; it never prints anything or fails the agent's tool call."""
+    import pty
+    hook = REPO / "plugins/agent-status/bin/agent-status.py"
+    pid, fd = pty.fork()
+    if pid == 0:  # a shell on the pty, running the hook with pipes for stdio, as Claude Code does
+        os.execv("/bin/sh", ["sh", "-c", f"echo '{json.dumps(event)}' | {hook} >/dev/null 2>&1 </dev/stdin;"
+                                         " echo rc=$?"])
+    got = b""
+    while True:
+        try:
+            chunk = os.read(fd, 4096)
+        except OSError:
+            break
+        if not chunk:
+            break
+        got += chunk
+    os.waitpid(pid, 0)
+    found = web.STATUS.findall(got)
+    assert [base64.b64decode(f) for f in found] == ([said] if said else [])
+    assert got.endswith(b"rc=0\r\n")

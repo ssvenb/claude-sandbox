@@ -1,0 +1,9 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "/opt/plugins/agent-status/bin/agent-status.py"}]}],
+    "PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "/opt/plugins/agent-status/bin/agent-status.py"}]}],
+    "PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "/opt/plugins/agent-status/bin/agent-status.py"}]}],
+    "Notification": [{"hooks": [{"type": "command", "command": "/opt/plugins/agent-status/bin/agent-status.py"}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "/opt/plugins/agent-status/bin/agent-status.py"}]}]
+  }
+}

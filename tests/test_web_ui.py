@@ -2,7 +2,8 @@
 
 The server and its pages run from a copy of web/, next to a stub run.sh: `--web` answers with the
 JSON below (what the plugins would describe, tested on their own in test_plugin_hosts.py), and a
-session is an "agent" that waits for a line, then exits 4. `docker` does nothing (stopping a session
+session is an "agent" that says it has a question (as the agent-status hook would), waits for a
+line, then exits 4. `docker` does nothing (stopping a session
 removes its container), `code` is the stand-in from test_web.py. Skipped without Playwright (pip install playwright, then
 `python -m playwright install chromium`, or a chromium on the PATH).
 """
@@ -24,7 +25,9 @@ RUN = "abc123"  # the run the fixture's first pull request and checkout belong t
 RUN_SH = """#!/bin/sh
 case "$1" in
   --web) cat "$(dirname "$0")/web.json" ;;
-  *) echo "agent $2 at work${4:+ on: $4}"; read line; exit 4 ;;
+  *) echo "agent $2 at work${4:+ on: $4}"
+     printf '\033]1337;SetUserVar=agent_status=%s\007' "$(printf question | base64)"
+     read line; exit 4 ;;
 esac
 """
 DOCKER = "#!/bin/sh\n"
@@ -145,11 +148,12 @@ def test_the_dashboard_shows_totals_ci_icon_buttons_and_its_own_icon(board):
     assert "CI: 1 of 2 checks failed" in board.get_attribute("a:has(.status.fail)", "title")
 
 
-def test_a_session_has_one_tab_with_a_lamp_lit_while_it_runs(board):
+def test_a_session_has_one_tab_with_a_lamp_in_the_colour_of_what_its_agent_does(board):
     board.resume()
+    board.wait_for_selector("button.session .lamp.question")  # the stand-in asks: violet
     tab = opens_tab(board, lambda: board.click("button.session"))
-    tab.wait_for_selector("text=running")
-    assert "#f2b84b" in icon(tab) and "<circle" in icon(tab)
+    tab.wait_for_selector("text=has a question")
+    assert "#c69cff" in icon(tab) and "<circle" in icon(tab)
     again_opens_nothing(board, lambda: board.click("button.session"))
 
     tab.click(".xterm")

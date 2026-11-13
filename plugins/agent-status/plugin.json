@@ -1,0 +1,11 @@
+{
+  "name": "agent-status",
+  "description": "Hooks that tell the terminal whether the agent is working, idle or waiting on a question, for the web UI's status dots.",
+  "priority": 30,
+  "defaultEnabled": true,
+  "requiredAgent": "claude",
+  "provides": ["agent-status"],
+  "requires": [],
+  "requiredEnv": [],
+  "secrets": []
+}

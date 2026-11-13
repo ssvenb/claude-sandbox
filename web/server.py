@@ -44,6 +44,14 @@ RUN_SH = HERE.parent / "run.sh"
 RUN_ID = re.compile(r"[0-9a-f]{6}")
 SCROLLBACK = 256 * 1024  # bytes replayed to a browser that (re)opens a terminal
 KEEPALIVE = 15  # seconds between keepalives on a terminal's stream: how soon a closed tab is let go
+# What the agent says it is doing, from the agent-status plugin's hook: an iTerm2-style user var in
+# its output, `ESC ] 1337 ; SetUserVar=agent_status=<base64> BEL` (or ST in place of BEL).
+STATUS = re.compile(rb"\x1b\]1337;SetUserVar=agent_status=([A-Za-z0-9+/=]*)(?:\x07|\x1b\\)")
+STATES = {"working", "idle", "question"}
+QUIET = 3  # seconds without output after which an agent that reports nothing counts as idle
+# A TUI at work redraws (its spinner, its timer) all the time, so "working" this long without a byte
+# of output means it was interrupted before it could say it stopped (Esc fires no Stop hook).
+STALE = 30
 
 sessions = {}
 described = {}  # project → what describe() last said about it
@@ -86,6 +94,7 @@ class Session:
         self.project, self.kind, self.run_id = project, kind, run_id
         self.started, self.exit = time.time(), None
         self.buf, self.listeners = bytearray(), []
+        self.said, self.output, self.tail = None, time.time(), b""  # see status()
         argv = command(kind, run_id, task)
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
@@ -104,6 +113,17 @@ class Session:
                 break
             if not data:
                 break
+            self.output = time.time()
+            # The marker may straddle two reads: look at it with the end of the last one.
+            seen = self.tail + data
+            for m in STATUS.finditer(seen):
+                try:
+                    said = base64.b64decode(m[1]).decode()
+                except ValueError:
+                    continue
+                if said in STATES:
+                    self.said = said
+            self.tail = seen[-96:]
             with lock:
                 self.buf += data
                 del self.buf[:-SCROLLBACK]
@@ -139,9 +159,19 @@ class Session:
         subprocess.Popen(["docker", "rm", "-f", f"sandbox-{self.run_id}"],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+    def status(self):
+        """working, idle or question while it runs (None once it has ended, and for a terminal):
+        what the agent last said it is doing, else a guess from whether output is flowing."""
+        if self.exit is not None or self.kind == "shell":
+            return None
+        quiet = time.time() - self.output
+        if self.said == "working" and quiet > STALE:
+            return "idle"
+        return self.said or ("working" if quiet < QUIET else "idle")
+
     def json(self):
         return {**{k: getattr(self, k) for k in ("id", "project", "kind", "run_id", "started", "exit")},
-                "workspace": checkout(self.project, self.run_id)}
+                "status": self.status(), "workspace": checkout(self.project, self.run_id)}
 
 
 def describe(project):

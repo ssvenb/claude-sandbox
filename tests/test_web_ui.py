@@ -466,8 +466,8 @@ def test_a_chat_offers_the_agents_commands_and_models_and_can_interrupt_it(board
     tab.keyboard.press("Enter")
     tab.wait_for_selector(".tool.running:has-text('sleep 600') .spin")  # the step it is on turns
     # and nothing else: not a line at the bottom, nor the thinking before it, though it only streamed
+    tab.wait_for_function("document.querySelector('.think').innerText === 'Thought'")  # drawn on the next frame
     assert tab.locator(".spin").count() == 1 and tab.query_selector("#tail") is None
-    assert tab.inner_text(".think") == "Thought"
     assert tab.inner_text(".you") == "a long task\nover two lines"
     assert tab.is_visible("#halt")
     board.wait_for_selector(".window.working .doing.tool:has-text('Bash: Wait a long time')")

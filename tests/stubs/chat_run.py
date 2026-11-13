@@ -147,7 +147,6 @@ def turn(text):
         say(f"a{n}", f"Done with “{text}”.\n\n## What changed\n\n- `main()` now returns **2**\n- the tests pass\n\n"
                      "| File | Change |\n|---|---|\n| `src/app.py` | one line |\n\n```python\ndef main():\n    return 2\n```\n\n"
                      "See [the docs](https://example.com/docs) for more.")
-        emit(type="suggestion", text="Open a pull request for it")
     emit(type="turn", duration=4200, cost=0.1 * n, context={"used": 30000 * n, "max": 1000000})
     emit(type="status", state="idle")
 

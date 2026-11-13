@@ -544,12 +544,9 @@ def test_a_chat_keeps_the_conversation_for_a_page_opened_later(chat):
     assert (edit["done"], edit["error"], edit["output"]) == (True, False, "The file has been updated.")
     assert next(e for e in snap["events"] if e.get("parent"))["name"] == "Grep"  # a subagent's call, under its parent
     assert snap["todos"][-1] == {"text": "Run the tests", "status": "done"}
-    assert snap["suggestion"] == "Open a pull request for it"
     told = s.json()
     assert (told["cost"], told["context"], told["status"]) == (0.1, {"used": 30000, "max": 1000000}, "idle")
     assert told["said"].endswith("for more.") and told["activity"] == ""
-    s.prompt("again")
-    assert s.snapshot()["suggestion"] is None  # it was for the turn before
 
 
 PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="  # one pixel

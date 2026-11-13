@@ -145,7 +145,7 @@ def closes(tab, board, within=10):
 
 
 def delete(board):
-    """Deletes the one session, as the dashboard lets you: stop its window, then delete it where the ended ones are folded."""
+    """Deletes the one session, as the dashboard lets you: stop its window, then delete it where its project folds the ended ones."""
     board.click(".window button[aria-label='Stop session']")
     board.wait_for_selector("details.ended")
     if not board.locator("details.ended[open]").count():  # once unfolded, it stays so
@@ -158,7 +158,7 @@ def icon(tab):
 
 
 ROW = ".window"  # a running session, under its project on the left
-NOBODY = ".running:has-text('Nothing running'):not(:has(.group))"  # no session left, running or ended
+NOBODY = ".board:not(:has(.running)):not(:has(details.ended))"  # no session left, running or ended
 
 
 def state(board):
@@ -168,8 +168,8 @@ def state(board):
 def test_the_dashboard_is_a_chat_bar_over_running_sessions_and_projects(board):
     assert board.title() == "Dashboard" and "<rect" in icon(board)
     assert board.query_selector("h1") is None and board.query_selector(".totals") is None
-    assert board.locator("h2.band").all_inner_texts() == ["Running now", "Projects"]
-    assert board.inner_text(".running .none") == "Nothing running"
+    assert board.locator("h2.band").all_inner_texts() == ["Projects"]  # nothing runs: no side for it, and no word about it
+    assert "Nothing running" not in board.inner_text("#board")
     for name in ("New session", "Terminal", "Settings"):  # the project's buttons, on its panel on the right
         button = board.query_selector(f".project button[aria-label='{name}']")
         assert button.inner_text() == "" and button.query_selector("svg") and button.get_attribute("title")
@@ -177,6 +177,7 @@ def test_the_dashboard_is_a_chat_bar_over_running_sessions_and_projects(board):
     assert " ".join(board.inner_text(".project h4").split()) == "Issues 1"  # what its plugins list, under it
     assert board.query_selector(".project button.session") is None  # and no sessions there
     board.resume()
+    assert board.locator("h2.band").all_inner_texts() == ["Running now", "Projects"]
     assert board.inner_text(".running .group > h3") == "proj"  # a running session, under its project
     assert board.query_selector("button[aria-label='VS Code']") is None  # that is the session's own page's
     board.wait_for_selector(f"{ROW} a.chip .status")
@@ -304,9 +305,13 @@ def test_a_running_session_is_a_window_with_its_stop_button_top_right(board):
     board.resume()
     # How it is doing is the colour along its top, and nothing else: no lamp, no word for it.
     assert board.query_selector(".window .lamp, .window .spin, .window .state") is None and "Idle" not in board.inner_text(".window")
-    assert board.eval_on_selector(".window.idle", "e => getComputedStyle(e, '::before').backgroundColor") == \
+    # A strip cut to the card's own rounded shape: a layer as large as the card, painted 4px deep.
+    strip = board.eval_on_selector(".window.idle", "e => { const c = getComputedStyle(e, '::before'), r = e.getBoundingClientRect();"
+                                   " return [c.backgroundImage, c.borderTopLeftRadius, parseFloat(c.width) === r.width]; }")
+    assert strip[1:] == [board.eval_on_selector(".window", "e => getComputedStyle(e).borderTopLeftRadius"), True]
+    assert "4px" in strip[0] and strip[0].startswith("linear-gradient(" +
         board.evaluate("(() => { const p = document.createElement('p'); p.style.color = 'var(--ok)'; document.body.append(p);"
-                       " const c = getComputedStyle(p).color; p.remove(); return c; })()")
+                       " const c = getComputedStyle(p).color; p.remove(); return c; })()"))
     assert board.get_attribute(".window", "aria-label").endswith(": idle, waiting for its next task")  # said to a screen reader
     stop, card = board.locator(".window button[aria-label='Stop session']").bounding_box(), board.locator(".window").bounding_box()
     assert stop["y"] - card["y"] < 20 and card["x"] + card["width"] - stop["x"] - stop["width"] < 20
@@ -356,7 +361,7 @@ def test_a_session_has_one_tab_with_a_lamp_in_the_colour_of_what_its_agent_does(
     tab.wait_for_selector("text=Session ended")
     tab.wait_for_function("decodeURIComponent(document.querySelector('link[rel=icon]').href).includes('stroke')")
     assert tab.is_disabled("#input")
-    board.wait_for_selector("details.ended summary:has-text('1 ended')")  # folded away under its project
+    board.wait_for_selector("details.ended summary:has-text('1 ended')")  # folded away on its project's panel
     board.click("details.ended summary")
     board.wait_for_selector("button[aria-label='Resume session']")
     with tab.expect_navigation():  # resuming takes this tab to the run's new session
@@ -428,10 +433,7 @@ def test_a_chat_draws_what_the_agent_says_and_does(board):
     assert " ".join(tab.inner_text("#plan summary").split()) == "Plan All done 3 of 3"
     assert tab.inner_text("header .who span") == f"proj / {state(board)[0]['run_id']} / claude, fable"
 
-    assert tab.inner_text("#suggest span") == "Open a pull request for it"
-    tab.click("#input")
-    tab.keyboard.press("Tab")  # the prompt it expects next, taken with Tab
-    assert tab.input_value("#input") == "Open a pull request for it"
+    assert tab.query_selector("#suggest") is None  # no next prompt is offered
     tab.fill("#input", "now fail")
     tab.keyboard.press("Enter")
     tab.wait_for_selector(".note.error:has-text('The API did not answer.')")
@@ -628,7 +630,7 @@ def test_stopping_keeps_the_session_and_its_tab_and_deleting_closes_them(board):
     session.wait_for_selector("text=Session ended")  # still open, to read how it ended
     board.wait_for_selector(".window", state="detached")  # no window: nothing runs
     board.wait_for_selector("button[aria-label='Stop session']", state="detached")
-    board.click("details.ended summary")  # listed still, folded under its project, to resume or delete
+    board.click("details.ended summary")  # listed still, folded on its project's panel, to resume or delete
     assert board.inner_text("details.ended button.session") == "Session " + RUN
     assert [c.text_content() for c in board.query_selector_all("details.ended a.chip")] == ["✕#3", "⇥#2", "preview"]
     board.wait_for_timeout(3500)  # unfolded still after the page's next refresh

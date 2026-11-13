@@ -36,19 +36,25 @@
   /* A side clips what it scrolls: the room around it keeps a focus ring and a window's edge whole. */
   .board > * { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 8px 6px 48px; }
   h2.band { margin: 0 0 12px; font-size: 15px; font-weight: 600; color: var(--muted); letter-spacing: 0; }
-  .none { color: var(--muted); }
+  /* With nothing running there is no left side: the projects take the width, panel beside panel. */
+  .board.quiet { grid-template-columns: minmax(0, 1fr); }
+  .board.quiet .projects { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 400px)); gap: 12px; align-content: start; align-items: start; }
+  .board.quiet .projects h2.band { grid-column: 1 / -1; margin: 0; }
+  .board.quiet .project + .project { margin-top: 0; }
   /* The left: under each project's name, a window per running session, lit in the colour of what
-     its agent is doing; the ones that ended are folded away under them. */
+     its agent is doing. */
   .group + .group { margin-top: 22px; }
   .group > h3, .project h3 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -.012em; overflow-wrap: anywhere; min-width: 0; }
   .group > h3 { margin-bottom: 8px; }
   .windows { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; }
   .window { position: relative; display: grid; grid-template-rows: auto 1fr auto; gap: 6px; min-height: 112px; padding: 12px 10px 10px 16px;
             background: var(--panel); border: 1px solid var(--rule); border-radius: 14px; text-align: left; min-width: 0; }
-  .window::before { content: ""; position: absolute; inset: -1px -1px auto -1px; height: 4px; border-radius: 14px 14px 0 0; background: var(--rule); }
-  .window.working::before, .window.starting::before { background: var(--lamp-fill); }
-  .window.question::before { background: var(--ask); }
-  .window.idle::before { background: var(--ok); }
+  /* The colour along its top is cut to the card's own rounded shape: a layer as large as the card, painted 4px deep. */
+  .window::before { content: ""; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none;
+                    background: linear-gradient(var(--top, var(--rule)) 4px, transparent 4px); }
+  .window.working, .window.starting { --top: var(--lamp-fill); }
+  .window.question { --top: var(--ask); }
+  .window.idle { --top: var(--ok); }
   .window.question { border-color: var(--ask); }
   /* How it is doing is the colour along its top, and nothing else: its name, and the button that stops it. */
   .window .name { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
@@ -65,6 +71,7 @@
   .window .chips { display: flex; gap: 6px; min-width: 0; overflow: hidden; }
   .window .chips:empty { display: none; }
   .window .chips > * { position: relative; z-index: 1; }
+  /* A project's ended sessions, folded away at the foot of its panel. */
   details.ended { margin-top: 8px; }
   details.ended > summary { display: inline-block; cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; padding: 2px 0; }
   details.ended > summary::-webkit-details-marker { display: none; }
@@ -700,12 +707,18 @@ function render() {
   const typing = document.activeElement?.closest?.('.starter') && document.activeElement;
   const caret = typing?.selectionStart !== undefined ? [typing.selectionStart, typing.selectionEnd] : null;
 
-  // The left: each project's running sessions (the ones waiting on you first), its ended ones folded.
+  // The left: each project's running sessions (the ones waiting on you first).
   const groups = state.projects.map(path => {
     const mine = agents.filter(s => s.project === path);
     const running = mine.filter(s => s.exit === null).sort((a, b) => urgency[a.status] - urgency[b.status] || b.started - a.started);
-    const ended = mine.filter(s => s.exit !== null).reverse();
-    if (!mine.length) return null;
+    if (!running.length) return null;
+    return h('div', {className: 'group'}, h('h3', {title: path}, name(path)),
+      h('div', {className: 'windows'}, ...running.map(s => windowOf(s, tiedTo(s)))));
+  }).filter(Boolean);
+  // A project's ended sessions, folded away at the foot of its panel on the right.
+  const endedOf = path => {
+    const ended = agents.filter(s => s.project === path && s.exit !== null).reverse();
+    if (!ended.length) return '';
     const fold = h('details', {className: 'ended', open: unfolded.has(path),
                                ontoggle: () => { fold.open ? unfolded.add(path) : unfolded.delete(path); }},
       h('summary', {}, `${ended.length} ended`),
@@ -719,10 +732,8 @@ function render() {
           s.run_id && !live(s.run_id) ? play : '',
           h('button', {className: 'icon', onclick: () => remove(s), ariaLabel: 'Delete session', title: 'Delete'}, ICON.trash()));
       })));
-    return h('div', {className: 'group'}, h('h3', {title: path}, name(path)),
-      running.length ? h('div', {className: 'windows'}, ...running.map(s => windowOf(s, tiedTo(s)))) : '',
-      ended.length ? fold : '');
-  }).filter(Boolean);
+    return fold;
+  };
 
   // The right: each project, its buttons, and what its plugins list (issues, …): the page only
   // draws it. An item a plugin tied to a run is on that run's session instead, while one is
@@ -752,14 +763,14 @@ function render() {
               // A new session on a task the plugin wrote for this item (an issue's Resolve).
               go || '');
           }))];
-      }));
+      }),
+      endedOf(path));
   });
 
   $('board').replaceChildren(
     h('div', {className: 'top'}, state.projects.length ? starter() : h('div', {className: 'starter'}), themeSwitch()),
-    state.projects.length ? h('div', {className: 'board'},
-      h('div', {className: 'running'}, h('h2', {className: 'band'}, 'Running now'),
-        agents.some(s => s.exit === null) ? '' : h('p', {className: 'none'}, 'Nothing running'), ...groups),
+    state.projects.length ? h('div', {className: 'board' + (groups.length ? '' : ' quiet')},
+      groups.length ? h('div', {className: 'running'}, h('h2', {className: 'band'}, 'Running now'), ...groups) : '',
       h('aside', {className: 'projects'}, h('h2', {className: 'band'}, 'Projects'), ...projects))
     : h('div', {className: 'empty'}, h('b', {}, 'No projects yet'),
       `List the directories of the repos your agents work on, one per line, in ${state.projects_file}.`));

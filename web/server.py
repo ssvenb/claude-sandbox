@@ -245,7 +245,7 @@ class Chat(Session):
         self.listeners, self.events = [], []
         self.tasks = []  # what its agent runs in the background right now
         self.ready, self.state, self.waiting = False, "idle", []  # prompts typed before `ready`
-        self.info, self.todos, self.suggestion = {}, [], None
+        self.info, self.todos = {}, []
         self.title = self.activity = self.said = ""
         self.cost, self.context, self.sent = None, None, 0
         self.blocks, self.tools, self.boot = {}, {}, None  # where streamed text, results and boot lines go
@@ -350,9 +350,6 @@ class Chat(Session):
         if kind == "tasks":  # the whole set each time: a page opened later gets the latest
             self.tasks = [t for t in e.get("items") or [] if isinstance(t, dict)] if isinstance(e.get("items"), list) else []
             return self._tell(e)
-        if kind == "suggestion":
-            self.suggestion = e.get("text")
-            return self._tell(e)
         if kind == "asked":
             for ask in self.events:
                 if ask.get("type") == "ask" and ask.get("id") == e.get("id"):
@@ -386,7 +383,6 @@ class Chat(Session):
             self.sent += 1
             event = {"type": "user", "id": f"u{self.sent}", "text": text, **({"images": images} if images else {})}
             self.title = self.title or " ".join(text.split())[:140] or "Image"
-            self.suggestion = None
             if self.ready:
                 self._send({"type": "prompt", "text": text, **({"images": images} if images else {})})
                 self.state = "working"
@@ -409,7 +405,7 @@ class Chat(Session):
     def snapshot(self):
         """Everything a page needs to draw the session from nothing. Caller holds `lock`."""
         return {"type": "snapshot", "events": self.events, "info": self.info, "todos": self.todos, "tasks": self.tasks,
-                "suggestion": self.suggestion, "ready": self.ready, "status": self.status(), "session": self.json()}
+                "ready": self.ready, "status": self.status(), "session": self.json()}
 
     def write(self, data):
         raise ValueError("a chat takes prompts, not keystrokes")

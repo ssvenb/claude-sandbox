@@ -141,7 +141,6 @@ const q = query({
     permissionMode: 'bypassPermissions',
     allowDangerouslySkipPermissions: true,
     includePartialMessages: true,
-    promptSuggestions: true,
     agentProgressSummaries: true,
     effort: EFFORTS.includes(process.env.CLAUDE_EFFORT) ? process.env.CLAUDE_EFFORT : 'medium',
     systemPrompt: { type: 'preset', preset: 'claude_code', ...(briefing && { append: briefing }) },
@@ -256,7 +255,6 @@ try {
       if (m.error) emit({ type: 'notice', level: 'error', text: `Claude could not answer (${String(m.error).replace(/_/g, ' ')}).` });
     } else if (m.type === 'user') fromUser(m.message, parent, false);
     else if (m.type === 'result') await turnEnded(m);
-    else if (m.type === 'prompt_suggestion') emit({ type: 'suggestion', text: m.suggestion });
     else if (m.type === 'tool_progress' && m.elapsed_time_seconds >= 5)
       emit({ type: 'progress', id: m.tool_use_id, seconds: Math.round(m.elapsed_time_seconds) });
     else if (m.type === 'system') {

@@ -24,7 +24,6 @@
 //                                                each time (a bridge whose agent has none sends none)
 //   model      {id}, effort {level}              what the next turn runs on
 //   notice     {level, text}                     info, warning or error
-//   suggestion {text}                            a next prompt the agent expects
 //
 // and the commands: prompt {text, images: [{type, data}]}, interrupt {}, answer {id, answers |
 // cancel}, model {id}, effort {level}, task {id} (stop that background task). An image is its

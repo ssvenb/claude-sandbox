@@ -194,7 +194,7 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | `agent-workspace` | 15 | on | any | `workspace-mirror` | — | bind-mounts `$AGENT_WORKSPACE_DIR/<project>-<date>-<RUN_ID>` (default `~/.agent-workspaces/<project>-<date>-<RUN_ID>`, created if missing) at `/workspace`, so the agent's checkout is visible on the host; removed when the container exits, unless `AGENT_WORKSPACE_CLEANUP=0`; complements `git-workspace`, conflicts with `cwd-workspace` |
 | `package-managers` | 25 | on | any | `package-managers` | — | `sudo` install; lets the agent install packages itself — `npm -g`/`pip` into its home, `apt-get`/`apt` via a passwordless sudo rule (which amounts to root, so its guardrails become advisory) |
 | `project-deps` | 25 | on | any | `project-deps` | — | installs the dependencies the target repo declares in the project config: apt/npm/pip packages (as root, at boot) and `setup` shell commands (as the agent user, in the provisioned `/workspace`); nothing configured → does nothing |
-| `dev-server` | 28 | on | any | `dev-server` | — | starts the project's server (`.plugins["dev-server"].command`) in `/workspace` at every boot, after `project-deps`; the agent restarts it with `bin/sandbox-server`. Its ports are published like any others, see [Published ports](#published-ports); nothing configured → does nothing |
+| `dev-server` | 28 | on | any | `dev-server` | — | starts the project's server (`.plugins["dev-server"].command`) in `/workspace` at every boot, after `project-deps`; the agent restarts it with `bin/sandbox-server`. Its ports are published when listed in `PORTS`, see [Published ports](#published-ports); nothing configured → does nothing |
 | `branch-guard` | 30 | on | claude | — | `workspace` | `guard-branch.py` PreToolUse hook |
 
 Disable them all and the agent starts plain, in an empty `/workspace` with no GitHub access.
@@ -462,23 +462,33 @@ file takes effect only once no sandbox of the project is running.
 ### Published ports
 
 Part of the core, not a plugin. Each sandbox has a network namespace of its own, so two sessions
-can both run a server on `:3000`. Inside the container a root helper (`src/publish-ports.py`,
-started by `entrypoint.sh`) notices every TCP port a non-root process listens on — on any
-address, `127.0.0.1` included — and offers it as a unix socket in a directory mounted from the
-host, under a root-only `/run/ports` the agent cannot reach. One central proxy on your machine
-(`src/portd.py`, managed by `src/lib/host-ports.sh`), shared by every sandbox of every project,
-gives each such port a port of its own on `$PORTS_BIND` (default `127.0.0.1`): the same number
-while it is free, otherwise any free one, and the same one again when that session's server
-restarts. The first `run.sh` starts the proxy; it exits once no `run.sh` using it is alive. The
-web UI shows each published port as a button on its session's row, within a second or two of the
-server starting. `PORTS_IGNORE` lists ports never to publish (a debugger's, say).
+can both run a server on `:3000`. Which ports a sandbox opens is a setting, `PORTS`: a
+space-separated list, usually kept with the project in `.claude-sandbox.json` (the gear on the
+dashboard edits its `env` block):
+
+```json
+{ "env": { "PORTS": "3000 5173" } }
+```
+
+Nothing else is published, and the dashboard shows nothing else; with `PORTS` unset a sandbox
+opens no ports at all, and no proxy is started for it. Inside the container a root helper
+(`src/publish-ports.py`, started by `entrypoint.sh`) notices when a non-root process listens on one
+of those ports — on any address, `127.0.0.1` included — and offers it as a unix socket in a
+directory mounted from the host, under a root-only `/run/ports` the agent cannot reach. One central
+proxy on your machine (`src/portd.py`, managed by `src/lib/host-ports.sh`), shared by every sandbox
+of every project, gives each such port a port of its own on `$PORTS_BIND` (default `127.0.0.1`):
+the same number while it is free, otherwise any free one, and the same one again when that
+session's server restarts. The first `run.sh` starts the proxy; it exits once no `run.sh` using it
+is alive. The web UI shows each published port as a button on its session's row, within a second
+or two of the server starting. The agent's briefing names the configured ports, so it serves on
+one of them.
 
 The `dev-server` plugin starts the project's server at every boot, in `/workspace` after
 `project-deps`; the agent controls it with `/opt/plugins/dev-server/bin/sandbox-server
 start|stop|restart|status|log`:
 
 ```json
-{ "plugins": { "dev-server": { "command": "pnpm dev --port 3000" } } }
+{ "env": { "PORTS": "3000" }, "plugins": { "dev-server": { "command": "pnpm dev --port 3000" } } }
 ```
 
 The host's own services are at `host.docker.internal` from inside, if they listen on an address
@@ -597,8 +607,8 @@ only required while that agent or plugin is in use.
 | `AGENT` | core | Which agent runs: a directory name under `agents/` (default `claude`) |
 | `PROJECT_CONFIG_FILE` | core | Per-project plugin configuration (default `$HOST_CWD/.claude-sandbox.json`; optional) |
 | `PROJECT_ENV_FILE` | core | The worked-on repo's `.env`, scanned for plugin settings it keeps there (default `$HOST_CWD/.env`; `/dev/null` loads nothing) |
+| `PORTS` | core | Space-separated ports a sandbox opens: published on the host, and shown on the dashboard, while something in it listens on them (default: none) |
 | `PORTS_BIND` | core | Address the central port proxy publishes the sandboxes' ports on (default `127.0.0.1`; `0.0.0.0` for your whole network) |
-| `PORTS_IGNORE` | core | Space-separated ports never published |
 | `CLAUDE_CODE_OAUTH_TOKEN` | agents/claude | Claude Code OAuth token (`claude setup-token`). Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does |
 | `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low`, `medium` (the sandbox default), `high`, `xhigh`, `max` |
 | `COPILOT_GITHUB_TOKEN` | agents/copilot | Fine-grained PAT with the "Copilot Requests" permission (or a Copilot/`gh` OAuth token). Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |

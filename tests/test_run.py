@@ -57,7 +57,8 @@ def test_the_host_pipeline_builds_and_runs_the_image(sb, run_sh):
     assert run[-1] == "claude-agent:claude"
     tail = " ".join(run[13:])
     assert "--network" not in run  # a network of its own: ports reach the host through the proxy
-    for expected in (f"-v {sb.cwd}:/workspace", "-e PORTS_BIND=127.0.0.1", "-v /dev/null:/workspace/.env:ro",
+    assert not any("PORTS" in arg for arg in run)  # none configured: none opened
+    for expected in (f"-v {sb.cwd}:/workspace", "-v /dev/null:/workspace/.env:ro",
                      "-e CWD_WORKSPACE_HIDDEN=/workspace/.env",
                      "-e CLAUDE_CODE_OAUTH_TOKEN=oauth-tok", "-e CLAUDE_EFFORT=high"):
         assert expected in tail
@@ -140,7 +141,7 @@ def test_host_proxy_runs_exactly_as_long_as_the_container(sb, run_sh, short_tmp)
 
 
 def test_the_runs_ports_directory_lives_exactly_as_long_as_the_container(sb, run_sh, short_tmp):
-    done = run_sh("--run-id", "0a1b2c", CLAUDE_CODE_OAUTH_TOKEN="t")
+    done = run_sh("--run-id", "0a1b2c", CLAUDE_CODE_OAUTH_TOKEN="t", PORTS="3000")
     assert done.returncode == 0, done.stderr
     [run] = calls(done, "run")
     base = f"{short_tmp}/sandbox-ports-{os.getuid()}-127.0.0.1"

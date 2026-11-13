@@ -2,8 +2,9 @@
 # Published ports. Sourced by run.sh (bash, on YOUR machine).
 #
 # Every sandbox has a network namespace of its own, so two sessions can both serve on :3000.
-# Inside, a root helper (src/publish-ports.py, started by entrypoint.sh) offers each port a process
-# of the agent's listens on as a unix socket in a directory mounted from here; one central proxy
+# Which ports a sandbox opens is the project's choice: $PORTS lists them, and nothing else is
+# published (nor shown on the dashboard). Inside, a root helper (src/publish-ports.py, started by
+# entrypoint.sh) offers each of those a process of the agent's listens on as a unix socket in a directory mounted from here; one central proxy
 # on this machine (src/portd.py), shared by every sandbox of every project, gives each a port on
 # $PORTS_BIND — the same number while it is free, another free one otherwise. The first run.sh
 # starts the proxy; it exits by itself once no run.sh using it is alive.
@@ -62,12 +63,24 @@ ports_release() {
 }
 
 # ports_start: join (or start) the central proxy for this run, and hand the container its socket
-# directory. Its sockets sit under a root-only directory in the container (entrypoint.sh), so the
-# agent cannot plant anything there for this machine to connect to.
+# directory — only when the project configured ports to publish ($PORTS). Its sockets sit under a
+# root-only directory in the container (entrypoint.sh), so the agent cannot plant anything there for
+# this machine to connect to.
 ports_start() {
   PORTS_BIND=${PORTS_BIND:-127.0.0.1}
   [[ "$PORTS_BIND" =~ ^[0-9A-Fa-f.:]+$ ]] || die "PORTS_BIND must be an IP address (got: $PORTS_BIND)"
-  [[ "${PORTS_IGNORE:-}" =~ ^[0-9\ ]*$ ]] || die "PORTS_IGNORE must list port numbers (got: $PORTS_IGNORE)"
+  local port list=()
+  for port in ${PORTS:-}; do
+    [[ "$port" =~ ^[1-9][0-9]{0,4}$ ]] && [ "$port" -le 65535 ] \
+      || die "PORTS must list port numbers, space-separated (got: $PORTS)"
+    list+=("$port")
+  done
+  DOCKER_ARGS+=(--add-host=host.docker.internal:host-gateway)
+  if [ ${#list[@]} -eq 0 ]; then
+    echo "🔌 Ports: none published (list them in PORTS, e.g. PORTS=\"3000 5173\")"
+    return 0
+  fi
+  PORTS="${list[*]}"
   command -v flock >/dev/null || die "flock (util-linux) is required on the host to publish ports."
 
   PORTS_DIR=$(ports_dir)
@@ -92,10 +105,8 @@ ports_start() {
   flock -u "$fd"
   exec {fd}>&-
 
-  DOCKER_ARGS+=(-v "$PORTS_DIR/runs/$RUN_ID:/run/ports/sockets" -e "PORTS_BIND=$PORTS_BIND"
-                --add-host=host.docker.internal:host-gateway)
-  [ -z "${PORTS_IGNORE:-}" ] || DOCKER_ARGS+=(-e "PORTS_IGNORE=$PORTS_IGNORE")
-  echo "🔌 Ports: whatever the agent serves is published on $PORTS_BIND"
+  DOCKER_ARGS+=(-v "$PORTS_DIR/runs/$RUN_ID:/run/ports/sockets" -e "PORTS_BIND=$PORTS_BIND" -e "PORTS=$PORTS")
+  echo "🔌 Ports: ${PORTS// /, } published on $PORTS_BIND"
 }
 
 # ports_web: the proxy's list of published ports, as session buttons for the web UI.

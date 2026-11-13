@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&display=swap">
 <style>
   :root { --dusk: #1b1d36; --night: #0f1123; --rule: #2e3158; --paper: #e6e4f2; --haze: #8c8fb3;
-          --lamp: #f2b84b; --link: #9aa5ff; --ok: #6fd3a2; --fail: #ff7b8a; color-scheme: dark; }
+          --lamp: #f2b84b; --link: #9aa5ff; --ok: #6fd3a2; --fail: #ff7b8a; --ask: #c69cff; color-scheme: dark; }
   * { box-sizing: border-box; }
   button { font: inherit; font-size: 14px; color: var(--paper); background: transparent;
            border: 1px solid var(--rule); border-radius: 999px; padding: 3px 12px; cursor: pointer; }
@@ -69,8 +69,13 @@
   button.session:hover { color: var(--lamp); }
   .lamp { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 10px;
           border: 1.5px solid var(--haze); }
-  .lamp.lit { border-color: var(--lamp); background: var(--lamp); animation: glow 2.6s ease-in-out infinite; }
+  /* Its colour is what the agent is doing: amber and glowing at work, green when idle, a violet
+     blink when it waits on an answer. Ended: an empty ring. */
+  .lamp.working { border-color: var(--lamp); background: var(--lamp); animation: glow 2.6s ease-in-out infinite; }
+  .lamp.idle { border-color: var(--ok); background: var(--ok); }
+  .lamp.question { border-color: var(--ask); background: var(--ask); animation: ask 1.1s ease-in-out infinite; }
   @keyframes glow { 0%, 100% { box-shadow: 0 0 0 0 #f2b84b00; } 50% { box-shadow: 0 0 10px 2px #f2b84b99; } }
+  @keyframes ask { 0%, 100% { box-shadow: 0 0 0 0 #c69cff00; opacity: 1; } 50% { box-shadow: 0 0 10px 3px #c69cffaa; opacity: .55; } }
   .ended { color: var(--haze); }
   a { color: var(--paper); text-decoration: none; padding: 4px 0; }
   a:hover { color: var(--link); }
@@ -90,7 +95,7 @@
     .total { gap: 6px; }
     .columns { grid-auto-flow: row; gap: 22px; }
   }
-  @media (prefers-reduced-motion: reduce) { .lamp.lit { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .lamp { animation: none !important; } }
 </style>
 </head>
 <body>
@@ -183,6 +188,7 @@ const svg = (d, extra = '') => {
   e.innerHTML = `<path d="${d}" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>${extra}`;
   return e;
 };
+const SAYS = {working: 'working', idle: 'idle, waiting for its next task', question: 'waiting on your answer'};
 const PLUS = 'M10 4v12M4 10h12', PROMPT = 'M4 6l4 4-4 4M10 15h6';
 // A session's own row, as on a recorder: resume it (play), stop it (the red square); delete it,
 // VS Code on its checkout.
@@ -260,8 +266,8 @@ function render() {
         h('div', {className: 'columns'},
         column('Sessions', mine, s => h('li', {},
           h('button', {className: 'session' + (s.exit === null ? '' : ' ended'), onclick: () => show(s), title: 'Open its terminal in a tab'},
-            h('span', {className: 'lamp' + (s.exit === null ? ' lit' : '')}),
-            label(s) + (s.exit === null ? '' : `, exited ${s.exit}`)),
+            h('span', {className: 'lamp ' + (s.status || ''), title: SAYS[s.status] || 'ended'}),
+            label(s) + (s.exit === null ? '' : `, exited ${s.exit}`) + (s.status === 'question' ? ', has a question' : '')),
           s.exit !== null && s.run_id && !live(s.run_id)
             ? h('button', {className: 'icon play', onclick: () => start(path, 'resume', s.run_id), ariaLabel: 'Resume session',
                            title: 'Resume: same branch, same conversation'}, PLAY()) : '',

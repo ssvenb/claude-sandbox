@@ -106,7 +106,7 @@ def board(tmp_path, browser):
         req = urllib.request.Request(base + "/api/sessions", json.dumps(
             {"project": str(project), "kind": "resume", "run_id": RUN}).encode())
         s = json.load(urllib.request.urlopen(req))
-        page.wait_for_selector("button.session")
+        page.wait_for_selector(".window")
         return s
     page.resume = resume
     page.base, page.checkout, page.ports = base, checkout, tmp_path / "ports.json"
@@ -144,44 +144,77 @@ def closes(tab, board, within=10):
     raise AssertionError(f"{tab.url} still open")
 
 
+def delete(board):
+    """Deletes the one session, as the dashboard lets you: stop its window, then delete it where the ended ones are folded."""
+    board.click(".window button[aria-label='Stop session']")
+    board.wait_for_selector("details.ended")
+    if not board.locator("details.ended[open]").count():  # once unfolded, it stays so
+        board.click("details.ended summary")
+    board.click("details.ended button[aria-label='Delete session']")
+
+
 def icon(tab):
     return tab.eval_on_selector("link[rel=icon]", "e => decodeURIComponent(e.href)")
 
 
-ROW = "li:has(button.session)"  # a session's row in its project; a running one has a window too
+ROW = ".window"  # a running session, under its project on the left
+NOBODY = ".running:has-text('Nothing running'):not(:has(.group))"  # no session left, running or ended
 
 
 def state(board):
     return json.load(urllib.request.urlopen(board.base + "/api/state"))["sessions"]
 
 
-def test_the_dashboard_shows_totals_ci_icon_buttons_and_its_own_icon(board):
-    assert board.title() == "Dashboard" and board.inner_text("h1") == "Nobody at work."
-    assert "<rect" in icon(board)
-    for name in ("New session", "Terminal", "Settings"):  # icon buttons: a glyph, named for screen readers
-        button = board.query_selector(f"button[aria-label='{name}']")
+def test_the_dashboard_is_a_chat_bar_over_running_sessions_and_projects(board):
+    assert board.title() == "Dashboard" and "<rect" in icon(board)
+    assert board.query_selector("h1") is None and board.query_selector(".totals") is None
+    assert board.locator("h2.band").all_inner_texts() == ["Running now", "Projects"]
+    assert board.inner_text(".running .none") == "Nothing running"
+    for name in ("New session", "Terminal", "Settings"):  # the project's buttons, on its panel on the right
+        button = board.query_selector(f".project button[aria-label='{name}']")
         assert button.inner_text() == "" and button.query_selector("svg") and button.get_attribute("title")
-    assert board.inner_text(".head h2 small") == "claude"  # the project's agent, as run.sh --web says
+    assert board.inner_text(".project .head h3 small") == "claude"  # the project's agent, as run.sh --web says
+    assert " ".join(board.inner_text(".project h4").split()) == "Issues 1"  # what its plugins list, under it
+    assert board.query_selector(".project button.session") is None  # and no sessions there
     board.resume()
-    board.wait_for_function("document.querySelector('.totals').innerText.includes('1\\nSessions')")
-    totals = board.inner_text(".totals").split()
-    assert totals == ["1", "Sessions", "1", "Issues"]  # pull requests: no column, no total
+    assert board.inner_text(".running .group > h3") == "proj"  # a running session, under its project
+    assert board.query_selector("button[aria-label='VS Code']") is None  # that is the session's own page's
     board.wait_for_selector(f"{ROW} a.chip .status")
     failing, merged = board.query_selector_all(f"{ROW} a .status")
     assert (failing.get_attribute("class"), failing.inner_text()) == ("status fail", "✕")
     assert (merged.get_attribute("class"), merged.inner_text()) == ("status done", "⇥")
     assert "CI: 1 of 2 checks failed" in board.get_attribute(f"{ROW} a:has(.status.fail)", "title")
     assert "Merged: Went in" in board.get_attribute(f"{ROW} a:has(.status.done)", "title")
+    # The left is beside the right, both under the chat bar.
+    bar, left, right = (board.locator(sel).bounding_box() for sel in (".starter", ".running", ".projects"))
+    assert bar["y"] + bar["height"] <= left["y"] and left["x"] + left["width"] <= right["x"]
 
 
-def test_the_dashboard_says_what_every_agent_is_doing_the_ones_waiting_on_you_first(board):
+def test_the_project_and_the_start_button_stay_put_while_the_first_message_grows(board):
+    button = lambda: board.locator(".starter button[type=submit]").bounding_box()  # noqa: E731
+    before, field = button(), board.locator(".starter .field").bounding_box()
+    board.fill(".starter textarea", "one\ntwo\nthree\nfour")
+    assert board.locator(".starter .field").bounding_box()["height"] > field["height"] + 40
+    assert button() == before
+    assert board.query_selector(".starter .field button") is None  # beside the field, not in it
+
+
+def test_a_running_session_is_a_window_with_its_stop_button_top_right(board):
+    board.resume()
+    assert board.inner_text(".window .state") == "Idle"  # how it is doing, and nothing else
+    stop, card = board.locator(".window button[aria-label='Stop session']").bounding_box(), board.locator(".window").bounding_box()
+    assert stop["y"] - card["y"] < 20 and card["x"] + card["width"] - stop["x"] - stop["width"] < 20
+    board.click(".window button[aria-label='Stop session']")
+    board.wait_for_selector(".window", state="detached")  # stopped, not opened
+
+
+def test_the_dashboard_shows_the_sessions_waiting_on_you_first(board):
     board.fill(".starter textarea", "please ask me")  # starting a session is writing its first message
     asking = opens_tab(board, lambda: board.click(".starter button[type=submit]"))
     asking.wait_for_selector(".ask")
     board.resume()  # a second one, idle after its boot
     board.wait_for_selector(".window.idle")
     board.wait_for_selector(".window.question")
-    assert board.inner_text("h1") == "1 agent waiting on you, 1 idle."
     first, second = board.query_selector_all(".window")
     assert "question" in first.get_attribute("class") and first.query_selector(".open").inner_text() == "please ask me"
     assert first.query_selector(".state b").inner_text() == "Needs you"
@@ -192,32 +225,34 @@ def test_the_dashboard_says_what_every_agent_is_doing_the_ones_waiting_on_you_fi
 
     asking.click(".ask .options button:has-text('Postgres')")
     board.wait_for_selector(".window.question", state="detached")
-    assert board.inner_text("h1") == "2 agents idle."
+    assert board.locator(".window.idle").count() == 2
 
 
 def test_a_session_has_one_tab_with_a_lamp_in_the_colour_of_what_its_agent_does(board):
     board.resume()
-    board.wait_for_selector("button.session .lamp.idle")  # booted and waiting: green
-    tab = opens_tab(board, lambda: board.click("button.session"))
+    board.wait_for_selector(".window .lamp.idle")  # booted and waiting: green
+    tab = opens_tab(board, lambda: board.click(".window .open"))
     assert tab.url.endswith("/chat#" + state(board)[0]["id"])
     tab.wait_for_selector(".say:has-text('An earlier answer.')")  # a resumed run: its conversation so far
     assert tab.inner_text(".you") == "What was said before the resume"
     tab.wait_for_selector("header .state.idle")
     assert "#6fd3a2" in icon(tab) and "<circle" in icon(tab)
-    again_opens_nothing(board, lambda: board.click("button.session"))
+    again_opens_nothing(board, lambda: board.click(".window .open"))
 
     tab.fill("#input", "ask me something")
     tab.keyboard.press("Enter")
     tab.wait_for_selector(".ask")  # the stand-in asks: violet, here and on the dashboard
     tab.wait_for_function("decodeURIComponent(document.querySelector('link[rel=icon]').href).includes('#c69cff')")
-    board.wait_for_selector("button.session .lamp.question")
+    board.wait_for_selector(".window .lamp.question")
     assert tab.inner_text("header .state") == "Needs you"
 
     tab.on("dialog", lambda d: d.accept())
     tab.click("button[aria-label='Stop session']")
-    tab.wait_for_selector("text=This session has ended")
+    tab.wait_for_selector("text=Session ended")
     tab.wait_for_function("decodeURIComponent(document.querySelector('link[rel=icon]').href).includes('stroke')")
     assert tab.is_disabled("#input")
+    board.wait_for_selector("details.ended summary:has-text('1 ended')")  # folded away under its project
+    board.click("details.ended summary")
     board.wait_for_selector("button[aria-label='Resume session']")
     with tab.expect_navigation():  # resuming takes this tab to the run's new session
         tab.click(".over button:has-text('Resume')")
@@ -230,17 +265,17 @@ def test_the_first_message_is_written_while_the_sandbox_starts_and_sent_when_it_
     tab = opens_tab(board, lambda: board.click("button[aria-label='New session']"))
     tab.wait_for_selector(".boot.starting .spin")  # whatever loads, turns
     tab.wait_for_selector(".boot .line:has-text('Cloning into /workspace')")
-    assert "What should the agent do in proj?" in tab.inner_text("#welcome")
+    assert tab.locator("#log > *").count() == 1 and tab.get_attribute("#input", "placeholder") == "Message"  # no explanations
     assert tab.inner_text("header .state") == "Starting" and "stroke-dasharray" in icon(tab)
     assert tab.evaluate("document.activeElement.id") == "input"  # ready to type from the first moment
     tab.fill("#input", "change main")
     tab.keyboard.press("Enter")
-    tab.wait_for_selector(".you.queued:has-text('change main') .spin")
-    assert "Sent as soon as the sandbox is ready" in tab.inner_text(".you.queued")
+    tab.wait_for_selector(".you.queued:has-text('change main')")
+    assert tab.inner_text(".you.queued") == "change main"
     tab.fill("#input", "and a second one")
     tab.keyboard.press("Enter")
     tab.wait_for_selector(".you.queued >> nth=1")
-    board.wait_for_selector(".window.starting .doing:has-text('2 messages waiting') .spin")
+    board.wait_for_selector(".window.starting .doing:has-text('Starting, 2 messages waiting') .spin")
     assert board.inner_text(".window .open") == "change main"  # a session is called what it was first asked
     assert not board.commands.exists()  # nothing reached the agent yet
 
@@ -268,7 +303,7 @@ def test_a_chat_draws_what_the_agent_says_and_does(board):
     assert said.locator(".code pre").inner_text() == "def main():\n    return 2" and said.locator(".code .lang").inner_text() == "python"
     link = said.locator("a")
     assert (link.get_attribute("href"), link.get_attribute("target")) == ("https://example.com/docs", "_blank")
-    assert tab.inner_text(".think summary") == "Thought for a moment"
+    assert tab.inner_text(".think summary") == "Thought"
 
     # What it did: a line per tool call, runs of them in one box; open one for what went in and came back.
     lines = [" ".join(t.inner_text().split()) for t in tab.query_selector_all("#log > .tools > .tool > summary")]
@@ -283,7 +318,7 @@ def test_a_chat_draws_what_the_agent_says_and_does(board):
     tab.click(".tool:has-text('Run') > summary")
     assert tab.inner_text(".tool:has-text('Run') .body pre >> nth=1") == "3 passed in 0.12s"
 
-    assert tab.inner_text(".turn") == "4 s, $0.10 so far, 3% of its context used"
+    assert tab.inner_text(".turn") == "4 s · $0.10 · 3% context"
     assert " ".join(tab.inner_text("#plan summary").split()) == "Plan All done 3 of 3"
     assert tab.inner_text("header .who span") == f"proj / {state(board)[0]['run_id']} / claude, fable"
 
@@ -320,14 +355,17 @@ def test_a_chat_offers_the_agents_commands_and_models_and_can_interrupt_it(board
 
     tab.fill("#input", "a long task\nover two lines")
     tab.keyboard.press("Enter")
-    tab.wait_for_selector(".tool.running:has-text('sleep 600') .spin")
-    tab.wait_for_selector("#tail .spin")
+    tab.wait_for_selector(".tool.running:has-text('sleep 600') .spin")  # the step it is on turns
+    # and nothing else: not a line at the bottom, nor the thinking before it, though it only streamed
+    assert tab.locator(".spin").count() == 1 and tab.query_selector("#tail") is None
+    assert tab.inner_text(".think summary") == "Thought"
     assert tab.inner_text(".you") == "a long task\nover two lines"
-    assert tab.is_visible("#halt") and " ".join(tab.inner_text("#tail").split()) == "Working Run sleep 600"
+    assert tab.is_visible("#halt")
     board.wait_for_selector(".window.working .doing.tool:has-text('Bash: Wait a long time')")
     tab.keyboard.press("Escape")  # as in the terminal
     tab.wait_for_selector(".tool.failed:has-text('sleep 600')")
     tab.wait_for_selector("#halt", state="hidden")
+    tab.wait_for_selector(".spin", state="detached")  # nothing works: nothing turns
     sent = [json.loads(line) for line in board.commands.read_text().splitlines()]
     assert sent == [{"type": "model", "id": "opus"}, {"type": "effort", "level": "high"},
                     {"type": "prompt", "text": "a long task\nover two lines"}, {"type": "interrupt"}]
@@ -387,8 +425,7 @@ def test_one_terminal_per_project_on_this_machine(board):
     term.keyboard.type("echo $(basename $PWD)-$((40+2))\n")
     term.wait_for_selector("text=proj-42")  # in the project's directory
     again_opens_nothing(board, lambda: board.click("button[aria-label='Terminal']"))
-    assert board.inner_text(".totals").startswith("0")  # a terminal is not a session
-    assert board.query_selector("button.session") is None
+    assert board.query_selector(".window") is None and board.is_visible(NOBODY)  # a terminal is not a session
 
     term.keyboard.type("exit 3\n")
     term.wait_for_selector("text=exited 3")  # still there to read, not closed under you
@@ -401,10 +438,10 @@ def test_one_tab_per_item(board):
     again_opens_nothing(board, lambda: board.click("text=A bug"))  # GitHub's tab: another origin
 
 
-def test_pull_requests_show_only_on_their_runs_session_row(board):
+def test_pull_requests_show_only_on_their_runs_session(board):
     # No session of the run yet: its pull requests show nowhere, and there is no column of them.
     assert board.query_selector("a.chip") is None
-    assert board.query_selector("h3:has-text('Pull requests')") is None
+    assert board.query_selector("h4:has-text('Pull requests')") is None
     board.resume()
     board.wait_for_selector(f"{ROW} a.chip.fail")
     row = board.query_selector(ROW)
@@ -420,7 +457,7 @@ def test_pull_requests_show_only_on_their_runs_session_row(board):
     assert preview.url.endswith("/preview")
 
 
-def test_a_port_the_session_publishes_is_a_button_on_its_row_while_published(board):
+def test_a_port_the_session_publishes_is_a_button_on_its_window_while_published(board):
     board.resume()
     port = board.base.rsplit(":", 1)[1]
     # As the central port proxy writes it: `{host}` is whatever name the page was opened by.
@@ -434,20 +471,21 @@ def test_a_port_the_session_publishes_is_a_button_on_its_row_while_published(boa
     board.wait_for_selector("a.chip:has-text(':3000')", state="detached")
     board.ports.write_text(json.dumps([{"run_id": RUN, "ref": ":3000", "title": "t", "url": f"http://{{host}}:{port}/published"}]))
     board.wait_for_selector(f"{ROW} a.chip:has-text(':3000')")
-    board.click("button[aria-label='Delete session']")
+    delete(board)
     closes(published, board)  # deleting the session closes its port's tab too
 
 
 def test_deleting_a_session_closes_its_tabs_and_only_its_own(board):
     board.resume()
-    session = opens_tab(board, lambda: board.click("button.session"))
-    code = opens_tab(board, lambda: board.click(f"{ROW} button[aria-label='VS Code']"))
+    session = opens_tab(board, lambda: board.click(".window .open"))
+    session.on("dialog", lambda d: d.accept())
+    code = opens_tab(session, lambda: session.click("button[aria-label='VS Code']"))  # from the session's own page
     assert "/vscode/?folder=" in code.url
     its_pr = opens_tab(board, lambda: board.click(f"{ROW} a.chip:has-text('#3')"))
     issue = opens_tab(board, lambda: board.click("text=A bug"))
     term = opens_tab(board, lambda: board.click("button[aria-label='Terminal']"))
 
-    board.click("button[aria-label='Delete session']")
+    delete(board)
     for tab in (session, code, its_pr):
         closes(tab, board)
     assert not issue.is_closed() and not term.is_closed() and not board.is_closed()
@@ -457,16 +495,16 @@ def test_deleting_a_session_asks_before_closing_its_open_pull_request(board):
     board.resume()
     board.wait_for_selector(f"{ROW} a.chip.fail")
     board.answers.append(False)  # no: the pull request stays open
-    board.click("button[aria-label='Delete session']")
-    board.wait_for_selector("text=Nobody at work.")
+    delete(board)
+    board.wait_for_selector(NOBODY)
     assert board.asked == ["Close #3 too?"]  # only the open one of this run: not the merged one, nor #4
     board.wait_for_timeout(500)
     assert not board.actions.exists()
 
     board.resume()
     board.wait_for_selector(f"{ROW} a.chip.fail")
-    board.click("button[aria-label='Delete session']")  # yes, this time
-    board.wait_for_selector("text=Nobody at work.")
+    delete(board)  # yes, this time
+    board.wait_for_selector(NOBODY)
     for _ in range(50):
         if board.actions.exists():
             break
@@ -476,20 +514,24 @@ def test_deleting_a_session_asks_before_closing_its_open_pull_request(board):
 
 def test_stopping_keeps_the_session_and_its_tab_and_deleting_closes_them(board):
     board.resume()
-    session = opens_tab(board, lambda: board.click("button.session"))
+    session = opens_tab(board, lambda: board.click(".window .open"))
     session.on("dialog", lambda d: d.accept())
     its_pr = opens_tab(board, lambda: board.click(f"{ROW} a.chip:has-text('#3')"))
     session.wait_for_selector(".chips a.chip.fail:has-text('#3')")  # its pull request, on its own page too
     session.click("button[aria-label='Stop session']")
-    session.wait_for_selector("text=This session has ended")  # still open, to read how it ended
-    board.wait_for_selector("button.session.ended")  # listed still, to resume, and no longer stoppable
-    board.wait_for_selector("button[aria-label='Stop session']", state="detached")
+    session.wait_for_selector("text=Session ended")  # still open, to read how it ended
     board.wait_for_selector(".window", state="detached")  # no window: nothing runs
+    board.wait_for_selector("button[aria-label='Stop session']", state="detached")
+    board.click("details.ended summary")  # listed still, folded under its project, to resume or delete
+    assert board.inner_text("details.ended button.session") == "Session " + RUN
+    assert [c.text_content() for c in board.query_selector_all("details.ended a.chip")] == ["✕#3", "⇥#2", "preview"]
+    board.wait_for_timeout(3500)  # unfolded still after the page's next refresh
+    assert board.is_visible("details.ended button[aria-label='Resume session']")
     assert not its_pr.is_closed()
     session.click("button[aria-label='Delete session']")  # its own page asks about #3 too
     closes(session, board)
     closes(its_pr, board)  # the dashboard heard it on the `sandbox-tabs` channel
-    board.wait_for_selector("text=Nobody at work.")
+    board.wait_for_selector(NOBODY)
 
 
 def test_ctrl_c_copies_a_selection_and_interrupts_without_one(board):
@@ -533,7 +575,7 @@ def test_resolve_starts_a_session_on_the_items_task(board):
     session.wait_for_selector(".say:has-text('Done with “Fix issue #7 now”.')")
     [s] = state(board)
     assert (s["kind"], s["title"]) == ("run", "Fix issue #7 now") and session.url.endswith("/chat#" + s["id"])
-    board.wait_for_selector("button.session:has-text('Fix issue #7 now')")
+    board.wait_for_selector(".window .open:has-text('Fix issue #7 now')")
 
 
 @pytest.mark.parametrize("keys", ["Control+v", "Control+Shift+v"])

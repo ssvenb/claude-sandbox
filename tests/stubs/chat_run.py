@@ -35,7 +35,8 @@ def say(block, text, **more):
     for word in text.split(" "):
         emit(type="delta", id=block, kind=more.get("kind", "text"), text=word + " ")
         time.sleep(PACE)
-    emit(type="text", id=block, kind=more.get("kind", "text"), text=text)
+    if more.get("whole", True):
+        emit(type="text", id=block, kind=more.get("kind", "text"), text=text)
 
 
 if args[:1] == ["--web"]:
@@ -90,7 +91,8 @@ def turn(text):
     turns += 1
     n = turns
     emit(type="status", state="working")
-    say(f"t{n}", "The user wants this done; look at the code first.", kind="thinking")
+    # In a "long" turn its thinking only streams, never sent whole, as Claude's sometimes is.
+    say(f"t{n}", "The user wants this done; look at the code first.", kind="thinking", whole="long" not in text)
     emit(type="tool", id=f"r{n}", name="Read", input={"file_path": "/workspace/src/app.py"})
     time.sleep(PACE * 3)
     emit(type="result", id=f"r{n}", output="def main():\n    return 1\n", error=False)

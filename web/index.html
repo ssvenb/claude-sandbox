@@ -10,91 +10,82 @@
 <link rel="stylesheet" href="/ui.css">
 <script src="/ui.js"></script>
 <style>
-  /* The dashboard reads top down, from what needs you to what is merely there: one sentence on
-     what every agent is doing, a place to start a new one, a window per session that is running
-     (the ones waiting on you first), then each project with all its sessions, pull requests and
-     issues. */
-  body { padding: 30px 32px 72px; }
+  /* The dashboard: on top, the first message of a new session; under it, on the left what is
+     running, grouped by project, and on the right each project with what its plugins list. */
+  body { padding: 24px 32px 72px; }
   main { max-width: 1320px; margin: 0 auto; }
-  .top { display: flex; align-items: flex-start; gap: 20px; }
-  .top > div:first-child { flex: 1; min-width: 0; }
-  h1 { font-size: clamp(30px, 4.4vw, 50px); font-weight: 700; letter-spacing: -.03em; line-height: 1.04; margin: 0;
-       text-wrap: balance; }
-  h1 .ask { color: var(--ask); }
-  h1 .lit { color: var(--lamp); }
-  h1 .quiet { color: var(--muted); }
-  /* Totals over every project, one per column the projects show, in the same order. */
-  .totals { display: flex; flex-wrap: wrap; gap: 4px 26px; margin: 12px 0 0; color: var(--muted); }
-  .total { display: flex; align-items: baseline; gap: 6px; }
-  .total b { color: var(--ink); font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums; }
 
-  /* Starting a session is writing its first message: the sandbox boots behind it. */
-  .starter { display: flex; align-items: flex-end; gap: 8px; margin: 26px 0 0; padding: 8px 8px 8px 14px; background: var(--panel);
-             border: 1.5px solid var(--rule); border-radius: 18px; box-shadow: var(--shadow); max-width: 860px; }
-  .starter:focus-within { border-color: var(--lamp); }
-  .starter textarea { flex: 1; min-width: 0; min-height: 36px; max-height: 30vh; resize: none; border: 0; outline: 0 !important;
-                      background: transparent; padding: 6px 0; font-size: 16px; line-height: 1.5; }
-  .starter select { border-color: transparent; background: var(--sunk); max-width: 220px; font-weight: 550; height: 36px; cursor: pointer; }
-  .starter .in { color: var(--muted); padding-bottom: 7px; }
-  .starter button { height: 36px; padding: 0 16px; white-space: nowrap; }
+  /* Starting a session is writing its first message: the sandbox boots behind it. The project and
+     the button stand beside the field, on its first line, so they stay put while it grows. */
+  .top { display: flex; align-items: flex-start; gap: 12px; }
+  .starter { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 8px; }
+  .starter .field { flex: 1; min-width: 0; display: flex; padding: 9px 14px; background: var(--panel);
+                    border: 1.5px solid var(--rule); border-radius: 14px; box-shadow: var(--shadow); }
+  .starter .field:focus-within { border-color: var(--lamp); }
+  .starter textarea { flex: 1; min-width: 0; height: 24px; max-height: 30vh; resize: none; border: 0; outline: 0 !important;
+                      background: transparent; padding: 0; font-size: 16px; line-height: 24px; }
+  .starter select { background: var(--panel); max-width: 220px; font-weight: 550; height: 45px; border-radius: 14px;
+                    padding: 0 10px; cursor: pointer; }
+  .starter button { height: 45px; padding: 0 18px; white-space: nowrap; border-radius: 14px; }
+  .top .theme { margin-top: 7px; }
 
-  h2.band { margin: 34px 0 12px; font-size: 15px; font-weight: 600; color: var(--muted); letter-spacing: 0; }
-  /* A window per running session, lit in the colour of what its agent is doing. */
-  .windows { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
-  .window { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 6px; min-height: 148px; padding: 14px 16px 10px;
+  .board { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 400px); gap: 12px 36px; align-items: start; margin-top: 28px; }
+  h2.band { margin: 0 0 12px; font-size: 15px; font-weight: 600; color: var(--muted); letter-spacing: 0; }
+  .none { color: var(--muted); }
+  /* The left: under each project's name, a window per running session, lit in the colour of what
+     its agent is doing; the ones that ended are folded away under them. */
+  .group + .group { margin-top: 22px; }
+  .group > h3, .project h3 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -.012em; overflow-wrap: anywhere; min-width: 0; }
+  .group > h3 { margin-bottom: 8px; }
+  .windows { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; }
+  .window { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 6px; min-height: 132px; padding: 10px 10px 10px 16px;
             background: var(--panel); border: 1px solid var(--rule); border-radius: 14px; text-align: left; min-width: 0; }
   .window::before { content: ""; position: absolute; inset: -1px -1px auto -1px; height: 4px; border-radius: 14px 14px 0 0; background: var(--rule); }
   .window.working::before, .window.starting::before { background: var(--lamp-fill); }
   .window.question::before { background: var(--ask); }
   .window.idle::before { background: var(--ok); }
   .window.question { border-color: var(--ask); }
-  .window .state { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+  .window .state { display: flex; align-items: center; gap: 8px; min-height: 28px; font-size: 13px; font-weight: 600; }
   .window.working .state b, .window.starting .state b { color: var(--lamp); }
   .window.question .state b { color: var(--ask); }
   .window.idle .state b { color: var(--ok); }
   .window .state b { font-weight: 600; }
-  .window .state span:last-child { margin-left: auto; color: var(--muted); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .window button.open { all: unset; cursor: pointer; font-size: 17px; font-weight: 650; letter-spacing: -.012em; line-height: 1.25;
+  .window .state .stop { margin-left: auto; position: relative; z-index: 1; }  /* above the window's own click */
+  .window button.open { all: unset; cursor: pointer; font-size: 17px; font-weight: 650; letter-spacing: -.012em; line-height: 1.25; padding-right: 6px;
                         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
   .window button.open::after { content: ""; position: absolute; inset: 0; border-radius: 14px; }  /* the whole window opens it */
   .window button.open:focus-visible::after { outline: 2px solid var(--link); outline-offset: 2px; }
   .window:hover { border-color: var(--muted); }
   .window.question:hover { border-color: var(--ask); }
-  .window .doing { color: var(--muted); font-size: 13.5px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2;
+  .window .doing { color: var(--muted); font-size: 13.5px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; padding-right: 6px;
                    -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; align-self: start; }
   .window .doing.tool { font-family: var(--mono); font-size: 12px; }
-  .window .foot { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0 -6px; }
-  .window .foot > * { position: relative; z-index: 1; }  /* above the window's own click */
-  .window .foot .chips { display: flex; gap: 6px; flex: 1; min-width: 0; overflow: hidden; padding-left: 6px; }
+  .window .chips { display: flex; gap: 6px; min-width: 0; overflow: hidden; }
+  .window .chips:empty { display: none; }
+  .window .chips > * { position: relative; z-index: 1; }
+  details.ended { margin-top: 8px; }
+  details.ended > summary { display: inline-block; cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; padding: 2px 0; }
+  details.ended > summary::-webkit-details-marker { display: none; }
+  details.ended > summary:hover { color: var(--ink); }
 
-  /* One panel per project. */
-  section { margin-top: 14px; padding: 20px 24px 22px; background: var(--panel); border: 1px solid var(--rule); border-radius: 16px; }
-  .head { display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap; }
-  .head h2 { flex: 1 1 auto; font-size: 23px; font-weight: 650; letter-spacing: -.018em; line-height: 1.2; margin: 0;
-             overflow-wrap: break-word; min-width: 0; }
-  .head h2 small { margin-left: 10px; color: var(--muted); font-size: 13px; font-weight: 400; letter-spacing: 0; }
-  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
-  .notes { margin-top: 6px; }
+  /* The right: a panel per project, its buttons, then what its plugins list (issues, …). */
+  .project { padding: 14px 16px 12px; background: var(--panel); border: 1px solid var(--rule); border-radius: 14px; }
+  .project + .project { margin-top: 12px; }
+  .head { display: flex; align-items: center; gap: 8px; }
+  .head h3 { flex: 1; }
+  .head h3 small { margin-left: 8px; color: var(--muted); font-size: 12px; font-weight: 400; letter-spacing: 0; }
   .notes p { color: var(--muted); font-size: 13px; }
-  .columns { display: grid; grid-template-columns: minmax(0, 1.25fr) repeat(auto-fit, minmax(0, 1fr)); grid-auto-flow: column;
-             grid-auto-columns: minmax(0, 1fr); gap: 16px 36px; margin-top: 16px; }
-  /* A column's heading carries its count, so an empty one reads as quiet, not missing. */
-  h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; padding-bottom: 8px;
-       border-bottom: 1px solid var(--rule); font-size: 15px; font-weight: 600; letter-spacing: -.005em; }
-  h3 .count { min-width: 22px; padding: 0 7px; border-radius: 999px; background: var(--sunk);
-              color: var(--muted); font-size: 12px; font-weight: 500; line-height: 20px; text-align: center;
-              font-variant-numeric: tabular-nums; }
-  h3 .count.lit { background: var(--lamp-wash); color: var(--lamp); }
+  .project h4 { display: flex; align-items: center; gap: 8px; margin: 12px 0 2px; color: var(--muted); font-size: 13px; font-weight: 600; }
+  .project h4 .count { font-weight: 400; font-variant-numeric: tabular-nums; }
   ul { list-style: none; margin: 0; padding: 0; }
-  li { display: flex; align-items: center; gap: 6px; min-height: 34px; }
+  li { display: flex; align-items: center; gap: 6px; min-height: 32px; }
   li > :first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
                       white-space: nowrap; text-align: left; }
-  .columns p { color: var(--muted); font-size: 13px; }
-  button.session { display: flex; align-items: center; gap: 10px; border-radius: 8px; border-color: transparent; padding: 5px 8px 5px 0; }
-  button.session:hover .name { color: var(--lamp); }
+  li button { flex: none; }
+  .project p.none { font-size: 13px; }
+  button.session { display: flex; align-items: center; gap: 10px; border-radius: 8px; border-color: transparent; padding: 5px 8px 5px 0; color: var(--muted); }
+  button.session:hover .name { color: var(--ink); }
   button.session .name { overflow: hidden; text-overflow: ellipsis; }
-  button.session .run { color: var(--muted); font-size: 12px; font-family: var(--mono); flex: none; }
-  .ended .name { color: var(--muted); }
   li a { color: var(--ink); text-decoration: none; padding: 4px 0; }
   li a:hover { color: var(--link); }
   a .num { color: var(--link); font-variant-numeric: tabular-nums; margin-right: 8px; }
@@ -184,16 +175,14 @@
   .kept { font-size: 12px; }
 
   @media (max-width: 900px) {
-    body { padding: 20px 14px 48px; }
-    section { padding: 16px 14px 18px; border-radius: 12px; }
-    .columns { grid-template-columns: minmax(0, 1fr); grid-auto-flow: row; gap: 22px; }
-    .starter { flex-wrap: wrap; }
-    .starter textarea { flex-basis: 100%; }
+    body { padding: 14px 14px 48px; }
+    .top { flex-wrap: wrap; }
+    .starter { flex-wrap: wrap; flex-basis: 100%; }
+    .starter .field { flex-basis: 100%; }
     .starter select { flex: 1; max-width: none; }
+    .top .theme { margin: 0 0 0 auto; }
+    .board { grid-template-columns: minmax(0, 1fr); gap: 28px; margin-top: 20px; }
     .window { min-height: 0; }
-    .top { gap: 10px; }
-    h2.band { margin-top: 26px; }
-    button.session .run { display: none; }
     dialog { width: 100vw; max-width: 100vw; max-height: 100dvh; height: 100dvh; margin: 0; border-radius: 0; border: 0; }
     dialog form { max-height: 100dvh; height: 100%; }
     dialog .body { flex: 1; }
@@ -217,15 +206,13 @@ const liveItems = s => (s.items || []).map(here);
 const runItems = said => [...said.lists.flatMap(list => list.items), ...(said.run_items || [])]
   .filter(i => i.run_id).concat(said.session_items || []);
 
-// The tabs this page opened, by name, so closing a session can close them too. Terminal tabs also
-// close themselves when told on `tabs` (they keep doing so after this page reloads); a VS Code tab
-// is not ours to script, so only this page's handle on it closes it.
-// shortcut: a VS Code tab opened before this page last reloaded stays open; keep the names in
-// sessionStorage and look them up with window.open if that matters.
+// The tabs this page opened, by name, so closing a session can close them too. A session's own
+// page also closes itself (and the VS Code tab it opened) when told on `tabs`.
 const opened = {}, tabs = new BroadcastChannel('sandbox-tabs');
-// A session's tabs: its terminal, VS Code on its checkout, and any item (its pull request) a
-// plugin tied to its run.
-const tabNames = s => ['session-' + s.id, 'code-' + s.workspace,
+// A session's tabs: its page, any item (its pull request) a plugin tied to its run, and those
+// opened from it (a port it published while it ran, no longer listed once it is stopped).
+const owned = {};
+const tabNames = s => ['session-' + s.id, ...(owned[s.id] || []),
   ...Object.values(plugins).flatMap(runItems).filter(i => s.run_id && i.run_id === s.run_id)
     .concat(liveItems(s)).map(i => 'item-' + i.url)];
 const closeTabs = s => tabNames(s).forEach(n => opened[n]?.close());
@@ -244,10 +231,11 @@ const fresh = w => { try { return w.location.href === 'about:blank'; } catch { r
 
 // One tab per listed item (a pull request, an issue). A plain click only: ctrl/middle-click still
 // open a tab of their own, as on any link.
-function item(e, i) {
+function item(e, i, s) {
   if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
   e.preventDefault();
   const w = tab('item-' + i.url);
+  if (s) (owned[s.id] ??= new Set()).add('item-' + i.url);
   // The tab keeps its opener (this page): cut off, Chromium moves it out of reach of both the
   // lookup by name and close(). GitHub could navigate this tab through it; it is your own login.
   if (w && fresh(w)) w.location.replace(i.url);
@@ -280,28 +268,17 @@ async function terminal(project) {
   } catch (e) { w.close(); alert(e.message); }
 }
 
-async function code(s, button) {
-  const w = tab('code-' + s.workspace);
-  if (!w || !fresh(w)) return;
-  await busy(button, async () => {  // the first one starts `code serve-web`, which takes a moment
-    try {
-      const v = await post('/api/vscode', JSON.stringify({session: s.id}));
-      w.location.replace('/vscode/?folder=' + encodeURIComponent(v.folder));
-    } catch (e) { w.close(); alert(e.message); }
-  });
-}
-
 // Stopping removes the container and keeps the session listed, its tab showing how it ended, so
 // it can be read and resumed. Nothing else stops it: closing its tab, or the browser, does not.
 async function stop(s) {
-  if (!confirm(`Stop ${label(s)} in ${name(s.project)}? Its container is removed.`)) return;
+  if (!confirm(`Stop “${titled(s)}”?`)) return;
   await post(`/api/sessions/${s.id}/stop`).catch(e => alert(e.message));
   refresh();
 }
 
 // Deleting forgets the session (stopping it first if it still runs) and closes its tabs.
 async function remove(s) {
-  if (s.exit === null && !confirm(`Stop and delete ${label(s)} in ${name(s.project)}? Its tabs close too.`)) return;
+  if (s.exit === null && !confirm(`Stop and delete “${titled(s)}”?`)) return;
   // What a plugin offers to tidy up with it (its run's open pull request: close it) is asked
   // about one by one, and done only on a yes.
   const {offers} = await api(`/api/sessions/${s.id}/offers`).catch(() => ({offers: []}));
@@ -656,28 +633,8 @@ async function configure(path) {
 }
 
 // An item on a session's row: opens in its own tab, as in a section.
-const chip = i => h('a', {className: 'chip ' + (i.status || ''), href: i.url, target: '_blank', rel: 'noopener',
-                          onclick: e => item(e, i), title: tip(i)}, mark(i), i.ref || i.title);
-
-const column = (title, items, row, none, lit) => h('div', {},
-  h('h3', {}, title, h('span', {className: 'count' + (lit ? ' lit' : '')}, String(items.length))),
-  items.length ? h('ul', {}, ...items.map(row)) : h('p', {}, none));
-const resume = (path, run_id) => {
-  const b = h('button', {onclick: () => busy(b, () => start(path, 'resume', run_id)), title: 'Same branch, same conversation'}, 'Resume');
-  return b;
-};
-
-// What every agent is doing, in one sentence: the ones waiting on you first.
-function lede(agents) {
-  const n = st => agents.filter(s => s.status === st).length;
-  const parts = [[n('question'), 'ask', 'waiting on you'], [n('working'), 'lit', 'at work'],
-                 [n('starting'), 'lit', 'starting'], [n('idle'), 'quiet', 'idle']].filter(p => p[0]);
-  if (!parts.length) return h('h1', {}, 'Nobody at work.');
-  const h1 = h('h1');
-  parts.forEach(([k, cls, what], i) => h1.append(
-    h('span', {className: cls}, i ? `${k} ${what}` : `${k} ${k === 1 ? 'agent' : 'agents'} ${what}`), i < parts.length - 1 ? ', ' : '.'));
-  return h1;
-}
+const chip = s => i => h('a', {className: 'chip ' + (i.status || ''), href: i.url, target: '_blank', rel: 'noopener',
+                               onclick: e => item(e, i, s), title: tip(i)}, mark(i), i.ref || i.title);
 
 // The first message of a new session, and the project it is for. One form for the page's whole
 // life (rebuilt only when the projects change), so what is being written survives a redraw.
@@ -698,27 +655,24 @@ function starter() {
     text.value = '';
     grow();
     busy(go, () => start(projects.length > 1 ? pick.value : projects[0], 'run', undefined, task || undefined));
-  }}, text, projects.length > 1 ? h('span', {className: 'in'}, 'in') : '', projects.length > 1 ? pick : '', go);
+  }}, h('div', {className: 'field'}, text), projects.length > 1 ? pick : '', go);
   return starterForm;
 }
 
 // A running session as a window: how it is doing, what it was asked, what it is at right now.
 function windowOf(s, items) {
-  const doing = s.status === 'starting' ? h('div', {className: 'doing'}, spinner(s.waiting ? `Starting its sandbox, ${s.waiting} message${s.waiting > 1 ? 's' : ''} waiting` : 'Starting its sandbox'))
-    : s.status === 'question' ? h('div', {className: 'doing'}, 'It asked you something and waits for the answer.')
+  const doing = s.status === 'starting' ? h('div', {className: 'doing'}, spinner(s.waiting ? `Starting, ${s.waiting} message${s.waiting > 1 ? 's' : ''} waiting` : 'Starting'))
     : s.status === 'working' && s.activity ? h('div', {className: 'doing tool'}, s.activity)
-    : h('div', {className: 'doing'}, (s.said || '').replace(/[#*`>|]/g, '').replace(/\s+/g, ' ').slice(0, 180) || (s.status === 'working' ? 'Thinking' : 'Waiting for its first task.'));
-  const vs = h('button', {className: 'icon vscode', onclick: () => code(s, vs), ariaLabel: 'VS Code', title: `VS Code on this run's checkout, ${s.workspace}`}, ICON.vscode());
+    : h('div', {className: 'doing'}, (s.said || '').replace(/[#*`>|]/g, '').replace(/\s+/g, ' ').slice(0, 180));
   return h('article', {className: 'window ' + s.status},
     h('div', {className: 'state'}, h('span', {className: 'lamp ' + s.status}), h('b', {}, SHORT[s.status]),
-      h('span', {title: s.project}, `${name(s.project)}, ${ago(s.started)}`)),
-    h('button', {className: 'open', onclick: () => show(s), title: s.title || 'Open the session'}, titled(s)),
+      h('button', {className: 'icon stop', onclick: () => stop(s), ariaLabel: 'Stop session', title: 'Stop'}, ICON.stop())),
+    h('button', {className: 'open', onclick: () => show(s), title: s.title || ''}, titled(s)),
     doing,
-    h('div', {className: 'foot'}, h('div', {className: 'chips'}, ...items.map(chip)),
-      s.workspace ? vs : '',
-      h('button', {className: 'icon stop', onclick: () => stop(s), ariaLabel: 'Stop session', title: 'Stop: remove its container, keep it listed'}, ICON.stop())));
+    h('div', {className: 'chips'}, ...items.map(chip(s))));
 }
 
+const unfolded = new Set();  // the projects whose ended sessions are unfolded, across redraws
 function render() {
   const sig = JSON.stringify([state, plugins]);
   if (sig === drawn) return;
@@ -730,78 +684,77 @@ function render() {
     return of.find(s => s.exit === null) || of.pop();
   };
   const agents = state.sessions.filter(s => s.kind !== 'shell');  // terminals are not sessions
-  const totals = new Map([['Sessions', agents.length]]);
-  for (const said of Object.values(plugins))
-    for (const list of said.lists) totals.set(list.title, (totals.get(list.title) || 0) + list.items.length);
   const tiedTo = s => {
     const said = plugins[s.project];
     return (s.run_id && said && holder(s.project, s.run_id) === s ? runItems(said).filter(i => i.run_id === s.run_id) : []).concat(liveItems(s));
   };
   const urgency = {question: 0, working: 1, starting: 2, idle: 3};
-  const running = agents.filter(s => s.exit === null).sort((a, b) => urgency[a.status] - urgency[b.status] || b.started - a.started);
   // The starter form is moved, not rebuilt: put the caret back where it was.
   const typing = document.activeElement?.closest?.('.starter') && document.activeElement;
   const caret = typing?.selectionStart !== undefined ? [typing.selectionStart, typing.selectionEnd] : null;
 
-  $('board').replaceChildren(
-    h('div', {className: 'top'}, h('div', {}, lede(running),
-      h('div', {className: 'totals'}, ...[...totals].map(([title, n]) => h('div', {className: 'total'}, h('b', {}, String(n)), h('span', {}, title))))),
-      themeSwitch()),
-    state.projects.length ? starter() : '',
-    running.length ? h('h2', {className: 'band'}, 'Running now') : '',
-    running.length ? h('div', {className: 'windows'}, ...running.map(s => windowOf(s, tiedTo(s)))) : '',
-    state.projects.length ? h('h2', {className: 'band'}, 'Projects') : '',
-    ...state.projects.map(path => {
-      const mine = agents.filter(s => s.project === path), said = plugins[path];
-      const gear = h('button', {className: 'glyph', onclick: () => busy(gear, () => configure(path)), title: 'Plugins and settings for this project (.claude-sandbox.json)',
-                                ariaLabel: 'Settings'}, ICON.gear());
-      const shell = h('button', {className: 'glyph', onclick: () => busy(shell, () => terminal(path)), title: 'Terminal on this machine, in the project',
-                                 ariaLabel: 'Terminal'}, ICON.prompt());
-      const add = h('button', {className: 'glyph primary', onclick: () => busy(add, () => start(path, 'run')), title: 'New session',
-                               ariaLabel: 'New session'}, ICON.plus());
-      return h('section', {},
-        h('div', {className: 'head'},
-          h('h2', {title: path}, name(path), said?.agent ? h('small', {}, said.agent) : ''),
-          h('div', {className: 'actions'}, gear, shell, add)),
-        h('div', {className: 'notes'},
-          ...(said ? said.notes.map(note => h('p', {}, note)) : [h('p', {className: 'loading'}, h('span', {className: 'spin'}), 'Reading the project')])),
-        h('div', {className: 'columns'},
-        column('Sessions', mine, s => {
-          const play = h('button', {className: 'icon play', onclick: () => busy(play, () => start(path, 'resume', s.run_id)), ariaLabel: 'Resume session',
-                                    title: 'Resume: same branch, same conversation'}, ICON.play());
-          const vs = h('button', {className: 'icon vscode', onclick: () => code(s, vs), ariaLabel: 'VS Code',
-                                  title: `VS Code on this run's checkout, ${s.workspace}`}, ICON.vscode());
-          return h('li', {},
-            h('button', {className: 'session' + (s.exit === null ? '' : ' ended'), onclick: () => show(s), title: s.title || 'Open the session in a tab'},
-              h('span', {className: 'lamp ' + (s.status || ''), title: SAYS[s.status] || 'ended'}),
-              h('span', {className: 'name'}, (s.title || label(s)) + (s.exit === null ? '' : `, exited ${s.exit}`) + (s.status === 'question' ? ', has a question' : '')),
-              s.title ? h('span', {className: 'run'}, s.run_id) : ''),
-            ...tiedTo(s).map(chip),
-            s.exit !== null && s.run_id && !live(s.run_id) ? play : '',
-            s.workspace ? vs : '',
-            s.exit === null ? h('button', {className: 'icon stop', onclick: () => stop(s), ariaLabel: 'Stop session',
-                                           title: 'Stop: remove its container, keep it listed'}, ICON.stop()) : '',
-            h('button', {className: 'icon', onclick: () => remove(s), ariaLabel: 'Delete session',
-                         title: 'Delete: forget it, stopping it first'}, ICON.trash()));
-        }, 'No sessions yet. Start one with the + above.', mine.some(s => s.exit === null)),
-        // What the project's plugins list (issues, …): the page only draws it. An item a plugin
-        // tied to a run is on that run's session row instead, while one is listed; with none, it
-        // offers to resume the run. Items listed for runs only (pull requests) have no section.
-        ...(said ? said.lists : []).map(list => column(list.title,
-          list.items.filter(i => !(i.run_id && holder(path, i.run_id))), i => {
+  // The left: each project's running sessions (the ones waiting on you first), its ended ones folded.
+  const groups = state.projects.map(path => {
+    const mine = agents.filter(s => s.project === path);
+    const running = mine.filter(s => s.exit === null).sort((a, b) => urgency[a.status] - urgency[b.status] || b.started - a.started);
+    const ended = mine.filter(s => s.exit !== null).reverse();
+    if (!mine.length) return null;
+    const fold = h('details', {className: 'ended', open: unfolded.has(path),
+                               ontoggle: () => { fold.open ? unfolded.add(path) : unfolded.delete(path); }},
+      h('summary', {}, `${ended.length} ended`),
+      h('ul', {}, ...ended.map(s => {
+        const play = h('button', {className: 'icon play', onclick: () => busy(play, () => start(path, 'resume', s.run_id)), ariaLabel: 'Resume session',
+                                  title: 'Resume'}, ICON.play());
+        return h('li', {},
+          h('button', {className: 'session', onclick: () => show(s), title: s.title || ''},
+            h('span', {className: 'lamp'}), h('span', {className: 'name'}, titled(s))),
+          ...tiedTo(s).map(chip(s)),
+          s.run_id && !live(s.run_id) ? play : '',
+          h('button', {className: 'icon', onclick: () => remove(s), ariaLabel: 'Delete session', title: 'Delete'}, ICON.trash()));
+      })));
+    return h('div', {className: 'group'}, h('h3', {title: path}, name(path)),
+      running.length ? h('div', {className: 'windows'}, ...running.map(s => windowOf(s, tiedTo(s)))) : '',
+      ended.length ? fold : '');
+  }).filter(Boolean);
+
+  // The right: each project, its buttons, and what its plugins list (issues, …): the page only
+  // draws it. An item a plugin tied to a run is on that run's session instead, while one is
+  // listed; with none, it offers to resume the run. Items listed for runs only (pull requests)
+  // show nowhere else.
+  const projects = state.projects.map(path => {
+    const said = plugins[path];
+    const gear = h('button', {className: 'glyph', onclick: () => busy(gear, () => configure(path)), title: 'Settings', ariaLabel: 'Settings'}, ICON.gear());
+    const shell = h('button', {className: 'glyph', onclick: () => busy(shell, () => terminal(path)), title: 'Terminal', ariaLabel: 'Terminal'}, ICON.prompt());
+    const add = h('button', {className: 'glyph primary', onclick: () => busy(add, () => start(path, 'run')), title: 'New session', ariaLabel: 'New session'}, ICON.plus());
+    return h('section', {className: 'project'},
+      h('div', {className: 'head'}, h('h3', {title: path}, name(path), said?.agent ? h('small', {}, said.agent) : ''), gear, shell, add),
+      h('div', {className: 'notes'},
+        ...(said ? said.notes.map(note => h('p', {}, note)) : [h('p', {className: 'loading'}, h('span', {className: 'spin'}), 'Loading')])),
+      ...(said ? said.lists : []).flatMap(list => {
+        const items = list.items.filter(i => !(i.run_id && holder(path, i.run_id)));
+        return [h('h4', {}, list.title, h('span', {className: 'count'}, String(items.length))),
+          items.length ? h('ul', {}, ...items.map(i => {
             const go = i.start && h('button', {onclick: () => busy(go, () => start(path, 'run', undefined, i.start.task)), title: i.start.task}, i.start.label);
+            const again = i.run_id && h('button', {onclick: () => busy(again, () => start(path, 'resume', i.run_id))}, 'Resume');
             return h('li', {},
               h('a', {href: i.url, target: '_blank', rel: 'noopener', onclick: e => item(e, i), title: tip(i)},
                 mark(i), i.ref ? h('span', {className: 'num'}, i.ref) : '',
                 i.note ? h('span', {className: 'draft'}, i.note + ': ') : '', i.title),
-              i.run_id ? resume(path, i.run_id) : '',
+              again || '',
               // A new session on a task the plugin wrote for this item (an issue's Resolve).
               go || '');
-          }, 'None open.'))));
-    }));
-  if (!state.projects.length)
-    $('board').append(h('div', {className: 'empty'}, h('b', {}, 'No projects yet'),
-      `List the directories of the repos your agents work on, one per line, in ${state.projects_file}. They show up here on the next refresh.`));
+          })) : h('p', {className: 'none'}, 'None')];
+      }));
+  });
+
+  $('board').replaceChildren(
+    h('div', {className: 'top'}, state.projects.length ? starter() : h('div', {className: 'starter'}), themeSwitch()),
+    state.projects.length ? h('div', {className: 'board'},
+      h('div', {className: 'running'}, h('h2', {className: 'band'}, 'Running now'),
+        agents.some(s => s.exit === null) ? '' : h('p', {className: 'none'}, 'Nothing running'), ...groups),
+      h('aside', {className: 'projects'}, h('h2', {className: 'band'}, 'Projects'), ...projects))
+    : h('div', {className: 'empty'}, h('b', {}, 'No projects yet'),
+      `List the directories of the repos your agents work on, one per line, in ${state.projects_file}.`));
   if (typing) { typing.focus(); if (caret && typing.setSelectionRange) typing.setSelectionRange(...caret); }
 }
 

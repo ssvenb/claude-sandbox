@@ -33,13 +33,7 @@
 
   #scroll { flex: 1; min-height: 0; overflow-y: auto; scroll-behavior: auto; overscroll-behavior: contain; }
   .column { width: min(820px, 100%); margin: 0 auto; padding: 0 20px; }
-  #log { padding-top: 22px; padding-bottom: 12px; display: flex; flex-direction: column; gap: 14px; }
-
-  /* Before anything is said: an invitation, and what the sandbox is up to. */
-  #welcome { padding: 9vh 0 2vh; }
-  #welcome h1 { margin: 0 0 8px; font-size: clamp(28px, 4.6vw, 42px); font-weight: 700; letter-spacing: -.028em; line-height: 1.08;
-                text-wrap: balance; }
-  #welcome p { color: var(--muted); font-size: 16px; max-width: 56ch; }
+  #log { padding-top: 22px; padding-bottom: 26px; display: flex; flex-direction: column; gap: 14px; }
 
   /* The sandbox starting: a turning ring, the step it is on, the whole output on request. */
   .boot { border: 1px solid var(--rule); border-radius: 12px; background: var(--sunk); font-size: 14px; }
@@ -65,7 +59,6 @@
   .you { align-self: flex-end; max-width: min(86%, 640px); padding: 9px 14px; border-radius: 16px 16px 4px 16px;
          background: var(--lamp-wash); white-space: pre-wrap; overflow-wrap: anywhere; }
   .you.queued { background: transparent; border: 1px dashed var(--muted); }
-  .you .waits { display: flex; align-items: center; gap: 7px; margin-top: 5px; color: var(--muted); font-size: 12px; }
 
   /* What the agent wrote: prose, set like prose. */
   .say { line-height: 1.6; overflow-wrap: anywhere; min-width: 0; }
@@ -171,11 +164,6 @@
   .ask .row { display: flex; gap: 8px; justify-content: flex-end; }
   .ask.settled .said { color: var(--ink); }
 
-  /* Below the column while the agent is at it: what it is doing right now. */
-  #tail { min-height: 26px; padding-bottom: 18px; color: var(--muted); font-size: 13.5px; }
-  #tail .loading { color: var(--lamp); }
-  #tail .loading span + span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
   /* The dock: the plan it works through, a suggestion, and the composer. */
   #dock { border-top: 1px solid var(--rule); background: var(--page); padding: 10px 0 max(14px, env(safe-area-inset-bottom)); }
   #dock .column { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
@@ -198,8 +186,7 @@
   .composer .bar select { border-color: transparent; background: transparent; color: var(--muted); font-size: 13px; padding: 3px 4px;
                           max-width: 190px; min-width: 0; text-overflow: ellipsis; cursor: pointer; }
   .composer .bar select:hover { color: var(--ink); background: var(--sunk); }
-  .composer .bar .hint { flex: 1; min-width: 0; text-align: right; color: var(--muted); font-size: 12px; overflow: hidden;
-                         text-overflow: ellipsis; white-space: nowrap; padding-right: 4px; }
+  .composer .bar .hint { flex: 1; }
   .composer .bar button.round { width: 34px; height: 34px; padding: 0; display: grid; place-items: center; flex: none; }
   .composer .bar button.round svg { width: 18px; height: 18px; }
   .composer .bar button.halt { color: var(--fail); border-color: color-mix(in srgb, var(--fail) 50%, transparent); }
@@ -218,21 +205,19 @@
 
   @media (max-width: 720px) {
     header { padding: 8px 10px; gap: 6px; }
-    header .chips, header .theme, header button.icon span { display: none; }
+    header .chips, header .theme { display: none; }
     .column { padding: 0 12px; }
     .you { max-width: 94%; }
     .tool .body { padding-left: 12px; }
-    .composer .bar .hint { visibility: hidden; }
     .composer .bar select { max-width: 120px; }
     .composer textarea { font-size: 16px; }  /* smaller, and a phone zooms in on focus */
     #log { padding-top: 14px; gap: 12px; }
-    #welcome { padding-top: 4vh; }
     .ask { padding: 12px; }
     .code .lang { display: none; }
   }
   /* On a touch screen Enter starts a new line and the button sends; there is no Tab to take a suggestion with. */
   @media (pointer: coarse) {
-    #suggest kbd, .composer .bar .hint { display: none; }
+    #suggest kbd { display: none; }
     .composer .bar { justify-content: space-between; }
     .composer .bar select { flex: 0 1 auto; }
     .composer .bar button.round { width: 40px; height: 40px; margin-left: auto; }
@@ -245,11 +230,10 @@
 </head>
 <body>
 <header id="bar"></header>
-<div id="gone" hidden><div><b>This session is gone</b>It was deleted, or the server restarted. <a href="/">See what is running</a></div></div>
+<div id="gone" hidden><div><b>Session gone</b><a href="/">Dashboard</a></div></div>
 <main id="scroll">
   <div class="column">
     <div id="log" aria-live="polite"></div>
-    <div id="tail"></div>
   </div>
 </main>
 <footer id="dock"><div class="column">
@@ -259,11 +243,11 @@
     <div id="menu" role="listbox" hidden></div>
     <textarea id="input" rows="1" aria-label="Message to the agent" autocomplete="off"></textarea>
     <div class="bar">
-      <select id="model" aria-label="Model" title="The model the next turn runs on" hidden></select>
-      <select id="effort" aria-label="Reasoning effort" title="How hard it thinks" hidden></select>
-      <span class="hint" id="hint"></span>
-      <button class="round halt" id="halt" type="button" title="Stop what it is doing (Esc)" aria-label="Interrupt" hidden></button>
-      <button class="round primary" id="send" type="submit" title="Send (Enter)" aria-label="Send"></button>
+      <select id="model" aria-label="Model" hidden></select>
+      <select id="effort" aria-label="Reasoning effort" hidden></select>
+      <span class="hint"></span>
+      <button class="round halt" id="halt" type="button" title="Interrupt (Esc)" aria-label="Interrupt" hidden></button>
+      <button class="round primary" id="send" type="submit" aria-label="Send"></button>
     </div>
   </form>
 </div></footer>
@@ -429,8 +413,7 @@ const todoItems = input => (input?.todos || []).map(t => ({text: t.content || t.
 // ---- the column ---------------------------------------------------------------------------------
 
 let session = null, info = {}, status = 'starting', ready = false, over = null, lastState = '';
-let blocks = new Map(), tools = new Map(), asks = new Map(), users = new Map(), boot = null, welcome = null;
-let doing = '';      // the tool call it is on, for the line under the column
+let blocks = new Map(), tools = new Map(), asks = new Map(), users = new Map(), boot = null;
 let follow = true;  // keep the newest line in view, until the reader scrolls up
 scroller.addEventListener('scroll', () => { follow = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80; });
 const settle = () => { if (follow) scroller.scrollTop = scroller.scrollHeight; };
@@ -438,8 +421,6 @@ new ResizeObserver(settle).observe(log);
 
 // Where an event's element goes: inside the subagent call it belongs to, else at the column's end.
 function place(el, parent) {
-  welcome?.remove();
-  welcome = null;
   (tools.get(parent)?.kids || log).append(el);
   return el;
 }
@@ -463,14 +444,13 @@ function bootState() {
   const failed = over !== null && !ready;
   boot.el.className = 'boot ' + (failed ? 'failed' : ready ? 'ok quiet' : 'starting');
   boot.mark.replaceChildren(failed ? '✕' : ready ? '✓' : h('span', {className: 'spin'}));
-  boot.step.textContent = failed ? 'The sandbox stopped before the agent was ready' : ready ? 'Sandbox ready' : info.agent ? 'Starting the agent' : 'Starting the sandbox';
+  boot.step.textContent = failed ? 'Sandbox failed' : ready ? 'Sandbox ready' : info.agent ? 'Starting the agent' : 'Starting the sandbox';
   if (failed) boot.el.open = true;
   if (ready) boot.line.textContent = '';
 }
 
 function user(e) {
   const el = place(h('div', {className: 'you' + (e.queued ? ' queued' : '')}, e.text));
-  if (e.queued) el.append(h('div', {className: 'waits'}, h('span', {className: 'spin'}), 'Sent as soon as the sandbox is ready'));
   if (e.id) users.set(e.id, el);
   if (session && !session.title) session.title = e.text.replace(/\s+/g, ' ').slice(0, 140);  // it is called what it was first asked
   follow = true;
@@ -478,10 +458,30 @@ function user(e) {
 function sent(e) {
   const el = users.get(e.id);
   el?.classList.remove('queued');
-  el?.querySelector('.waits')?.remove();
 }
 
 // A block of text, whole or still streaming: drawn at most once a frame.
+function draw(b) {
+  if (b.dirty) return;
+  b.dirty = true;
+  requestAnimationFrame(() => {
+    b.dirty = false;
+    if (b.kind === 'thinking') {
+      b.body.textContent = b.text;
+      b.label.replaceChildren(b.streaming ? h('span', {className: 'spin'}) : '', b.streaming ? ' Thinking' : 'Thought');
+    } else {
+      b.body.replaceChildren();
+      markdown(b.text, b.body);
+      b.body.lastElementChild?.classList.toggle('caret', !!b.streaming && !b.body.lastElementChild.matches('.code, .scroller'));
+    }
+    settle();
+  });
+}
+// A block streams until its whole text comes, or until anything else does: not every block gets
+// its whole text sent (thinking may come only as a stream), and it must not turn for ever.
+function settleBlocks(except) {
+  for (const b of blocks.values()) if (b.streaming && b !== except) { b.streaming = false; draw(b); }
+}
 function block(e, streaming) {
   let b = blocks.get(e.id);
   if (!b) {
@@ -494,23 +494,10 @@ function block(e, streaming) {
     blocks.set(e.id, b);
     place(b.el, e.parent);
   }
+  settleBlocks(b);
   b.text = streaming ? b.text + e.text : e.text;
   b.streaming = streaming;
-  if (!b.dirty) {
-    b.dirty = true;
-    requestAnimationFrame(() => {
-      b.dirty = false;
-      if (b.kind === 'thinking') {
-        b.body.textContent = b.text;
-        b.label.replaceChildren(b.streaming ? h('span', {className: 'spin'}) : '', b.streaming ? ' Thinking' : 'Thought for a moment');
-      } else {
-        b.body.replaceChildren();
-        markdown(b.text, b.body);
-        b.body.lastElementChild?.classList.toggle('caret', !!b.streaming && !b.body.lastElementChild.matches('.code, .scroller'));
-      }
-      settle();
-    });
-  }
+  draw(b);
 }
 
 function tool(e) {
@@ -531,7 +518,6 @@ function tool(e) {
   t.what.textContent = what(t.input);
   const i = t.input;
   if (typeof i?.description === 'string') t.what.title = i.description;
-  if (!e.parent) doing = `${t.verb.textContent} ${t.what.textContent}`;
   if (i && typeof i === 'object') {
     const before = i.old_string ?? i.old_str, after = i.new_string ?? i.new_str, written = i.content ?? i.file_text;
     const parts = [];
@@ -609,10 +595,10 @@ function settled(a, answers) {
 function turn(e) {
   const parts = [];
   if (e.duration) parts.push(e.duration >= 60000 ? `${Math.floor(e.duration / 60000)} min ${Math.round(e.duration % 60000 / 1000)} s` : `${Math.max(1, Math.round(e.duration / 1000))} s`);
-  if (typeof e.cost === 'number') parts.push(`$${e.cost.toFixed(2)} so far`);
-  if (e.context?.max) parts.push(`${Math.round(100 * e.context.used / e.context.max)}% of its context used`);
+  if (typeof e.cost === 'number') parts.push(`$${e.cost.toFixed(2)}`);
+  if (e.context?.max) parts.push(`${Math.round(100 * e.context.used / e.context.max)}% context`);
   if (e.error) place(h('div', {className: 'note error'}, e.error));
-  if (parts.length) place(h('div', {className: 'turn'}, parts.join(', ')));
+  if (parts.length) place(h('div', {className: 'turn'}, parts.join(' · ')));
   for (const t of tools.values()) if (!t.done) { t.done = true; toolState(t); }  // nothing still runs once the turn is over
 }
 
@@ -621,8 +607,8 @@ function ended(e) {
   bootState();
   for (const t of tools.values()) if (!t.done) { t.done = true; t.error = true; toolState(t); }
   const again = h('button', {type: 'button', className: 'primary', onclick: () => busy(again, resume)}, 'Resume');
-  place(h('div', {className: 'over'}, h('b', {}, 'This session has ended'),
-    h('span', {}, e.code ? `Its sandbox exited with status ${e.code}.` : 'Its sandbox is gone; the branch and the conversation are kept.'),
+  place(h('div', {className: 'over'}, h('b', {}, 'Session ended'),
+    h('span', {}, e.code ? `Exit status ${e.code}` : ''),
     session?.run_id ? again : ''));
 }
 
@@ -644,19 +630,19 @@ function handle(e) {
     case 'sent': sent(e); break;
     case 'text': block(e, false); break;
     case 'delta': block(e, true); break;
-    case 'tool': tool(e); break;
+    case 'tool': settleBlocks(); tool(e); break;
     case 'result': result(e); break;
     case 'progress': progress(e); break;
-    case 'ask': ask(e); break;
+    case 'ask': settleBlocks(); ask(e); break;
     case 'asked': { const a = asks.get(e.id); if (a && !a.el.classList.contains('settled')) settled(a, a.e.answers); break; }
-    case 'turn': turn(e); break;
+    case 'turn': settleBlocks(); turn(e); break;
     case 'notice': place(h('div', {className: 'note ' + (e.level || 'info')}, e.text)); break;
-    case 'status': status = e.state; if (status !== 'working') doing = ''; break;
+    case 'status': status = e.state; if (status !== 'working') settleBlocks(); break;
     case 'model': info.model = e.id; pickers(); break;
     case 'effort': info.effort = e.level; pickers(); break;
     case 'todos': plan(e.items); break;
     case 'suggestion': suggest(e.text); break;
-    case 'exit': ended(e); break;
+    case 'exit': settleBlocks(); ended(e); break;
   }
 }
 function apply(e) {
@@ -670,12 +656,6 @@ function restore(snap) {
   blocks = new Map(); tools = new Map(); asks = new Map(); users = new Map(); boot = null; over = null;
   session = snap.session; info = {...snap.info}; ready = snap.ready; status = snap.status;
   bootLine('');
-  if (!snap.events.some(e => e.type !== 'boot')) {
-    welcome = h('div', {id: 'welcome'}, h('h1', {}, `What should the agent do in ${name(session.project)}?`),
-      h('p', {}, snap.ready ? 'It is ready and waiting for its first task.'
-        : 'Its sandbox is still starting. Write your first message now: it is sent the moment the agent is ready.'));
-    log.append(welcome);
-  }
   for (const e of snap.events) handle(e);
   for (const b of blocks.values()) b.streaming = false;
   bootState();
@@ -740,7 +720,7 @@ function menu() {
   el.hidden = !offered.length;
   if (m && !ready && !offered.length) {
     el.hidden = false;
-    return el.replaceChildren(spinner('Its commands are listed once the agent is ready'));
+    return el.replaceChildren(spinner());
   }
   picked = Math.min(picked, Math.max(0, offered.length - 1));
   el.replaceChildren(...offered.map((c, k) => h('button', {type: 'button', role: 'option', ariaSelected: String(k === picked),
@@ -786,15 +766,17 @@ $('halt').onclick = interrupt;
 
 let items = [];  // what the project's plugins tie to this run: its pull request, its ports
 const tabs = new BroadcastChannel('sandbox-tabs');
-tabs.onmessage = e => { if (e.data.id === id) window.close(); };
+let vsTab = null;  // the VS Code tab this page opened: closed with the session
+const leave = () => { vsTab?.close(); window.close(); };
+tabs.onmessage = e => { if (e.data.id === id) leave(); };
 
 async function stop() {
-  if (!confirm(`Stop ${titled(session)} in ${name(session.project)}? Its container is removed.`)) return;
+  if (!confirm('Stop this session?')) return;
   await post(`/api/sessions/${id}/stop`).catch(e => alert(e.message));
   poll();
 }
 async function remove() {
-  if (session.exit === null && !confirm(`Stop and delete ${titled(session)} in ${name(session.project)}? Its tabs close too.`)) return;
+  if (session.exit === null && !confirm('Stop and delete this session?')) return;
   // What a plugin offers to tidy up with it (its run's open pull request: close it) is asked
   // about one by one, and done only on a yes.
   const {offers} = await api(`/api/sessions/${id}/offers`).catch(() => ({offers: []}));
@@ -802,11 +784,11 @@ async function remove() {
   const done = await post(`/api/sessions/${id}/delete`, JSON.stringify({tidy})).catch(e => alert(e.message));
   if (done?.failed?.length) alert('Not done:\n' + done.failed.join('\n'));
   tabs.postMessage(session);
-  window.close();
+  leave();
   poll();  // still here: this tab was not opened by the dashboard, so it may not close itself
 }
 async function code(button) {
-  const w = window.open('', 'code-' + session.workspace);
+  const w = vsTab = window.open('', 'code-' + session.workspace);
   await busy(button, async () => {
     try {
       const v = await post('/api/vscode', JSON.stringify({session: id}));
@@ -826,7 +808,7 @@ function chrome() {
     $('icon').href = FAVICON[state || 'unlit'];
     const chips = [...items, ...(session.items || []).map(here)].map(i =>
       h('a', {className: 'chip ' + (i.status || ''), href: i.url, target: '_blank', rel: 'noopener', title: tip(i)}, mark(i), i.ref || i.title));
-    const vs = h('button', {className: 'icon vscode', onclick: () => code(vs), ariaLabel: 'VS Code', title: `VS Code on this run's checkout, ${session.workspace}`}, ICON.vscode());
+    const vs = h('button', {className: 'icon vscode', onclick: () => code(vs), ariaLabel: 'VS Code', title: 'VS Code'}, ICON.vscode());
     $('bar').replaceChildren(
       h('a', {className: 'home', href: '/', target: 'sandbox-dashboard', title: 'Dashboard', ariaLabel: 'Dashboard'}, ICON.back()),
       h('div', {className: 'who'}, h('b', {title: session.title || ''}, titled(session)),
@@ -834,22 +816,15 @@ function chrome() {
       h('div', {className: 'chips'}, ...chips),
       h('span', {className: 'state ' + (state || 'ended')}, h('span', {className: 'lamp ' + (state || '')}), state ? SHORT[state] : 'Ended'),
       session.workspace ? vs : '',
-      state ? h('button', {className: 'icon stop', onclick: stop, ariaLabel: 'Stop session', title: 'Stop: remove its container, keep the conversation'}, ICON.stop(), h('span', {}, 'Stop')) : '',
-      h('button', {className: 'icon', onclick: remove, ariaLabel: 'Delete session', title: 'Delete: forget it, stopping it first'}, ICON.trash()),
+      state ? h('button', {className: 'icon stop', onclick: stop, ariaLabel: 'Stop session', title: 'Stop'}, ICON.stop()) : '',
+      h('button', {className: 'icon', onclick: remove, ariaLabel: 'Delete session', title: 'Delete'}, ICON.trash()),
       themeSwitch());
   }
   const working = state === 'working';
   $('halt').hidden = !working;
   input.disabled = over !== null;
   $('send').disabled = over !== null;
-  input.placeholder = over !== null ? 'This session has ended. Resume it to go on.'
-    : state === 'starting' ? 'Write your first message. It is sent as soon as the sandbox is ready.'
-    : state === 'question' ? 'Answer above, or write something else…'
-    : working ? 'Add to what it is working on…' : 'Ask for something, or type / for its commands';
-  $('hint').textContent = working ? 'Esc stops it. Enter adds your message.' : 'Enter sends, Shift+Enter starts a new line';
-  // While the sandbox starts, the panel at the top of the column is what turns.
-  $('tail').replaceChildren(...(working ? [h('span', {className: 'loading'}, h('span', {className: 'spin'}),
-    h('span', {}, 'Working'), h('span', {}, doing))] : []));
+  input.placeholder = over !== null ? 'Session ended' : 'Message';
   settle();
 }
 
@@ -859,7 +834,7 @@ async function poll() {
     $('gone').hidden = false;
     for (const el of [scroller, $('dock')]) el.hidden = true;
     es.close();
-    window.close();
+    leave();
     return $('bar').replaceChildren(h('a', {className: 'home', href: '/', title: 'Dashboard', ariaLabel: 'Dashboard'}, ICON.back()),
       h('div', {className: 'who'}, h('b', {}, 'No session')));
   }

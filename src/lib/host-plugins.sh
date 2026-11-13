@@ -116,9 +116,10 @@ web_list() {
     '.lists += [{title: $title, items: $items}]' <<<"$WEB_JSON")
 }
 
-# web_run_items <json-array>: items that only ever show on a session's row: once a later plugin
-# ties one to a run (web_tie_items), on the row of that run's session while the page lists one;
-# nowhere otherwise (a pull request of a run, but no section of pull requests).
+# web_run_items <json-array>: items that show only for a run: once a later plugin ties one to a
+# run (web_tie_items), on the row of that run's session while the page lists one. With no session
+# of the run listed, an item naming a `section` ("Pull requests": a run's open one) shows under
+# that title on the project's panel, with a Resume button; any other, nowhere. Never untied.
 web_run_items() {
   WEB_JSON=$(jq -c --argjson items "$(_web_items "$1")" '.run_items += $items' <<<"$WEB_JSON")
 }
@@ -146,7 +147,8 @@ web_map_items() { WEB_JSON=$(jq -c "(.lists[].items[], .run_items[]) |= ($1)" <<
 # web_tie_items <jq-filter>: hand items listed so far to the run the filter names for each (a
 # RUN_ID; null or "" leaves the item where it is). A tied item of a section moves from it to its
 # run's session row while the page lists a session of that run; with none, it stays in its
-# section with a Resume button. A tied run item (web_run_items) shows on that row only.
+# section with a Resume button. A tied run item (web_run_items) shows on that row, or with no
+# session listed under the `section` it names, if any.
 web_tie_items() {
   WEB_JSON=$(jq -c "(.lists[].items[], .run_items[]) |= (. as \$i | (\$i | $1) as \$r
     | if (\$r // \"\") == \"\" then \$i else \$i + {run_id: \$r} end)" <<<"$WEB_JSON")

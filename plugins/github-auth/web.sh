@@ -3,9 +3,10 @@
 # through the host's own `gh` login — yours, as the project's GH_USERNAME when it names one (gh
 # keeps a token per account); the App's tokens are for the container.
 #
-# Issues get a section; pull requests none: they show only on the session row of the run a later
-# plugin ties them to (git-workspace, by branch), and offer to be closed when that session is
-# deleted (WEB_ACTION close-pr, run only once the page's user said yes).
+# Issues get a section. Pull requests show only for the run a later plugin ties them to
+# (git-workspace, by branch): on that run's session row, where they offer to be closed when the
+# session is deleted (WEB_ACTION close-pr, run only once the page's user said yes); and an open
+# one whose run has no session listed, under "Pull requests" on the project's panel, to resume.
 
 git -C "$HOST_CWD" remote get-url origin >/dev/null 2>&1 || return 0
 if ! command -v gh >/dev/null; then
@@ -67,7 +68,7 @@ github_ci='def ci:
 
 # Open pull requests, with their CI, offering to be closed with their run's session…
 if github_items pr number,title,url,headRefName,isDraft,statusCheckRollup \
-  "$github_ci"' {ref: "#\(.number)", title, url, branch: .headRefName,
+  "$github_ci"' {ref: "#\(.number)", title, url, branch: .headRefName, section: "Pull requests",
     on_delete: {action: "close-pr", arg: "\(.number)",
       ask: "Pull request #\(.number), \"\(.title)\", is still open. Close it on GitHub too? (Cancel leaves it open.)"}}
     + (if .isDraft then {note: "Draft"} else {} end) + ci'; then

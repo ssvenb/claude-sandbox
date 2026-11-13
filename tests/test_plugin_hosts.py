@@ -571,13 +571,13 @@ def test_github_lists_pull_requests_and_issues_and_git_workspace_ties_them_to_ru
     subprocess.run(["git", "-C", sb.cwd, "remote", "add", "origin", "https://github.com/o/r"], check=True)
     sb.stub("gh", GH_STUB)
     said = described("github-auth git-workspace")
-    [issues] = said["lists"]  # pull requests have no section: they show on their run's row only
+    [issues] = said["lists"]  # pull requests are run items: on their run's row, or (open) under the section they name
     close = lambda n, t: {"action": "close-pr", "arg": n, "plugin": "github-auth",  # noqa: E731
                           "ask": f'Pull request #{n}, "{t}", is still open. Close it on GitHub too? (Cancel leaves it open.)'}
     assert said["run_items"] == [
-        {"ref": "#3", "title": "t", "url": "u3", "branch": "claude-code/20261112-09fc4c", "on_delete": close("3", "t"),
+        {"ref": "#3", "title": "t", "url": "u3", "branch": "claude-code/20261112-09fc4c", "section": "Pull requests", "on_delete": close("3", "t"),
          "note": "Draft", "status": "pending", "status_text": "CI: 1 of 2 checks running", "run_id": "09fc4c"},
-        {"ref": "#4", "title": "by hand", "url": "u4", "branch": "feature/login", "on_delete": close("4", "by hand")},
+        {"ref": "#4", "title": "by hand", "url": "u4", "branch": "feature/login", "section": "Pull requests", "on_delete": close("4", "by hand")},
         # merged: shown on its run's row as done, with nothing left to close
         {"ref": "#2", "title": "m", "url": "u2", "branch": "claude-code/20261111-0a0a0a",
          "note": "Merged", "status": "done", "status_text": "Merged", "run_id": "0a0a0a"}]

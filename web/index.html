@@ -730,7 +730,18 @@ function render() {
   // The right: each project, its buttons, and what its plugins list (issues, …): the page only
   // draws it. An item a plugin tied to a run is on that run's session instead, while one is
   // listed; with none, it offers to resume the run. Items listed for runs only (pull requests)
-  // show nowhere else.
+  // show for their run alone: with no session of it listed, under the section they name (an
+  // open pull request), else nowhere.
+  const sections = said => {
+    const lists = said.lists.map(list => ({title: list.title, items: [...list.items]}));
+    for (const i of said.run_items || []) {
+      if (!i.run_id || !i.section) continue;
+      let list = lists.find(l => l.title === i.section);
+      if (!list) lists.push(list = {title: i.section, items: []});
+      list.items.push(i);
+    }
+    return lists;
+  };
   const projects = state.projects.map(path => {
     const said = plugins[path];
     const gear = h('button', {className: 'glyph', onclick: () => busy(gear, () => configure(path)), title: 'Settings', ariaLabel: 'Settings'}, ICON.gear());
@@ -740,7 +751,7 @@ function render() {
       h('div', {className: 'head'}, h('h3', {title: path}, name(path), said?.agent ? h('small', {}, said.agent) : ''), gear, shell, add),
       h('div', {className: 'notes'},
         ...(said ? said.notes.map(note => h('p', {}, note)) : [h('p', {className: 'loading'}, h('span', {className: 'spin'}), 'Loading')])),
-      ...(said ? said.lists : []).flatMap(list => {
+      ...(said ? sections(said) : []).flatMap(list => {
         const items = list.items.filter(i => !(i.run_id && holder(path, i.run_id)));
         if (!items.length) return [];  // a list with nothing on it (no open issue) is not shown
         return [h('h4', {}, list.title, h('span', {className: 'count'}, String(items.length))),

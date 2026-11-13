@@ -435,9 +435,10 @@ class Chat(Session):
                 "context": self.context, "waiting": len(self.waiting), "todos": self.todos}
 
 
-def describe(project):
+def describe(project, keep=False):
     """What the project's enabled plugins have for the page: `run.sh --web`, run in the project
-    like a session would be. The page draws it without knowing which plugin said what."""
+    like a session would be. The page draws it without knowing which plugin said what. With
+    `keep`, a failure leaves the last description standing instead of replacing it."""
     try:
         done = subprocess.run([str(RUN_SH), "--web"], cwd=project, capture_output=True, text=True,
                               timeout=120)
@@ -445,6 +446,8 @@ def describe(project):
             raise ValueError(done.stderr.strip().splitlines()[-1] if done.stderr.strip() else "run.sh --web failed")
         found = json.loads(done.stdout)
     except (OSError, ValueError, subprocess.TimeoutExpired) as e:
+        if keep and project in described:
+            return described[project]
         found = {"lists": [], "notes": [str(e)]}
     described[project] = found
     return found
@@ -914,7 +917,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(400, {"error": str(e)})
         elif m := re.fullmatch(r"/api/sessions/(\w+)/offers", url.path):
             # What its page asks about before deleting it, one yes/no each.
+            # Described afresh first: the pull request a run opened a moment ago is offered too,
+            # and one closed or merged since is not.
             if s := self.session(m[1]):
+                if s.kind != "shell":
+                    describe(s.project, keep=True)
                 with lock:
                     found = offers(s)
                 self.reply(200, {"offers": [{k: i.get(k) for k in ("url", "ref", "title")}

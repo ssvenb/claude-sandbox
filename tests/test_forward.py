@@ -79,27 +79,8 @@ def test_missing_host_socket_drops_the_connection(monkeypatch, short_tmp):
         assert recv_all(c) == b""
 
 
-def test_attestor_answers_whether_a_connection_is_ours(monkeypatch, short_tmp):
-    monkeypatch.setattr(forward, "from_this_sandbox", lambda peer, local: (peer, local) == (1111, 8080))
-    lsock = socket.socket(socket.AF_UNIX)
-    lsock.bind(str(short_tmp / "a.sock"))
-    lsock.listen()
-    threading.Thread(target=forward.attest, args=(lsock,), daemon=True).start()
-
-    def ask(line):
-        with socket.socket(socket.AF_UNIX) as c:
-            c.settimeout(5)
-            c.connect(str(short_tmp / "a.sock"))
-            c.sendall(line)
-            return recv_all(c)
-    assert ask(b"1111 8080\n") == b"1\n"
-    assert ask(b"2222 8080\n") == b"0\n"
-    assert ask(b"garbage\n") == b""          # no answer, and the attestor keeps serving
-    assert ask(b"1111 8080\n") == b"1\n"
-
-
-@pytest.mark.parametrize("argv", [["--log", "x"], ["--log", "x", "--attest", "d", "1=s"]])
-def test_needs_exactly_one_mode(monkeypatch, argv):
+@pytest.mark.parametrize("argv", [["--log", "x"], ["1=s"]], ids=["no routes", "no log"])
+def test_needs_a_log_and_routes(monkeypatch, argv):
     monkeypatch.setattr(sys, "argv", ["forward.py", *argv])
     with pytest.raises(SystemExit) as exc:
         forward.main()

@@ -132,6 +132,10 @@ let state = {projects: [], sessions: []}, plugins = {}, drawn = '';
 // What a project's plugins put on a run's session row: items they added there themselves, and
 // items they tied to a run (a pull request on the run's branch), from their sections or listed
 // for runs only (which show nowhere else).
+// What a plugin publishes for a running session (its servers' ports), to link from wherever this
+// page was opened: `{host}` in its url is this page's own host name.
+const here = i => ({...i, url: i.url.replaceAll('{host}', location.hostname)});
+const liveItems = s => (s.items || []).map(here);
 const runItems = said => [...said.lists.flatMap(list => list.items), ...(said.run_items || [])]
   .filter(i => i.run_id).concat(said.session_items || []);
 
@@ -144,7 +148,8 @@ const opened = {}, tabs = new BroadcastChannel('sandbox-tabs');
 // A session's tabs: its terminal, VS Code on its checkout, and any item (its pull request) a
 // plugin tied to its run.
 const tabNames = s => ['session-' + s.id, 'code-' + s.workspace,
-  ...Object.values(plugins).flatMap(runItems).filter(i => s.run_id && i.run_id === s.run_id).map(i => 'item-' + i.url)];
+  ...Object.values(plugins).flatMap(runItems).filter(i => s.run_id && i.run_id === s.run_id)
+    .concat(liveItems(s)).map(i => 'item-' + i.url)];
 const closeTabs = s => tabNames(s).forEach(n => opened[n]?.close());
 tabs.onmessage = e => closeTabs(e.data);
 
@@ -303,7 +308,7 @@ function render() {
           h('button', {className: 'session' + (s.exit === null ? '' : ' ended'), onclick: () => show(s), title: 'Open its terminal in a tab'},
             h('span', {className: 'lamp ' + (s.status || ''), title: SAYS[s.status] || 'ended'}),
             label(s) + (s.exit === null ? '' : `, exited ${s.exit}`) + (s.status === 'question' ? ', has a question' : '')),
-          ...onRow(s).map(chip),
+          ...onRow(s).concat(liveItems(s)).map(chip),
           s.exit !== null && s.run_id && !live(s.run_id)
             ? h('button', {className: 'icon play', onclick: () => start(path, 'resume', s.run_id), ariaLabel: 'Resume session',
                            title: 'Resume: same branch, same conversation'}, PLAY()) : '',

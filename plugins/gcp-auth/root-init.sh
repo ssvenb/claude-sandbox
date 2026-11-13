@@ -8,7 +8,7 @@
 GCP_TOKEN_FILE=/run/credentials/gcp-token
 [ -s "$GCP_TOKEN_FILE" ] || { echo "❌ gcp-auth: $GCP_TOKEN_FILE is missing" >&2; exit 1; }
 
-# A free port rather than a fixed one: under host-network the loopback is shared by every sandbox.
+# A free port rather than a fixed one, so it never collides with one the agent's own work binds.
 GCP_METADATA_PORT=$("$PLUGIN_DIR/root/metadata.py" --token-file "$GCP_TOKEN_FILE" \
   --account "$GCP_SERVICE_ACCOUNT" --project "$GCP_PROJECT" --log /var/log/gcp-metadata.log)
 export GCE_METADATA_HOST="127.0.0.1:$GCP_METADATA_PORT"

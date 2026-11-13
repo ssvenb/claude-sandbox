@@ -22,6 +22,8 @@ cd "$(dirname "$0")"
 . src/lib/host-project-env.sh
 # shellcheck source=src/lib/host-settings.sh
 . src/lib/host-settings.sh
+# shellcheck source=src/lib/host-ports.sh
+. src/lib/host-ports.sh
 
 usage() { echo "Usage: $0 [--resume <RUN_ID> | --run-id <RUN_ID> | --web | --web-action <PLUGIN> <ACTION> <ARG>] [--task TEXT]   (RUN_ID is 6 hex chars)" >&2; exit "${1:-1}"; }
 RESUME=0
@@ -88,6 +90,7 @@ if [ "$WEB" = 1 ]; then
   # Resolved exactly as a run would be, but not validated: a project that cannot start yet (no
   # App key, say) still has pull requests to show.
   plugins_web_stage
+  ports_web
   jq -c --arg agent "$AGENT" --arg plugins "$ENABLED_PLUGINS" \
     '. + {agent: $agent, plugins: ($plugins | split(" "))}' <<<"$WEB_JSON" >&3
   exit 0
@@ -97,6 +100,8 @@ plugins_host_stage
 agent_host_stage
 # After every host stage, so a credential may depend on what any of them set up.
 credentials_start
+# Whatever the agent serves reaches you through the central port proxy (src/lib/host-ports.sh).
+ports_start
 echo "🤖 Agent: $AGENT"
 echo "🔌 Plugins: ${ENABLED_PLUGINS:-<none>}"
 

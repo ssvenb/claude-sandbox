@@ -9,9 +9,8 @@ root-init.sh points here; the library then asks for a token exactly as it would 
 Tokens come from the file the host's credential refresher replaces (/run/credentials/gcp-token),
 minted with a 1h lifetime, so the expiry reported is one hour after the file was written.
 
-Under host-network the port is the host's, in reach of every other sandbox and of the host
-itself, so only this container's own processes are answered (peer_owner). Runs as root so the
-agent cannot replace it with a server of its own.
+Only this container's own processes are answered (peer_owner), whoever else shares its loopback.
+Runs as root so the agent cannot replace it with a server of its own.
 """
 
 from __future__ import annotations

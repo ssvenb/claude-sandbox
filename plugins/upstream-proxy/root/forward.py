@@ -1,21 +1,12 @@
 #!/usr/bin/env python3
-"""The container half of upstream-proxy, in one of two modes.
+"""The container half of upstream-proxy.
 
 Usage: forward.py --log FILE <port>=<socket> [<port>=<socket>]...
-       forward.py --log FILE --attest DIR
 
-Forwarding: ordinary HTTP clients need a TCP port, the host proxy listens on a unix socket, so each
+Ordinary HTTP clients need a TCP port, the host proxy listens on a unix socket, so each
 bind-mounted socket is bridged to a loopback port — for this sandbox's processes only. Each
 connection is traced back to its owner: the client end shows up in /proc/net/tcp with a socket
 inode, and that inode must be an open fd of a process in this container's PID namespace.
-
-Attesting (host-network): the container shares the HOST's loopback with every other sandbox on the
-machine, so the project's shared host proxy listens on the ports itself — a forwarder here would
-die with this container and take the port away from the project's other sandboxes. What only this
-container can tell is whether a connection's client end is one of its own processes; the host
-proxy asks every attestor of its project over a unix socket in DIR, and refuses a connection none
-of them vouches for. Other projects' sandboxes, and the host's own processes, have no attestor
-there, so they get a 403.
 
 Runs as root so the agent cannot replace it. Binds before detaching, so a port that cannot be
 bound fails the container's start.
@@ -25,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import secrets
 import selectors
 import socket
 import sys
@@ -36,7 +26,7 @@ sys.path.insert(0, "/usr/local/lib/sandbox")
 from peer_owner import LOOPBACK, from_this_sandbox  # noqa: E402  (installed by the Dockerfile)
 REFUSAL = (
     b"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
-    b"This port belongs to another sandbox's upstream-proxy; use the endpoints in your own briefing.\n"
+    b"This port serves only this sandbox's own processes; use the endpoints in your own briefing.\n"
 )
 
 
@@ -64,27 +54,6 @@ def bridge(client: socket.socket, upstream: socket.socket) -> None:
     other.join()
     client.close()
     upstream.close()
-
-
-def attest(lsock: socket.socket) -> None:
-    """Answer the host proxy, one `<peer port> <local port>` question per connection: 1 if a process
-    of this sandbox holds the client end of that loopback connection, else 0. Sequential, because
-    from_this_sandbox switches the process-wide euid."""
-    while True:
-        try:
-            conn, _ = lsock.accept()
-        except OSError:
-            continue
-        with conn:
-            conn.settimeout(2)
-            try:
-                peer_port, local_port = map(int, conn.makefile("rb").readline(64).split())
-                ok = from_this_sandbox(peer_port, local_port)
-                conn.sendall(b"1\n" if ok else b"0\n")
-            except (OSError, ValueError):
-                continue
-            if not ok:
-                log(f"not ours: :{local_port} ← 127.0.0.1:{peer_port}")
 
 
 def serve(listeners: dict[socket.socket, tuple[int, str]]) -> None:
@@ -120,22 +89,8 @@ def serve(listeners: dict[socket.socket, tuple[int, str]]) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--log", required=True)
-    ap.add_argument("--attest", metavar="DIR", help="vouch for this sandbox's connections in DIR")
-    ap.add_argument("routes", nargs="*", metavar="PORT=SOCKET")
+    ap.add_argument("routes", nargs="+", metavar="PORT=SOCKET")
     args = ap.parse_args()
-    if bool(args.attest) == bool(args.routes):
-        ap.error("pass either --attest DIR or PORT=SOCKET routes")
-
-    attestor = None
-    if args.attest:
-        # Every sandbox of the project shares DIR, so the name only has to be unique; the host
-        # proxy drops the socket once nothing answers on it any more.
-        path = os.path.join(args.attest, f"{os.environ.get('RUN_ID', 'sandbox')}-{secrets.token_hex(4)}.sock")
-        attestor = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        attestor.bind(path)
-        # The host proxy connects as the host user; a question answers nothing the asker could abuse.
-        os.chmod(path, 0o666)
-        attestor.listen(16)
 
     listeners: dict[socket.socket, tuple[int, str]] = {}
     for route in args.routes:
@@ -163,10 +118,7 @@ def main() -> int:
     os.dup2(devnull, 0)
     os.dup2(out, 1)
     os.dup2(out, 2)
-    if attestor:
-        attest(attestor)
-    else:
-        serve(listeners)
+    serve(listeners)
     return 0
 
 

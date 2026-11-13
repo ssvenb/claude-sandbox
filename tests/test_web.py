@@ -395,3 +395,21 @@ def test_deleting_tidies_up_only_what_a_plugin_offered_for_that_run(tmp_path, mo
     assert web.tidy(s, ["u3", "u4", "u2"], offered) == []  # only #3: u4 is not this run's, u2 offers nothing
     assert log.read_text() == "--web-action github-auth close-pr 3\n"
     assert web.tidy(s, ["u9"], offered) == ["#9: ❌ gh pr close: gone"]
+
+
+def test_a_running_sessions_live_items_are_read_afresh_on_every_poll(tmp_path, monkeypatch):
+    """web_live_items: a file a plugin keeps current (the central port proxy's published ports),
+    re-read for each running session; an ended session, or a terminal, shows none."""
+    from types import SimpleNamespace as NS
+    live = tmp_path / "items.json"
+    monkeypatch.setitem(web.described, str(tmp_path), {"lists": [], "live": [str(live), str(tmp_path / "none")]})
+    assert web.live_items(str(tmp_path), "0a1b2c") == []  # nothing published yet
+    port = {"run_id": "0a1b2c", "ref": ":3000", "url": "http://{host}:3000/", "title": "Port 3000"}
+    live.write_text(json.dumps([port, {"run_id": "ffffff", "ref": ":3000", "url": "x"}, "junk"]))
+    assert web.live_items(str(tmp_path), "0a1b2c") == [port]
+    assert web.live_items(str(tmp_path), None) == []
+    s = NS(project=str(tmp_path), run_id="0a1b2c", exit=None, kind="resume", id="a", started=0,
+           status=lambda: None)
+    assert web.Session.json(s)["items"] == [port]
+    s.exit = 0
+    assert web.Session.json(s)["items"] == []

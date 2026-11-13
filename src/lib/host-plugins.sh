@@ -88,7 +88,7 @@ trap plugins_run_exit_hooks EXIT
 # The web UI knows nothing about GitHub, branches or mirrors: it draws what the enabled plugins of
 # a project describe here. WEB_JSON is that description, printed by `run.sh --web`.
 
-WEB_JSON='{"lists":[],"notes":[],"session_items":[],"run_items":[]}'
+WEB_JSON='{"lists":[],"notes":[],"session_items":[],"run_items":[],"live":[]}'
 
 # The page has two places for what a plugin shows: a section of the project's band (web_list),
 # and a session's own row, next to its VS Code button (web_session_item, web_run_items,
@@ -129,6 +129,13 @@ web_session_item() {
   WEB_JSON=$(jq -c --arg run_id "$1" --argjson item "$(_web_items "[$2]")" \
     '.session_items += [$item[0] + {run_id: $run_id}]' <<<"$WEB_JSON")
 }
+
+# web_live_items <file>: a JSON array of items, each with its `run_id`, that the web server re-reads
+# on every poll of the page and puts on the row of that run's running session — for what comes and
+# goes within seconds (a port a session's server publishes), where waiting for the project to be
+# described again would not do. A `url` may say `{host}` for the name the page was opened by. The
+# file need not exist yet.
+web_live_items() { WEB_JSON=$(jq -c --arg file "$1" '.live += [$file]' <<<"$WEB_JSON"); }
 
 # web_note <text>: one line shown with the project, for what kept a plugin from listing anything.
 web_note() { WEB_JSON=$(jq -c --arg note "$1" '.notes += [$note]' <<<"$WEB_JSON"); }

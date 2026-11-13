@@ -71,6 +71,9 @@
         }
       ]
     },
+    "dev-server": {
+      "command": "pnpm dev --port 3000"
+    },
     "project-deps": {
       "apt": ["ripgrep", "postgresql-client"],
       "npm": ["pnpm@9"],

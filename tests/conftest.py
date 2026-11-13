@@ -28,7 +28,7 @@ import peer_owner  # noqa: E402,F401
 
 HOST_LIBS = "\n".join(f". src/lib/{lib}.sh" for lib in (
     "host-plugins", "host-credentials", "host-agents",
-    "host-project-config", "host-project-env", "host-settings"))
+    "host-project-config", "host-project-env", "host-settings", "host-ports"))
 
 
 def load(rel: str):

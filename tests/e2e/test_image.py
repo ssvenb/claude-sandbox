@@ -55,9 +55,9 @@ def run_args(plugins, probe, env):
     return [arg for k, v in env.items() for arg in ("-e", f"{k}={v}")]
 
 
-def boot(image, plugins="", probe="", before=None, **env) -> Boot:
+def boot(image, plugins="", probe="", before=None, mounts=(), **env) -> Boot:
     """One sandbox boot, start to finish. `before` runs as root ahead of the entrypoint."""
-    cmd = ["docker", "run", "--rm", *run_args(plugins, probe, env)]
+    cmd = ["docker", "run", "--rm", *run_args(plugins, probe, env), *(a for m in mounts for a in ("-v", m))]
     if before:
         cmd += ["--entrypoint", "sh", image, "-c", f"{before}\nexec /usr/local/bin/entrypoint.sh"]
     else:
@@ -235,25 +235,22 @@ def test_gcp_auth_without_a_token_fails_the_boot(image):
 
 
 UPSTREAM = {"UPSTREAM_PROXY_PORTS": "api:8099"}
-ATTEST = {**UPSTREAM, "UPSTREAM_PROXY_ATTEST_DIR": "/run/upstream-proxy-attest"}
 
 
-@pytest.mark.parametrize("mode", [UPSTREAM, ATTEST], ids=["forwarded", "host-network"])
-def test_upstream_proxy_reaches_the_upstream_with_the_hosts_credential(image, mode):
+def test_upstream_proxy_reaches_the_upstream_with_the_hosts_credential(image):
     b = boot(image, "e2e-upstream upstream-proxy",
-             "curl -sf -H 'Authorization: Bearer placeholder' http://127.0.0.1:8099/hello", **mode)
+             "curl -sf -H 'Authorization: Bearer placeholder' http://127.0.0.1:8099/hello", **UPSTREAM)
     seen = json.loads(b.out)
     assert seen["path"] == "/hello" and seen["headers"]["Authorization"] == "Bearer upstream-secret"
     assert "upstream-secret" not in json.dumps(b.env)
     assert "- `api` at http://127.0.0.1:8099" in b.briefing
 
 
-@pytest.mark.parametrize("mode", [UPSTREAM, ATTEST], ids=["forwarded", "host-network"])
-def test_processes_outside_the_sandbox_are_refused_on_its_loopback(image, mode):
-    """A second container in the first one's network namespace, but its own PID namespace, is
-    exactly what another sandbox under host-network is: it must not use these ports."""
+def test_processes_outside_the_sandbox_are_refused_on_its_loopback(image):
+    """A second container in the first one's network namespace, but its own PID namespace, must
+    not use these ports."""
     name = f"sandbox-e2e-{uuid.uuid4().hex[:8]}"
-    env = {**mode, "GCP_SERVICE_ACCOUNT": "sa@e2e-proj.iam.gserviceaccount.com", "GCP_PROJECT": "e2e-proj"}
+    env = {**UPSTREAM, "GCP_SERVICE_ACCOUNT": "sa@e2e-proj.iam.gserviceaccount.com", "GCP_PROJECT": "e2e-proj"}
     subprocess.run(["docker", "run", "-d", "--name", name, *run_args("e2e-upstream upstream-proxy gcp-auth",
                                                                     "sleep 300", env), image],
                    check=True, capture_output=True)
@@ -278,3 +275,28 @@ def test_processes_outside_the_sandbox_are_refused_on_its_loopback(image, mode):
         assert curl(*neighbour, url=project) == ""   # dropped without an answer
     finally:
         subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+
+
+def test_ports_the_agent_listens_on_are_offered_to_the_host_out_of_its_reach(image, tmp_path):
+    """src/publish-ports.py: a server of the agent's, on localhost only, shows up as a socket in the
+    directory run.sh mounts, which the agent itself cannot reach."""
+    sockets = tmp_path / "sockets"
+    sockets.mkdir()
+    probe = ("python3 -m http.server 8123 --bind 127.0.0.1 >/dev/null 2>&1 & sleep 3\n"
+             "ls /run/ports/sockets >/dev/null 2>&1 && echo reachable")
+    b = boot(image, probe=probe, mounts=[f"{sockets}:/run/ports/sockets"], PORTS_IGNORE="9229")
+    assert b.out == ""
+    assert (sockets / "8123.sock").is_socket()
+    assert "## Ports" in b.briefing and "host.docker.internal" in b.briefing
+
+
+def test_without_the_ports_mount_nothing_is_published_or_said(image):
+    assert "## Ports" not in boot(image).briefing
+
+
+def test_dev_server_starts_the_projects_server_at_boot(image):
+    probe = ("sleep 2; /opt/plugins/dev-server/bin/sandbox-server status >/dev/null && echo running\n"
+             "curl -fsS -o /dev/null http://127.0.0.1:8124/ && echo serving")
+    b = boot(image, "dev-server", probe, DEV_SERVER_COMMAND="python3 -m http.server 8124")
+    assert b.out.split() == ["running", "serving"]
+    assert "python3 -m http.server 8124" in b.briefing and "sandbox-server" in b.briefing

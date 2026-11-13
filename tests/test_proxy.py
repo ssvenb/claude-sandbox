@@ -262,14 +262,12 @@ def free_port():
 
 
 class Proxy:
-    def __init__(self, dirpath, routes, env_file=None, attest_dir=None, env=None):
+    def __init__(self, dirpath, routes, env_file=None, env=None):
         self.dir = dirpath
         (dirpath / "routes.json").write_text(json.dumps(routes))
         args = [sys.executable, PROXY]
         if env_file:
             args += ["--env-file", env_file]
-        if attest_dir:
-            args += ["--attest-dir", attest_dir]
         args += [dirpath / "routes.json", dirpath]
         self.proc = subprocess.Popen(args, env={"PATH": os.environ["PATH"], **(env or {})},
                                      stderr=subprocess.PIPE, text=True)
@@ -431,59 +429,3 @@ def test_bad_routes_fail_the_start(short_tmp, routes, message):
     done = subprocess.run([sys.executable, PROXY, short_tmp / "routes.json", short_tmp],
                           capture_output=True, text=True, timeout=10)
     assert done.returncode != 0 and message in done.stderr
-
-
-# --- host-network: the proxy holds the ports, sandboxes attest for their own connections ----
-
-class Attestor:
-    def __init__(self, path, answer):
-        self.answer = answer
-        self.sock = socket.socket(socket.AF_UNIX)
-        self.sock.bind(str(path))
-        self.sock.listen()
-        threading.Thread(target=self.loop, daemon=True).start()
-
-    def loop(self):
-        while True:
-            conn, _ = self.sock.accept()
-            with conn:
-                conn.makefile("rb").readline()
-                conn.sendall(self.answer)
-
-
-def tcp_get(port, path="/echo"):
-    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-    conn.request("GET", path)
-    resp = conn.getresponse()
-    data = resp.read()
-    conn.close()
-    return resp.status, data
-
-
-def test_attested_connections_on_the_port_are_relayed(start, upstream, short_tmp):
-    (short_tmp / "attest").mkdir()
-    port = free_port()
-    attestor = Attestor(short_tmp / "attest/run1.sock", b"1\n")
-    start([api_route(upstream, port=port)], attest_dir=short_tmp / "attest", env={"API_KEY": "k"})
-    assert tcp_get(port)[0] == 200
-    attestor.answer = b"0\n"
-    status, data = tcp_get(port)
-    assert status == 403 and b"another project" in data
-
-
-def test_a_dead_attestors_socket_is_removed(start, upstream, short_tmp):
-    (short_tmp / "attest").mkdir()
-    dead = socket.socket(socket.AF_UNIX)
-    dead.bind(str(short_tmp / "attest/gone.sock"))
-    dead.close()  # the file stays, nothing listens: what a killed container leaves behind
-    port = free_port()
-    start([api_route(upstream, port=port)], attest_dir=short_tmp / "attest", env={"API_KEY": "k"})
-    assert tcp_get(port)[0] == 403
-    assert not (short_tmp / "attest/gone.sock").exists()
-
-
-def test_attest_mode_needs_a_port_per_route(short_tmp):
-    (short_tmp / "routes.json").write_text(json.dumps([{"name": "api", "upstream": "http://x"}]))
-    done = subprocess.run([sys.executable, PROXY, "--attest-dir", short_tmp, short_tmp / "routes.json",
-                           short_tmp], capture_output=True, text=True, timeout=10)
-    assert done.returncode == 1 and "needs a port" in done.stderr

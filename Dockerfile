@@ -99,11 +99,14 @@ COPY src/lib/plugins.sh /usr/local/lib/sandbox/plugins.sh
 COPY src/lib/agents.sh /usr/local/lib/sandbox/agents.sh
 COPY src/lib/peer_owner.py /usr/local/lib/sandbox/peer_owner.py
 COPY src/merge-settings.py /usr/local/bin/merge-settings.py
+# Root-only: offers the ports the agent's servers listen on to the host's central port proxy.
+COPY src/publish-ports.py /usr/local/lib/sandbox/publish-ports.py
 COPY settings-base.json /usr/local/share/sandbox/settings-base.json
 RUN chmod 555 /usr/local/bin/merge-settings.py \
     && chmod 444 /usr/local/lib/sandbox/plugins.sh /usr/local/lib/sandbox/agents.sh \
                  /usr/local/lib/sandbox/peer_owner.py \
-                 /usr/local/share/sandbox/settings-base.json
+                 /usr/local/share/sandbox/settings-base.json \
+    && chmod 500 /usr/local/lib/sandbox/publish-ports.py
 
 # entrypoint.sh boots as root; agent-setup.sh is the part it runs as 'node'.
 COPY src/entrypoint.sh /usr/local/bin/entrypoint.sh

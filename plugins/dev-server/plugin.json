@@ -1,0 +1,10 @@
+{
+  "name": "dev-server",
+  "description": "Starts the project's server, the command its config names, in /workspace at every boot of the container, and gives the agent a helper to restart it. Its ports are published like any other (src/lib/host-ports.sh). Nothing configured → does nothing.",
+  "priority": 28,
+  "defaultEnabled": true,
+  "provides": ["dev-server"],
+  "requires": [],
+  "requiredEnv": [],
+  "secrets": []
+}

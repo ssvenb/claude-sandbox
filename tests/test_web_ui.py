@@ -74,6 +74,7 @@ def board(tmp_path, browser):
     # Items on another origin, as GitHub's are: localhost is the same server, another origin.
     elsewhere = base.replace("127.0.0.1", "localhost")
     (sandbox / "web.json").write_text(json.dumps({"notes": [], "checkout": f"{tmp_path}/mirrors/*-{{run_id}}",
+        "live": [str(tmp_path / "ports.json")],
         "session_items": [{"run_id": RUN, "ref": "preview", "title": "The run's preview", "url": f"{elsewhere}/preview"}],
         "run_items": [
             {"ref": "#3", "title": "Agent's work", "url": f"{elsewhere}/pr/3", "run_id": RUN,
@@ -110,7 +111,7 @@ def board(tmp_path, browser):
         page.wait_for_selector("button.session")
         return s
     page.resume = resume
-    page.base, page.checkout = base, checkout
+    page.base, page.checkout, page.ports = base, checkout, tmp_path / "ports.json"
     yield page
     context.close()
     proc.terminate()
@@ -220,6 +221,24 @@ def test_pull_requests_show_only_on_their_runs_session_row(board):
     again_opens_nothing(board, lambda: board.click("a.chip.fail"))
     preview = opens_tab(board, lambda: board.click("a.chip:has-text('preview')"))
     assert preview.url.endswith("/preview")
+
+
+def test_a_port_the_session_publishes_is_a_button_on_its_row_while_published(board):
+    board.resume()
+    port = board.base.rsplit(":", 1)[1]
+    # As the central port proxy writes it: `{host}` is whatever name the page was opened by.
+    board.ports.write_text(json.dumps([{"run_id": RUN, "ref": ":3000", "title": "Port 3000 of the sandbox",
+                                        "url": f"http://{{host}}:{port}/published"}]))
+    board.wait_for_selector("button.session ~ a.chip:has-text(':3000')")
+    assert board.get_attribute("a.chip:has-text(':3000')", "href") == f"{board.base}/published"
+    published = opens_tab(board, lambda: board.click("a.chip:has-text(':3000')"))
+    assert published.url == f"{board.base}/published"
+    board.ports.write_text("[]")  # its server stopped
+    board.wait_for_selector("a.chip:has-text(':3000')", state="detached")
+    board.ports.write_text(json.dumps([{"run_id": RUN, "ref": ":3000", "title": "t", "url": f"http://{{host}}:{port}/published"}]))
+    board.wait_for_selector("a.chip:has-text(':3000')")
+    board.click("button[aria-label='Delete session']")
+    closes(published, board)  # deleting the session closes its port's tab too
 
 
 def test_deleting_a_session_closes_its_tabs_and_only_its_own(board):

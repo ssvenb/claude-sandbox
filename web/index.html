@@ -56,6 +56,13 @@
   button.glyph svg { width: 18px; height: 18px; }
   button.icon { border-color: transparent; color: var(--haze); padding: 3px 8px; }
   button.icon:hover { color: var(--paper); }
+  button.icon svg { width: 16px; height: 16px; display: block; }
+  button.icon.stop { color: var(--fail); }
+  button.icon.stop:hover { color: #ff9aa5; }
+  button.icon.play { color: var(--ok); }
+  button.icon.play:hover { color: #a3e6c4; }
+  button.icon.vscode { color: #3ea6f0; }
+  button.icon.vscode:hover { color: #7cc4f7; }
   /* A session is a window in the dark: lit while its agent is at work. */
   button.session { border-radius: 8px; border-color: transparent; padding: 5px 10px 5px 0;
                    font-variant-numeric: tabular-nums; }
@@ -177,6 +184,19 @@ const svg = (d, extra = '') => {
   return e;
 };
 const PLUS = 'M10 4v12M4 10h12', PROMPT = 'M4 6l4 4-4 4M10 15h6';
+// A session's own row, as on a recorder: resume it (play), stop it (the red square); delete it,
+// VS Code on its checkout.
+const TRASH = 'M3.5 5.5h13M8 5.5V3.5h4v2M5.5 5.5l.8 11h7.4l.8-11M8.5 8.5v5M11.5 8.5v5';
+const filled = (inner, viewBox = '0 0 20 20') => {
+  const e = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  e.setAttribute('viewBox', viewBox);
+  e.setAttribute('aria-hidden', 'true');
+  e.innerHTML = inner;
+  return e;
+};
+const PLAY = () => filled('<path d="M6 4.2v11.6a.8.8 0 0 0 1.2.7l9.3-5.8a.8.8 0 0 0 0-1.4L7.2 3.5a.8.8 0 0 0-1.2.7z" fill="currentColor"/>');
+const STOP = () => filled('<rect x="4.5" y="4.5" width="11" height="11" rx="2" fill="currentColor"/>');
+const VSCODE = () => filled('<path fill="currentColor" fill-rule="evenodd" d="M17 1.5 22 4v16l-5 2.5-9.4-8.6-4.3 3.3L2 16.5v-9l1.3-.7 4.3 3.3zm0 5.7L10.7 12l6.3 4.8z"/>', '0 0 24 24');
 
 async function code(s) {
   const w = tab('code-' + s.workspace);
@@ -187,9 +207,18 @@ async function code(s) {
   } catch (e) { w.close(); alert(e.message); }
 }
 
-async function end(s) {
-  if (s.exit === null && !confirm(`Stop ${label(s)} in ${name(s.project)}? Its tabs close too.`)) return;
-  await post(`/api/sessions/${s.id}/close`);
+// Stopping removes the container and keeps the session listed, its tab showing how it ended, so
+// it can be read and resumed. Nothing else stops it: closing its tab, or the browser, does not.
+async function stop(s) {
+  if (!confirm(`Stop ${label(s)} in ${name(s.project)}? Its container is removed.`)) return;
+  await post(`/api/sessions/${s.id}/stop`).catch(e => alert(e.message));
+  refresh();
+}
+
+// Deleting forgets the session (stopping it first if it still runs) and closes its tabs.
+async function remove(s) {
+  if (s.exit === null && !confirm(`Stop and delete ${label(s)} in ${name(s.project)}? Its tabs close too.`)) return;
+  await post(`/api/sessions/${s.id}/delete`).catch(e => alert(e.message));
   closeTabs(s);
   tabs.postMessage(s);
   refresh();
@@ -233,9 +262,15 @@ function render() {
           h('button', {className: 'session' + (s.exit === null ? '' : ' ended'), onclick: () => show(s), title: 'Open its terminal in a tab'},
             h('span', {className: 'lamp' + (s.exit === null ? ' lit' : '')}),
             label(s) + (s.exit === null ? '' : `, exited ${s.exit}`)),
-          s.workspace ? h('button', {onclick: () => code(s), title: `VS Code on this run's checkout, ${s.workspace}`}, 'Code') : '',
-          s.exit !== null && s.run_id && !live(s.run_id) ? resume(path, s.run_id) : '',
-          h('button', {className: 'icon', onclick: () => end(s), ariaLabel: s.exit === null ? 'Stop session' : 'Remove session'}, '✕')),
+          s.exit !== null && s.run_id && !live(s.run_id)
+            ? h('button', {className: 'icon play', onclick: () => start(path, 'resume', s.run_id), ariaLabel: 'Resume session',
+                           title: 'Resume: same branch, same conversation'}, PLAY()) : '',
+          s.workspace ? h('button', {className: 'icon vscode', onclick: () => code(s), ariaLabel: 'VS Code',
+                                     title: `VS Code on this run's checkout, ${s.workspace}`}, VSCODE()) : '',
+          s.exit === null ? h('button', {className: 'icon stop', onclick: () => stop(s), ariaLabel: 'Stop session',
+                                         title: 'Stop: remove its container, keep it listed'}, STOP()) : '',
+          h('button', {className: 'icon', onclick: () => remove(s), ariaLabel: 'Delete session',
+                       title: 'Delete: forget it, stopping it first'}, svg(TRASH))),
           'Nobody at work.', mine.some(s => s.exit === null)),
         // What the project's plugins list (pull requests, issues, …): the page only draws it. An
         // item a plugin tied to a run opens that run's session, or resumes it.

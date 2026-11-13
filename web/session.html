@@ -18,7 +18,7 @@
   button:focus-visible, a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
   body { margin: 0; height: 100vh; display: flex; flex-direction: column; background: var(--night);
          color: var(--paper); font: 15px/1.45 "Bricolage Grotesque", system-ui, sans-serif; }
-  header { display: flex; align-items: baseline; gap: 10px; padding: 10px 16px;
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 16px;
            border-bottom: 1px solid var(--rule); background: var(--dusk); }
   header strong { font-weight: 650; }
   header .what { flex: 1; color: var(--haze); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -30,6 +30,11 @@
   #empty b { display: block; color: var(--paper); font-size: 22px; font-weight: 600; margin-bottom: 6px; }
   #empty[hidden] { display: none; }
   a { color: var(--link); }
+  button.icon { border-color: transparent; color: var(--haze); padding: 3px 8px; display: inline-flex;
+                align-items: center; gap: 6px; }
+  button.icon:hover { color: var(--paper); }
+  button.icon svg { width: 16px; height: 16px; }
+  button.icon.stop { color: #ff7b8a; }
 </style>
 </head>
 <body>
@@ -130,10 +135,29 @@ tabs.onmessage = e => {
   if (e.data.id === id) window.close();
 };
 
-async function end(s) {
-  const what = s.kind === 'shell' ? 'Close this terminal?' : `Stop ${label(s)} in ${name(s.project)}? Its tabs close too.`;
+// Closing this tab leaves the session running; only these buttons end it. Stop removes its
+// container and keeps this tab, to read how it ended. Delete forgets it and closes its tabs.
+const glyph = inner => {
+  const e = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  e.setAttribute('viewBox', '0 0 20 20');
+  e.setAttribute('aria-hidden', 'true');
+  e.innerHTML = inner;
+  return e;
+};
+const STOP = '<rect x="4.5" y="4.5" width="11" height="11" rx="2" fill="currentColor"/>';
+const TRASH = '<path d="M3.5 5.5h13M8 5.5V3.5h4v2M5.5 5.5l.8 11h7.4l.8-11M8.5 8.5v5M11.5 8.5v5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>';
+
+async function stop(s) {
+  const what = s.kind === 'shell' ? 'Stop this terminal?' : `Stop ${label(s)} in ${name(s.project)}? Its container is removed.`;
+  if (!confirm(what)) return;
+  await post(`/api/sessions/${s.id}/stop`).catch(e => alert(e.message));
+  refresh();
+}
+
+async function remove(s) {
+  const what = s.kind === 'shell' ? 'Stop and delete this terminal?' : `Stop and delete ${label(s)} in ${name(s.project)}? Its tabs close too.`;
   if (s.exit === null && !confirm(what)) return;
-  await post(`/api/sessions/${s.id}/close`);
+  await post(`/api/sessions/${s.id}/delete`).catch(e => alert(e.message));
   tabs.postMessage(s);
   window.close();
   refresh();  // still here: this tab was not opened by the status page, so it may not close itself
@@ -153,7 +177,9 @@ async function refresh() {
     h('strong', {}, name(s.project)),
     h('span', {className: 'what' + (s.exit === null ? ' lit' : '')},
       label(s) + (s.exit === null ? ', running' : `, exited ${s.exit}`)),
-    h('button', {onclick: () => end(s)}, s.kind === 'shell' ? 'Close terminal' : s.exit === null ? 'Stop session' : 'Remove'));
+    s.exit === null ? h('button', {className: 'icon stop', onclick: () => stop(s), ariaLabel: 'Stop session'},
+                        glyph(STOP), 'Stop') : '',
+    h('button', {className: 'icon', onclick: () => remove(s), ariaLabel: 'Delete session'}, glyph(TRASH), 'Delete'));
 }
 refresh();
 setInterval(refresh, 3000);

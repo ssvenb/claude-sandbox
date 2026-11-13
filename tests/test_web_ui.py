@@ -156,7 +156,7 @@ def test_a_session_has_one_tab_with_a_lamp_lit_while_it_runs(board):
     tab.keyboard.press("Enter")  # the stand-in agent exits 4
     tab.wait_for_selector("text=exited 4")
     tab.wait_for_function("decodeURIComponent(document.querySelector('link[rel=icon]').href).includes('stroke')")
-    board.wait_for_selector("button:has-text('Resume')")
+    board.wait_for_selector("button[aria-label='Resume session']")
 
 
 def test_one_terminal_per_project_on_this_machine(board):
@@ -183,30 +183,36 @@ def test_one_tab_per_pull_request(board):
     assert issue.url.endswith("/issues/7")
 
 
-def test_stopping_a_session_closes_its_tabs_and_only_its_own(board):
+def test_deleting_a_session_closes_its_tabs_and_only_its_own(board):
     board.resume()
     session = opens_tab(board, lambda: board.click("button.session"))
-    code = opens_tab(board, lambda: board.click("button:has-text('Code')"))
+    code = opens_tab(board, lambda: board.click("button[aria-label='VS Code']"))
     assert "/vscode/?folder=" in code.url
     its_pr = opens_tab(board, lambda: board.click("text=Agent's work"))
     other_pr = opens_tab(board, lambda: board.click("text=By hand"))
     term = opens_tab(board, lambda: board.click("button[aria-label='Terminal']"))
 
-    board.click("button[aria-label='Stop session']")
+    board.on("dialog", lambda d: d.accept())
+    board.click("button[aria-label='Delete session']")
     for tab in (session, code, its_pr):
         closes(tab, board)
     assert not other_pr.is_closed() and not term.is_closed() and not board.is_closed()
 
 
-def test_stopping_from_the_session_tab_closes_it_and_the_rest_of_its_tabs(board):
+def test_stopping_keeps_the_session_and_its_tab_and_deleting_closes_them(board):
     board.resume()
     session = opens_tab(board, lambda: board.click("button.session"))
     session.on("dialog", lambda d: d.accept())
     its_pr = opens_tab(board, lambda: board.click("text=Agent's work"))
-    session.click("text=Stop session")
+    session.click("button[aria-label='Stop session']")
+    session.wait_for_selector("text=exited")  # still open, to read how it ended
+    board.wait_for_selector("button.session.ended")  # listed still, to resume, and no longer stoppable
+    board.wait_for_selector("button[aria-label='Stop session']", state="detached")
+    assert not its_pr.is_closed()
+    session.click("button[aria-label='Delete session']")
     closes(session, board)
     closes(its_pr, board)  # the dashboard heard it on the `sandbox-tabs` channel
-    board.wait_for_selector("button[aria-label='Remove session']")
+    board.wait_for_selector("text=Nobody at work.")
 
 
 def test_ctrl_c_copies_a_selection_and_interrupts_without_one(board):

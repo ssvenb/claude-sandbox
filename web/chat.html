@@ -397,7 +397,7 @@ function what(input) {
 
 // Lines that left and lines that came, in order, with a little of what stayed around them.
 function diff(before, after) {
-  const a = before.split('\n'), b = after.split('\n');
+  const a = before.replace(/\n$/, '').split('\n'), b = after.replace(/\n$/, '').split('\n');
   let rows;
   if (a.length * b.length > 250000) rows = [...a.map(t => ['del', t]), ...b.map(t => ['add', t])];
   else {

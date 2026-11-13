@@ -277,7 +277,7 @@ def test_a_chat_draws_what_the_agent_says_and_does(board):
     tab.click(".tool:has-text('Edit') > summary")
     diff = tab.locator(".tool:has-text('Edit') .diff")
     assert [(r.get_attribute("class"), r.inner_text()) for r in diff.locator("span").element_handles()] == [
-        ("same", "def main():"), ("del", "    return 1"), ("add", "    return 2"), ("same", " ")]
+        ("same", "def main():"), ("del", "    return 1"), ("add", "    return 2")]
     tab.click(".tool:has-text('Subagent') > summary")  # a subagent's own calls, inside the call that started it
     assert "Search main\\( in src" in " ".join(tab.inner_text(".tool:has-text('Subagent') .kids .tool summary").split())
     tab.click(".tool:has-text('Run') > summary")

@@ -21,3 +21,17 @@ echo "✅ GitHub CLI authenticated successfully for the Agent!"
   done
 ) </dev/null >/dev/null 2>&1 &
 unset GH_TOKEN_FILE
+
+# The agent's work lands as a pull request, and only counts once its CI passes.
+[ -n "${AGENT_PROMPT_FILE:-}" ] || return 0
+cat >> "$AGENT_PROMPT_FILE" <<'BRIEF'
+
+## Pull request and CI
+
+This is informational context, not a task: wait for the user's. You are authenticated with
+GitHub (`gh`, and git through it). Whenever you finish a task, always commit your work, push your
+branch and open a pull request with `gh pr create` (or update the one already open for it). Then
+watch its CI (`gh pr checks --watch`) until every check is green. If a check fails, or any other
+problem comes up, read why (`gh run view --log-failed`), fix the cause, push the fix and watch CI
+again. The task is not finished until the pull request's CI is green.
+BRIEF

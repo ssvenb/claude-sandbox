@@ -58,6 +58,8 @@ def browser():
 def board(tmp_path, browser):
     sandbox = tmp_path / "sandbox"
     shutil.copytree(REPO / "web", sandbox / "web", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(REPO / "plugins", sandbox / "plugins")
+    shutil.copy(REPO / ".claude-sandbox.example.json", sandbox)
     tool(sandbox / "run.sh", RUN_SH)
     tool(tmp_path / "bin/docker", DOCKER)
     tool(tmp_path / "bin/code", FAKE_CODE)
@@ -112,6 +114,7 @@ def board(tmp_path, browser):
         return s
     page.resume = resume
     page.base, page.checkout, page.ports = base, checkout, tmp_path / "ports.json"
+    page.project = project
     yield page
     context.close()
     proc.terminate()
@@ -152,7 +155,7 @@ def icon(tab):
 def test_the_dashboard_shows_totals_ci_icon_buttons_and_its_own_icon(board):
     assert board.title() == "Dashboard" and board.inner_text("h1") == "Dashboard"
     assert "<rect" in icon(board)
-    for name in ("New session", "Terminal"):  # icon buttons: a glyph, named for screen readers
+    for name in ("New session", "Terminal", "Settings"):  # icon buttons: a glyph, named for screen readers
         button = board.query_selector(f"button[aria-label='{name}']")
         assert button.inner_text() == "" and button.query_selector("svg") and button.get_attribute("title")
     board.resume()
@@ -346,3 +349,37 @@ def test_ctrl_v_pastes(board, keys):
     term.keyboard.press(keys)
     term.keyboard.type("\n")
     term.wait_for_selector("text=pasted-5", timeout=5000)
+
+
+def test_the_gear_configures_the_projects_plugins_in_its_claude_sandbox_json(board):
+    file = board.project / ".claude-sandbox.json"
+    file.write_text(json.dumps({"plugins": {"git-workspace": {"branchPrefix": "bot"}, "retired": {"x": 1}}}))
+    board.click("button[aria-label='Settings']")
+    board.wait_for_selector("dialog[open] b:has-text('docker-cli')")
+    assert board.input_value("textarea[name='settings-git-workspace']").replace(" ", "").replace("\n", "") \
+        == '{"branchPrefix":"bot"}'
+    assert "briefing" in board.get_attribute("textarea[name='settings-kvm']", "placeholder")  # the example's
+    board.select_option("select[name='enabled-docker-cli']", "off")
+    board.select_option("select[name='enabled-kvm']", "on")
+    board.click("dialog details:has(textarea[name='settings-kvm']) summary")
+    board.fill("textarea[name='settings-kvm']", "not json")
+    board.click("dialog button[type=submit]")
+    board.wait_for_selector("dialog .error:has-text('kvm: not a JSON object')")
+    assert json.loads(file.read_text())["plugins"]["git-workspace"] == {"branchPrefix": "bot"}  # unsaved
+
+    board.fill("textarea[name='settings-kvm']", '{"briefing": "VMs in /data"}')
+    board.fill("textarea[name='env']", '{"CLAUDE_EFFORT": "high"}')
+    board.click("dialog button[type=submit]")
+    board.wait_for_selector("dialog[open]", state="detached")
+    assert json.loads(file.read_text()) == {
+        "plugins": {"git-workspace": {"branchPrefix": "bot"}, "retired": {"x": 1},
+                    "docker-cli": {"enabled": False}, "kvm": {"briefing": "VMs in /data", "enabled": True}},
+        "env": {"CLAUDE_EFFORT": "high"}}
+
+    board.click("button[aria-label='Settings']")  # opens on what the file holds now
+    board.wait_for_selector("dialog[open]")
+    assert board.input_value("select[name='enabled-docker-cli']") == "off"
+    board.select_option("select[name='enabled-docker-cli']", "")  # back to its default: no entry
+    board.click("dialog button[type=submit]")
+    board.wait_for_selector("dialog[open]", state="detached")
+    assert "docker-cli" not in json.loads(file.read_text())["plugins"]

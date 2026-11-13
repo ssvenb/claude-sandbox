@@ -36,14 +36,18 @@ printf '%s\n' ~/code/my-repo ~/code/other-repo > ~/.config/claude-sandbox/projec
 The home page is a dashboard of all your sandboxes: totals across them, then every listed project
 with its sessions, a **+** button for a new session (`run.sh` in that directory) and a terminal
 button (**>_**) for a shell on this machine in the project — one per project, its tab brought to
-the front when it is already open. For a project whose
+the front when it is already open. The gear button opens the project's settings, saved to its
+`.claude-sandbox.json`: each plugin On, Off or at its default, its own settings as JSON (the
+example config's section is shown as a hint), and the `env` block; the next session reads them.
+For a project whose
 `origin` is on GitHub it lists the open pull requests, with their CI status, and issues through the
 host's `gh` login, each a link to its GitHub page (one tab per item, brought to the front when it
 is already open); a PR on a per-run branch (`<prefix>/<date>-<RUN_ID>`) gets a **Resume** button,
 which is `run.sh --resume <RUN_ID>`; an ended session in the list has one too. An issue's
 **Resolve** starts a new session whose agent begins on it straight away: its first message
 (`run.sh --task`) names the issue and tells it to read it with `gh issue view`, fix it with tests,
-push and open a pull request that closes it.
+push and open a pull request that closes it. Seeing that pull request's CI through to green is
+in every session's briefing (`github-auth`), not in the task.
 
 What a project shows beyond its sessions comes from its enabled plugins, not from the web UI: the
 page draws what `run.sh --web` prints for the project, which is what each enabled plugin's `web.sh`
@@ -181,7 +185,7 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | `copilot-home` | 5 | on | copilot | `copilot-home` | — | mounts the host's `~/.copilot` (or `$COPILOT_HOME_DIR`) at `/home/node/.copilot`; sets `AGENT_AUTH_PROVIDED=1` |
 | `docker-cli` | 5 | on | any | `docker-cli` | — | Docker CLI + compose plugin install; mounts the host's `/var/run/docker.sock` |
 | `netbird` | 5 | off | any | `mesh-network` | — | NetBird client install; enrols the container as its own peer (`sandbox-<RUN_ID>`) from `$NB_SETUP_KEY`, adding `NET_ADMIN` + `/dev/net/tun` |
-| `github-auth` | 10 | on | any | `git-credentials` | — | `gh` CLI install; mints App installation tokens on the host as the `github-token` credential (re-minted every 40 min), `gh auth login` with each one |
+| `github-auth` | 10 | on | any | `git-credentials` | — | `gh` CLI install; mints App installation tokens on the host as the `github-token` credential (re-minted every 40 min), `gh auth login` with each one; briefs the agent to open a pull request for its work and fix whatever fails until its CI is green |
 | `gcp-auth` | 10 | off | any | `gcp-credentials` | — | Google Cloud CLI install; mints 1h service-account tokens on the host and makes them the container's ambient identity: `gcloud` reads the token file, a stand-in GCE metadata server serves the client libraries |
 | `ssh-credentials` | 15 | off | any | `ssh-credentials` | — | `openssh-client` install; writes `~/.ssh/sandbox_key` + `~/.ssh/config` for the agent user |
 | `upstream-proxy` | 15 | on | any | `upstream-proxy` | — | credential-injecting reverse proxies on the HOST, one per route from the project config, shared by all of a project's running sandboxes, bind-mounted as unix sockets and bridged to loopback ports that only the project's own sandboxes may use; no routes configured → does nothing |
@@ -645,4 +649,4 @@ Volume mounts are contributed by plugins via `pass_mount`; the core `docker run`
 | [src/lib/agents.sh](src/lib/agents.sh) | container-side agent framework (manifest lookup, stage runner) |
 | [agents/](agents) | the agents themselves |
 | [plugins/](plugins) | the plugins themselves |
-| [tests/](tests) | pytest suite; `tests/e2e` boots the built image (see CLAUDE.md, Tests) |
+| [tests/](tests) | pytest suite; `tests/e2e` boots the built image |

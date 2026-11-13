@@ -77,9 +77,9 @@ if github_items pr number,title,url,headRefName,isDraft,statusCheckRollup \
   '{ref: "#\(.number)", title, url, branch: .headRefName, note: "Merged", status: "done", status_text: "Merged"}' \
   --state merged && web_run_items "$github_items"
 fi
-# Resolve: a session told to fix the issue, reading it in full itself (the title is all we send),
-# and to see its pull request's CI through to green.
+# Resolve: a session told to fix the issue, reading it in full itself (the title is all we send);
+# seeing its pull request's CI through to green is in every session's briefing (agent-init.sh).
 # shellcheck disable=SC2016  # jq, not shell
 github_items issue number,title,url '{ref: "#\(.number)", title, url, start: {label: "Resolve",
-  task: "Resolve GitHub issue #\(.number): \(.title) (\(.url)). Read it in full first, with its comments: `gh issue view \(.number) --comments`. Then fix it: make the change, add or update tests and run them, commit, push your branch and open a pull request whose description says \"Closes #\(.number)\". Then watch its CI until every check has finished (`gh pr checks --watch`); when one fails, read why (`gh run view <run-id> --log-failed`), fix it, push and watch again, until all checks are green."}}' && web_list Issues "$github_items"
+  task: "Resolve GitHub issue #\(.number): \(.title) (\(.url)). Read it in full first, with its comments: `gh issue view \(.number) --comments`. Then fix it: make the change, add or update tests and run them, commit, push your branch and open a pull request whose description says \"Closes #\(.number)\"."}}' && web_list Issues "$github_items"
 return 0

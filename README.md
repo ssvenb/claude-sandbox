@@ -180,7 +180,6 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | `claude-home` | 5 | on | claude | `claude-home` | — | mounts the host's `~/.claude` (or `$CLAUDE_HOME_DIR`) at `/home/node/.claude`; sets `AGENT_AUTH_PROVIDED=1` |
 | `copilot-home` | 5 | on | copilot | `copilot-home` | — | mounts the host's `~/.copilot` (or `$COPILOT_HOME_DIR`) at `/home/node/.copilot`; sets `AGENT_AUTH_PROVIDED=1` |
 | `docker-cli` | 5 | on | any | `docker-cli` | — | Docker CLI + compose plugin install; mounts the host's `/var/run/docker.sock` |
-| `host-network` | 5 | on | any | `host-network` | — | runs the container in the host's network namespace (`--network host`); conflicts with `netbird` |
 | `netbird` | 5 | off | any | `mesh-network` | — | NetBird client install; enrols the container as its own peer (`sandbox-<RUN_ID>`) from `$NB_SETUP_KEY`, adding `NET_ADMIN` + `/dev/net/tun` |
 | `github-auth` | 10 | on | any | `git-credentials` | — | `gh` CLI install; mints App installation tokens on the host as the `github-token` credential (re-minted every 40 min), `gh auth login` with each one |
 | `gcp-auth` | 10 | off | any | `gcp-credentials` | — | Google Cloud CLI install; mints 1h service-account tokens on the host and makes them the container's ambient identity: `gcloud` reads the token file, a stand-in GCE metadata server serves the client libraries |
@@ -191,6 +190,7 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | `agent-workspace` | 15 | on | any | `workspace-mirror` | — | bind-mounts `$AGENT_WORKSPACE_DIR/<project>-<date>-<RUN_ID>` (default `~/.agent-workspaces/<project>-<date>-<RUN_ID>`, created if missing) at `/workspace`, so the agent's checkout is visible on the host; removed when the container exits, unless `AGENT_WORKSPACE_CLEANUP=0`; complements `git-workspace`, conflicts with `cwd-workspace` |
 | `package-managers` | 25 | on | any | `package-managers` | — | `sudo` install; lets the agent install packages itself — `npm -g`/`pip` into its home, `apt-get`/`apt` via a passwordless sudo rule (which amounts to root, so its guardrails become advisory) |
 | `project-deps` | 25 | on | any | `project-deps` | — | installs the dependencies the target repo declares in the project config: apt/npm/pip packages (as root, at boot) and `setup` shell commands (as the agent user, in the provisioned `/workspace`); nothing configured → does nothing |
+| `dev-server` | 28 | on | any | `dev-server` | — | starts the project's server (`.plugins["dev-server"].command`) in `/workspace` at every boot, after `project-deps`; the agent restarts it with `bin/sandbox-server`. Its ports are published like any others, see [Published ports](#published-ports); nothing configured → does nothing |
 | `branch-guard` | 30 | on | claude | — | `workspace` | `guard-branch.py` PreToolUse hook |
 
 Disable them all and the agent starts plain, in an empty `/workspace` with no GitHub access.
@@ -355,6 +355,7 @@ request, with its CI). An item is `{title, url}` plus optional `ref` (a short id
 | `web_session_item RUN_ID JSON_ITEM` | an item on that run's session row, shown while the page lists a session of the run |
 | `web_tie_items JQ_FILTER` | hands items listed so far (by plugins of a lower `priority`) to the run the filter names for each (a RUN_ID; `null` or `""` leaves the item be): such an item moves onto that run's session row while one is listed, else stays in its section with a **Resume** button |
 | `web_map_items JQ_FILTER` | rewrites every item listed so far (by plugins of a lower `priority`) |
+| `web_live_items FILE` | items from a JSON array in FILE, each with its `run_id`, on the row of that run's running session; the server re-reads the file on every poll, so it suits what comes and goes within seconds (a port a session's server publishes, see [Published ports](#published-ports)); `{host}` in a `url` stands for the host name the page was opened by |
 | `web_note TEXT` | one line saying why there is nothing to list |
 | `web_checkout GLOB` | where a run's `/workspace` is on this machine, `{run_id}` standing for the run; adds the VS Code button to its session |
 
@@ -419,7 +420,7 @@ real endpoints, real TLS, no emulator variables:
 credential. In the container, `gcloud` reads that file on every call, and a root-owned stand-in
 for the GCE metadata server hands it to the client libraries, which find it through
 `GCE_METADATA_HOST` as they would on a VM. It listens on a free loopback port and answers only the
-container's own processes, so it works under `host-network` too. The agent holds the current
+container's own processes. The agent holds the current
 token, usable from anywhere until it expires, but never anything it could mint a new one from; what
 it can do is decided by the account's IAM roles alone. For per-method/path restrictions on top,
 use the proxy route below instead.
@@ -449,20 +450,36 @@ In the container, `STORAGE_EMULATOR_HOST` points the Python/Go/Node storage clie
 http://127.0.0.1:<port>/storage/v1/b/my-bucket/o` works too. A bad login or a missing grant fails
 `run.sh` at startup. See the `gcs` route in [.claude-sandbox.example.json](.claude-sandbox.example.json).
 
-Sandboxes of the same project — launched from the same checkout, with the same routes, env file
-and network mode — share one host proxy: the first `run.sh` starts it, later ones reuse it, and the
+Sandboxes of the same project — launched from the same checkout, with the same routes and env
+file — share one host proxy: the first `run.sh` starts it, later ones reuse it, and the
 last one to exit stops it. It loads its credentials once, at start, so a rotated key in the env
 file takes effect only once no sandbox of the project is running.
 
-With `host-network` on, those loopback ports are the *host's*, shared with every other sandbox on
-the machine. The shared host proxy then listens on them itself, so they stay up for as long as any
-of the project's sandboxes runs, and every container runs a small root-owned attestor instead of a
-forwarder. For each connection the proxy asks the project's attestors whether its client end
-belongs to one of their processes; anyone else — another project's sandbox, the host — gets a 403.
-A port another project already listens on fails `run.sh` at startup rather than sending this
-agent's requests to that project's proxy, so projects that run at the same time need distinct
-route ports. This isolates the proxies, not the sandboxes: with `docker-cli` on, an agent can still
-reach the host's Docker daemon and from there anything else.
+### Published ports
+
+Part of the core, not a plugin. Each sandbox has a network namespace of its own, so two sessions
+can both run a server on `:3000`. Inside the container a root helper (`src/publish-ports.py`,
+started by `entrypoint.sh`) notices every TCP port a non-root process listens on — on any
+address, `127.0.0.1` included — and offers it as a unix socket in a directory mounted from the
+host, under a root-only `/run/ports` the agent cannot reach. One central proxy on your machine
+(`src/portd.py`, managed by `src/lib/host-ports.sh`), shared by every sandbox of every project,
+gives each such port a port of its own on `$PORTS_BIND` (default `127.0.0.1`): the same number
+while it is free, otherwise any free one, and the same one again when that session's server
+restarts. The first `run.sh` starts the proxy; it exits once no `run.sh` using it is alive. The
+web UI shows each published port as a button on its session's row, within a second or two of the
+server starting. `PORTS_IGNORE` lists ports never to publish (a debugger's, say).
+
+The `dev-server` plugin starts the project's server at every boot, in `/workspace` after
+`project-deps`; the agent controls it with `/opt/plugins/dev-server/bin/sandbox-server
+start|stop|restart|status|log`:
+
+```json
+{ "plugins": { "dev-server": { "command": "pnpm dev --port 3000" } } }
+```
+
+The host's own services are at `host.docker.internal` from inside, if they listen on an address
+other than loopback; the host's `localhost` is out of the agent's reach. Unix sockets created in a
+container are reachable from the host with Docker Engine on Linux, not through Docker Desktop's VM.
 
 ### The worked-on repo's `.env`
 
@@ -576,10 +593,12 @@ only required while that agent or plugin is in use.
 | `AGENT` | core | Which agent runs: a directory name under `agents/` (default `claude`) |
 | `PROJECT_CONFIG_FILE` | core | Per-project plugin configuration (default `$HOST_CWD/.claude-sandbox.json`; optional) |
 | `PROJECT_ENV_FILE` | core | The worked-on repo's `.env`, scanned for plugin settings it keeps there (default `$HOST_CWD/.env`; `/dev/null` loads nothing) |
+| `PORTS_BIND` | core | Address the central port proxy publishes the sandboxes' ports on (default `127.0.0.1`; `0.0.0.0` for your whole network) |
+| `PORTS_IGNORE` | core | Space-separated ports never published |
 | `CLAUDE_CODE_OAUTH_TOKEN` | agents/claude | Claude Code OAuth token (`claude setup-token`). Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does |
 | `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low`, `medium` (the sandbox default), `high`, `xhigh`, `max` |
 | `COPILOT_GITHUB_TOKEN` | agents/copilot | Fine-grained PAT with the "Copilot Requests" permission (or a Copilot/`gh` OAuth token). Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_CA_CERTS` / `ENABLE_HOST_NETWORK` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_NETBIRD` / `ENABLE_GCP_AUTH` / `ENABLE_SSH_CREDENTIALS` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `gcp-auth`, `netbird` and `ssh-credentials`) |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_CA_CERTS` / `ENABLE_DEV_SERVER` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_NETBIRD` / `ENABLE_GCP_AUTH` / `ENABLE_SSH_CREDENTIALS` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `gcp-auth`, `netbird` and `ssh-credentials`) |
 | `GH_APP_ID` | github-auth | GitHub App ID |
 | `GH_PRIVATE_KEY_FILE` | github-auth | Host path to the App's `.pem` private key |
 | `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default `github.com`) |

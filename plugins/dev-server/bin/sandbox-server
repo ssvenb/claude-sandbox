@@ -1,0 +1,36 @@
+#!/bin/sh
+# sandbox-server start|stop|restart|status|log: the project's server, the command its
+# .claude-sandbox.json names (plugins["dev-server"].command, as $DEV_SERVER_COMMAND), run in /workspace in a
+# session of its own so stop ends everything it started. Its ports are published like any other.
+set -eu
+LOG=${SANDBOX_SERVER_LOG:-/tmp/sandbox-server.log}
+PID=${SANDBOX_SERVER_PID:-/tmp/sandbox-server.pid}
+
+running() { [ -s "$PID" ] && kill -0 "$(cat "$PID")" 2>/dev/null; }
+
+case "${1:-status}" in
+  start)
+    [ -n "${DEV_SERVER_COMMAND:-}" ] || { echo "No server configured (plugins[\"dev-server\"].command)." >&2; exit 1; }
+    if running; then echo "Already running (pid $(cat "$PID"))."; exit 0; fi
+    cd "${SANDBOX_SERVER_DIR:-/workspace}"
+    echo "--- $(date '+%F %T') $DEV_SERVER_COMMAND" >>"$LOG"
+    # A background job is no group leader, so setsid execs in place: $! is the session's leader.
+    setsid sh -c "$DEV_SERVER_COMMAND" </dev/null >>"$LOG" 2>&1 &
+    echo $! >"$PID"
+    echo "Started: $DEV_SERVER_COMMAND (pid $!, log $LOG)" ;;
+  stop)
+    if running; then
+      kill -TERM "-$(cat "$PID")" 2>/dev/null || kill -TERM "$(cat "$PID")"
+      i=0
+      while running && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+      ! running || kill -KILL "-$(cat "$PID")" 2>/dev/null || true
+      echo "Stopped."
+    else
+      echo "Not running."
+    fi
+    rm -f "$PID" ;;
+  restart) "$0" stop; exec "$0" start ;;
+  status) if running; then echo "Running (pid $(cat "$PID")): ${DEV_SERVER_COMMAND:-}"; else echo "Not running."; exit 3; fi ;;
+  log) exec tail -n "${2:-100}" "$LOG" ;;
+  *) echo "Usage: $0 start|stop|restart|status|log [lines]" >&2; exit 2 ;;
+esac

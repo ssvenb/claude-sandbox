@@ -31,32 +31,15 @@ elif [ -n "$UPSTREAM_PROXY_ENV_FILE" ] && [ "$UPSTREAM_PROXY_ENV_FILE" != /dev/n
   echo "ℹ️  upstream-proxy: no env file at '$UPSTREAM_PROXY_ENV_FILE'; routes must resolve from the host environment." >&2
 fi
 
-# Under host-network every sandbox on the machine shares the host's loopback, so the proxy itself
-# listens on the route ports and each container only vouches for its own processes (see
-# root/forward.py). Otherwise each container has a loopback of its own and bridges the sockets.
-UPSTREAM_PROXY_HOST_NETWORK=0
-case " $ENABLED_PLUGINS " in *" host-network "*) UPSTREAM_PROXY_HOST_NETWORK=1 ;; esac
-# Docker Desktop's "host" network is its VM's, not this machine's: a container's connection reaches
-# our loopback relayed, from another address and port, so no attestor can recognise it. The VM's
-# loopback is the containers' own there, so the per-container forwarders work instead — at the
-# cost that two sandboxes of the project cannot run at once (both would bind the route ports).
-if [ "$UPSTREAM_PROXY_HOST_NETWORK" = 1 ] \
-    && docker info --format '{{.OperatingSystem}}' 2>/dev/null | grep -q 'Docker Desktop'; then
-  echo "ℹ️  upstream-proxy: Docker Desktop's host network relays connections; forwarding per container instead." >&2
-  UPSTREAM_PROXY_HOST_NETWORK=0
-fi
-
 # One proxy per project: every sandbox launched from this checkout with these routes shares it —
-# under host-network it is the only thing that can hold their common ports — the first run starts
-# it and the last one to exit stops it. A changed config or network mode gets a proxy of its own.
-UPSTREAM_PROXY_KEY=$(printf '%s\n' "$HOST_CWD" "$UPSTREAM_PROXY_ENV_FILE" "$UPSTREAM_PROXY_HOST_NETWORK" \
-  "$UPSTREAM_PROXY_ROUTES_JSON" | sha256sum | cut -c1-12)
+# the first run starts it and the last one to exit stops it. A changed config gets a proxy of its own.
+UPSTREAM_PROXY_KEY=$(printf '%s\n' "$HOST_CWD" "$UPSTREAM_PROXY_ENV_FILE" "$UPSTREAM_PROXY_ROUTES_JSON" \
+  | sha256sum | cut -c1-12)
 UPSTREAM_PROXY_DIR="${TMPDIR:-/tmp}/upstream-proxy-$(id -u)-$UPSTREAM_PROXY_KEY"
 mkdir -p -m 755 "$UPSTREAM_PROXY_DIR"
 [ -O "$UPSTREAM_PROXY_DIR" ] && [ ! -L "$UPSTREAM_PROXY_DIR" ] \
   || die "upstream-proxy: '$UPSTREAM_PROXY_DIR' is not yours; remove it and run again."
 UPSTREAM_PROXY_SOCK_DIR="$UPSTREAM_PROXY_DIR/sockets"
-UPSTREAM_PROXY_ATTEST_DIR="$UPSTREAM_PROXY_DIR/attest"
 # One file per run.sh using the proxy, named after its pid.
 UPSTREAM_PROXY_USERS="$UPSTREAM_PROXY_DIR/users"
 UPSTREAM_PROXY_PID_FILE="$UPSTREAM_PROXY_DIR/proxy.pid"
@@ -93,7 +76,7 @@ upstream_proxy_release() {
 }
 
 # A killed run under another config (an edited route, a different checkout) leaves its proxy
-# orphaned in a dir no later run of that key visits — holding its ports. Sweep them all; a dir
+# orphaned in a dir no later run of that key visits. Sweep them all; a dir
 # whose lock is busy belongs to a run starting or exiting right now, which settles it itself.
 for _dir in "${TMPDIR:-/tmp}/upstream-proxy-$(id -u)-"*/; do
   _dir=${_dir%/}
@@ -112,16 +95,10 @@ if [ -n "$UPSTREAM_PROXY_PID" ] && kill -0 "$UPSTREAM_PROXY_PID" 2>/dev/null; th
   echo "♻️  upstream-proxy: sharing the proxy of this project's other running sandbox(es)"
 else
   mkdir -p -m 755 "$UPSTREAM_PROXY_SOCK_DIR"
-  UPSTREAM_PROXY_ARGS=()
-  if [ "$UPSTREAM_PROXY_HOST_NETWORK" = 1 ]; then
-    mkdir -p -m 755 "$UPSTREAM_PROXY_ATTEST_DIR"
-    UPSTREAM_PROXY_ARGS=(--attest-dir "$UPSTREAM_PROXY_ATTEST_DIR")
-  fi
   # proxy.py takes a file; keep the routes out of the process table.
   printf '%s' "$UPSTREAM_PROXY_ROUTES_JSON" >"$UPSTREAM_PROXY_ROUTE_FILE"
   "$PLUGIN_DIR/host/proxy.py" \
     ${UPSTREAM_PROXY_ENV_ARGS[@]+"${UPSTREAM_PROXY_ENV_ARGS[@]}"} \
-    ${UPSTREAM_PROXY_ARGS[@]+"${UPSTREAM_PROXY_ARGS[@]}"} \
     "$UPSTREAM_PROXY_ROUTE_FILE" "$UPSTREAM_PROXY_SOCK_DIR" \
     </dev/null >"$UPSTREAM_PROXY_LOG" 2>&1 {UPSTREAM_PROXY_LOCK_FD}>&- &
   UPSTREAM_PROXY_PID=$!
@@ -134,7 +111,7 @@ on_exit upstream_proxy_release
 flock -u "$UPSTREAM_PROXY_LOCK_FD"
 exec {UPSTREAM_PROXY_LOCK_FD}>&-
 
-# Wait for every socket (created after its route's port, if any) rather than racing the container.
+# Wait for every socket rather than racing the container.
 for _ in $(seq 1 50); do
   missing=0
   while read -r name; do
@@ -148,12 +125,7 @@ done
 [ "${missing:-1}" = 0 ] \
   || die "upstream-proxy: sockets did not appear in $UPSTREAM_PROXY_SOCK_DIR."$'\n'"$(cat "$UPSTREAM_PROXY_LOG")"
 
-if [ "$UPSTREAM_PROXY_HOST_NETWORK" = 1 ]; then
-  pass_mount "$UPSTREAM_PROXY_ATTEST_DIR" /run/upstream-proxy-attest
-  pass_value UPSTREAM_PROXY_ATTEST_DIR /run/upstream-proxy-attest
-else
-  pass_mount "$UPSTREAM_PROXY_SOCK_DIR" /run/upstream-proxy
-fi
+pass_mount "$UPSTREAM_PROXY_SOCK_DIR" /run/upstream-proxy
 
 # name:port pairs drive the container-side forwarder in root-init.sh, and the agent's briefing.
 pass_value UPSTREAM_PROXY_PORTS "$(jq -r '[.[] | "\(.name):\(.port)"] | join(" ")' "$UPSTREAM_PROXY_ROUTE_FILE")"

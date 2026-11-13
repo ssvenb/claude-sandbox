@@ -4,7 +4,6 @@ import json
 import os
 import shutil
 import signal
-import socket
 import subprocess
 
 import pytest
@@ -371,7 +370,7 @@ def test_github_auth_mint_sees_the_repo_url_set_by_later_plugins(sb):
     assert run.out.endswith(f"7 {key} github.com https://github.com/acme/w.git\n")
 
 
-# --- herdr, host-network, screenshots ------------------------------------------------------
+# --- herdr, dev-server, screenshots ------------------------------------------------------
 
 @pytest.mark.parametrize("herdr_env, expected", [("1", "HERDR_AGENT=copilot"), (None, "")])
 def test_herdr_labels_the_docker_process_inside_a_herdr_pane(sb, herdr_env, expected):
@@ -381,8 +380,11 @@ def test_herdr_labels_the_docker_process_inside_a_herdr_pane(sb, herdr_env, expe
     assert run.args == []
 
 
-def test_host_network(sb):
-    assert sb.plugin("host-network").ok().args == ["--network", "host"]
+def test_dev_server_passes_its_command_only_when_configured(sb):
+    assert sb.plugin("dev-server").ok().args == []
+    sb.config({"plugins": {"dev-server": {"command": "pnpm dev --port 3000"}}})
+    run = sb.plugin("dev-server").ok()
+    assert run.env == {"DEV_SERVER_COMMAND": "pnpm dev --port 3000"}
 
 
 def test_screenshots_mounts_read_only(sb):
@@ -458,12 +460,6 @@ def test_ssh_credentials_passes_the_key_config_and_known_hosts(sb):
 
 
 # --- upstream-proxy ------------------------------------------------------------------------
-
-def free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
 
 @pytest.fixture
 def proxy_sb(sb, short_tmp):
@@ -541,27 +537,6 @@ def test_upstream_proxy_sweeps_orphans_of_other_configs(proxy_sb):
 def test_upstream_proxy_reports_a_proxy_that_cannot_start(proxy_sb):
     proxy_sb.config({"plugins": {"upstream-proxy": {"routes": routes(allowMethods=[])}}})
     proxy_sb.plugin("upstream-proxy").dies("the proxy exited during startup")
-
-
-def test_upstream_proxy_under_host_network_holds_the_ports_itself(proxy_sb):
-    proxy_sb.stub("docker", "echo 'Ubuntu 24.04 LTS'\n")
-    port = free_port()
-    proxy_sb.config({"plugins": {"upstream-proxy": {"routes": routes(port=port)}}})
-    run = proxy_sb.bash("project_config_load\nENABLED_PLUGINS='host-network upstream-proxy'\n"
-                        f"plugins_host_stage\nbash -c 'exec 3<>/dev/tcp/127.0.0.1/{port}' && echo listening").ok()
-    [proxy_dir] = proxy_dirs(proxy_sb)
-    assert run.mounts == [f"{proxy_dir}/attest:/run/upstream-proxy-attest"]
-    assert run.env["UPSTREAM_PROXY_ATTEST_DIR"] == "/run/upstream-proxy-attest"
-    assert "listening" in run.out
-
-
-def test_upstream_proxy_on_docker_desktop_forwards_per_container(proxy_sb):
-    proxy_sb.stub("docker", "echo 'Docker Desktop'\n")
-    proxy_sb.config({"plugins": {"upstream-proxy": {"routes": routes()}}})
-    run = proxy_sb.bash("project_config_load\nENABLED_PLUGINS='host-network upstream-proxy'\nplugins_host_stage").ok()
-    [proxy_dir] = proxy_dirs(proxy_sb)
-    assert f"{proxy_dir}/sockets:/run/upstream-proxy" in run.mounts
-    assert "UPSTREAM_PROXY_ATTEST_DIR" not in run.env
 
 
 # --- web stages: what plugins put on the web UI's status page ------------------------------

@@ -46,8 +46,8 @@ def test_the_host_pipeline_builds_and_runs_the_image(sb, run_sh):
     done = run_sh()
     assert done.returncode == 0, done.stderr
     [build], [run] = calls(done, "build"), calls(done, "run")
-    plugins = ("herdr host-network data-mounts upstream-proxy cwd-workspace package-managers "
-               "project-deps agent-status branch-guard")
+    plugins = ("herdr data-mounts upstream-proxy cwd-workspace package-managers "
+               "project-deps dev-server agent-status branch-guard")
     assert build == ["build", "-t", "claude-agent:claude", "--build-arg", "AGENT=claude",
                      "--build-arg", "AGENT_VERSION=1.2.3", "--build-arg", f"ENABLED_PLUGINS={plugins}", "."]
     run_id = re.fullmatch(r"RUN_ID=([0-9a-f]{6})", run[4])[1]
@@ -56,7 +56,8 @@ def test_the_host_pipeline_builds_and_runs_the_image(sb, run_sh):
                         "-e", "RESUME=0", "-e", "AGENT=claude", "-e", f"ENABLED_PLUGINS={plugins}"]
     assert run[-1] == "claude-agent:claude"
     tail = " ".join(run[13:])
-    for expected in ("--network host", f"-v {sb.cwd}:/workspace", "-v /dev/null:/workspace/.env:ro",
+    assert "--network" not in run  # a network of its own: ports reach the host through the proxy
+    for expected in (f"-v {sb.cwd}:/workspace", "-e PORTS_BIND=127.0.0.1", "-v /dev/null:/workspace/.env:ro",
                      "-e CWD_WORKSPACE_HIDDEN=/workspace/.env",
                      "-e CLAUDE_CODE_OAUTH_TOKEN=oauth-tok", "-e CLAUDE_EFFORT=high"):
         assert expected in tail
@@ -134,9 +135,17 @@ def test_host_proxy_runs_exactly_as_long_as_the_container(sb, run_sh, short_tmp)
     assert done.returncode == 0, done.stderr
     [run] = calls(done, "run")
     assert "UPSTREAM_PROXY_PORTS=api:" + str(port) in run
-    assert "UPSTREAM_PROXY_ATTEST_DIR=/run/upstream-proxy-attest" in run  # host-network is on
     [proxy_dir] = glob.glob(f"{short_tmp}/upstream-proxy-*")
     assert os.listdir(proxy_dir) == ["lock"], "the proxy outlived run.sh"
+
+
+def test_the_runs_ports_directory_lives_exactly_as_long_as_the_container(sb, run_sh, short_tmp):
+    done = run_sh("--run-id", "0a1b2c", CLAUDE_CODE_OAUTH_TOKEN="t")
+    assert done.returncode == 0, done.stderr
+    [run] = calls(done, "run")
+    base = f"{short_tmp}/sandbox-ports-{os.getuid()}-127.0.0.1"
+    assert f"{base}/runs/0a1b2c:/run/ports/sockets" in run
+    assert os.listdir(f"{base}/runs") == [] and not os.path.exists(f"{base}/portd.pid")
 
 
 def test_web_describes_the_project_and_starts_nothing(sb, run_sh):
@@ -145,6 +154,7 @@ def test_web_describes_the_project_and_starts_nothing(sb, run_sh):
     assert done.returncode == 0, done.stderr
     said = json.loads(done.stdout)
     assert said["agent"] == "claude" and "cwd-workspace" in said["plugins"]
+    assert said["live"] == [f"{sb.env['TMPDIR']}/sandbox-ports-{os.getuid()}-127.0.0.1/items.json"]
     assert said["lists"] == [] and "checkout" not in said  # agent-workspace is off in BASE
     assert done.calls == []
 

@@ -9,6 +9,19 @@ for p in ${CWD_WORKSPACE_HIDDEN:-}; do skip="$skip ! -path $p"; done
 find /workspace -xdev ! -type c $skip -exec chown node:node {} +
 unset skip p
 
+# Published ports: offer each port the agent's servers listen on to the host's central proxy, as
+# unix sockets in the directory run.sh mounted (src/lib/host-ports.sh). Its parent goes root-only
+# first, so the agent can neither reach the sockets nor plant one of its own for the host to
+# connect to.
+if [ -d /run/ports/sockets ]; then
+  chmod 700 /run/ports
+  _ignore=""
+  for _port in ${PORTS_IGNORE:-}; do _ignore="$_ignore --ignore $_port"; done
+  # shellcheck disable=SC2086  # one --ignore PORT pair per port
+  /usr/local/lib/sandbox/publish-ports.py --log /var/log/ports.log $_ignore /run/ports/sockets
+  unset _ignore _port
+fi
+
 # shellcheck source=lib/plugins.sh
 . /usr/local/lib/sandbox/plugins.sh
 # shellcheck source=lib/agents.sh

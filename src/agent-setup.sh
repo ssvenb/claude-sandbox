@@ -15,6 +15,22 @@ export HOME=/home/node
 AGENT_PROMPT_FILE=$(mktemp)
 export AGENT_PROMPT_FILE
 
+# What becomes of the ports it serves on (src/lib/host-ports.sh): the agent would otherwise assume
+# a shared network, or spend a turn wondering how the user reaches its server.
+if [ -d /run/ports ]; then
+  {
+    printf '## Ports\n\n'
+    printf 'This container has a network of its own. Any TCP port a process of yours listens on '
+    printf '(on any address, 127.0.0.1 included) is published to the user within a second or two, '
+    printf 'through a proxy on their machine, and shows as a button on your session in their '
+    printf 'dashboard. There it gets the same port number while that is free, otherwise another '
+    printf 'one, since other sessions may serve on the same port: pick any port, there is nothing '
+    printf 'to configure, and do not assume the number the user sees. Services the host machine '
+    printf 'offers on a non-loopback address are at host.docker.internal; its localhost is not '
+    printf 'reachable from here.\n'
+  } >>"$AGENT_PROMPT_FILE"
+fi
+
 # The agent seeds its own config first, then the plugins authenticate, provision /workspace and
 # set up guardrails. With every plugin off, /workspace is simply an empty directory.
 agent_run_stage agent-init

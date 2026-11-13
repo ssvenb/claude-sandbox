@@ -171,7 +171,8 @@ class Session:
 
     def json(self):
         return {**{k: getattr(self, k) for k in ("id", "project", "kind", "run_id", "started", "exit")},
-                "status": self.status(), "workspace": checkout(self.project, self.run_id)}
+                "status": self.status(), "workspace": checkout(self.project, self.run_id),
+                "items": live_items(self.project, self.run_id) if self.exit is None and self.kind != "shell" else []}
 
 
 def describe(project):
@@ -226,6 +227,20 @@ def tidy(s, urls, offered):
         except (OSError, KeyError, subprocess.TimeoutExpired) as e:
             failed.append(f"{item.get('ref') or item.get('title')}: {e}")
     return failed
+
+
+def live_items(project, run_id):
+    """What the project's plugins publish for a run while it runs (web_live_items: the ports its
+    servers listen on), read afresh: it changes faster than the project is described."""
+    found = []
+    for file in described.get(project, {}).get("live", []) if run_id else []:
+        try:
+            items = json.loads(Path(file).read_text())
+        except (OSError, ValueError):  # nothing published yet, or caught mid-write
+            continue
+        if isinstance(items, list):
+            found += [i for i in items if isinstance(i, dict) and i.get("run_id") == run_id]
+    return found
 
 
 def checkout(project, run_id):

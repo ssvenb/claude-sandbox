@@ -1,11 +1,10 @@
 """Whether a loopback TCP connection comes from a process of this sandbox.
 
 Shared by the root-owned helpers that listen on loopback ports (upstream-proxy's forwarder,
-gcp-auth's metadata server). Under host-network the container shares the HOST's loopback, so such a
-port is in reach of every other sandbox on the machine and of the host itself. The client end of
-each connection shows up in /proc/net/tcp with a socket inode, and only a process in this
-container's PID namespace can be found holding it — other sandboxes' processes, and the host's,
-are not visible here.
+gcp-auth's metadata server). Such a port is in reach of anything sharing the container's network
+namespace, which need not be only this container's processes. The client end of each connection
+shows up in /proc/net/tcp with a socket inode, and only a process in this container's PID namespace
+can be found holding it — anyone else's processes are not visible here.
 
     from peer_owner import from_this_sandbox
     if not from_this_sandbox(client_port, listening_port): refuse()

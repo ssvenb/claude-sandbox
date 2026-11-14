@@ -621,6 +621,7 @@ def test_a_chat_lists_what_runs_in_the_background_and_stops_one_on_request(chat)
     chat.until(s, lambda s: s.ready)
     s.prompt("run it in the background")
     chat.until(s, lambda s: len(s.tasks) == 2 and s.status() == "idle")  # the turn is over, they run on
+    assert s.json()["status"] == "working"  # and the dashboard shows it working while they do
     assert s.snapshot()["tasks"] == [{"id": "bg1a", "kind": "shell", "text": "npm run dev"},
                                      {"id": "bg1b", "kind": "agent", "text": "Check the callers", "note": "Reading src/app.py"}]
     assert not any(e["type"] == "tasks" for e in s.events)  # the latest set, not a log of them

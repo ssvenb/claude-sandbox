@@ -449,7 +449,10 @@ class Chat(Session):
         return self.state if self.ready else "starting"
 
     def json(self):
-        return {**super().json(), "title": self.title, "activity": self.activity, "said": self.said,
+        status = self.status()
+        if status == "idle" and self.tasks:  # its turn is over, but what it started in the background runs on
+            status = "working"
+        return {**super().json(), "status": status, "title": self.title, "activity": self.activity, "said": self.said,
                 "agent": self.info.get("agent"), "model": self.info.get("model"), "cost": self.cost,
                 "context": self.context, "waiting": len(self.waiting), "todos": self.todos}
 

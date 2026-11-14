@@ -15,16 +15,15 @@ shell in a pty. Standard library only; the terminal page loads xterm.js from a C
 
 FILE lists one project directory per line (default ~/.config/claude-sandbox/projects) and is
 re-read on every request. A line may be a glob (`~/code/*`); a match ending in `.git` stands for
-its repo, so `~/code/*/.git` lists only the git checkouts. Sessions belong to this process:
-stopping the server stops them.
+its repo, so `~/code/*/.git` lists only the git checkouts. Sessions outlive this process: each
+runs under web/holder.py, which keeps its output while no server listens, and a server that starts
+takes back the sessions the last one left (STATE), running or ended — a restart cuts nothing off.
 """
 import argparse
 import base64
-import fcntl
 import glob
 import json
 import os
-import pty
 import queue
 import re
 import secrets
@@ -35,7 +34,6 @@ import subprocess
 import sys
 import shutil
 import tempfile
-import termios
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -43,6 +41,12 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 HERE = Path(__file__).resolve().parent
+HOLDER = HERE / "holder.py"
+# A session's holder's socket and output, and what this server knew of it when it stopped.
+STATE = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "claude-sandbox/sessions"
+META = ("id", "project", "kind", "run_id", "started", "ui")
+SAVED = ("exit", "events", "info", "todos", "tasks", "ready", "state", "waiting", "title", "activity", "said",
+         "cost", "context", "sent", "offset")  # of a chat
 RUN_SH = HERE.parent / "run.sh"
 PLUGINS = HERE.parent / "plugins"
 AGENTS = HERE.parent / "agents"
@@ -127,63 +131,152 @@ def command(kind, run_id, task=None, chat=False):
 
 
 class Session:
-    """A terminal: a project's shell, or an agent's own TUI (`"ui": "terminal"`), in a pty."""
-    ui = "terminal"
+    """A terminal: a project's shell, or an agent's own TUI (`"ui": "terminal"`), in a pty, held by
+    web/holder.py so it outlives this server."""
+    ui, mode = "terminal", "pty"
 
     def __init__(self, project, kind, run_id, task=None):
         self.id = secrets.token_hex(4)
         self.project, self.kind, self.run_id = project, kind, run_id
         self.started, self.exit = time.time(), None
+        self._fresh()
+        self.dir = STATE / self.id
+        self.dir.mkdir(parents=True)
+        (self.dir / "meta.json").write_text(json.dumps({k: getattr(self, k) for k in META}))
+        try:
+            hold(self.dir, self.mode, self.argv(task), project)
+            self._attach(0)
+        except OSError:
+            shutil.rmtree(self.dir, ignore_errors=True)
+            raise
+
+    def argv(self, task):
+        return command(self.kind, self.run_id, task)
+
+    def _fresh(self):
+        """What is not saved: a terminal's screen comes back from its holder."""
         self.buf, self.listeners = bytearray(), []
         self.said, self.output, self.tail = None, time.time(), b""  # see status()
-        argv = command(kind, run_id, task)
-        self.pid, self.fd = pty.fork()
-        if self.pid == 0:
+
+    def _attach(self, start, tries=100):
+        """Talks to its holder from here on: output from byte `start` on (negative: the last bytes)."""
+        sock = socket.socket(socket.AF_UNIX)
+        for i in range(tries):
             try:
-                os.chdir(project)
-                os.execvpe(argv[0], argv, {**os.environ, "TERM": "xterm-256color"})
-            finally:
-                os._exit(127)
+                sock.connect(str(self.dir / "sock"))
+                break
+            except (FileNotFoundError, ConnectionRefusedError):
+                if i == tries - 1:
+                    sock.close()
+                    raise
+                time.sleep(0.05)
+        self.sock, self.sending = sock, threading.Lock()
+        self.pid = int((self.dir / "pid").read_text())
+        self._ctl({"from": start})
         threading.Thread(target=self._pump, daemon=True).start()
 
+    def _ctl(self, message):
+        try:
+            with self.sending:
+                self.sock.sendall(json.dumps(message).encode() + b"\n")
+        except OSError:  # its holder is gone: the pump says how it ended
+            pass
+
     def _pump(self):
-        while True:
-            try:
-                data = os.read(self.fd, 65536)
-            except OSError:  # EIO: the child side of the pty is gone
-                break
-            if not data:
-                break
-            self.output = time.time()
-            # The marker may straddle two reads: look at it with the end of the last one.
-            seen = self.tail + data
-            for m in STATUS.finditer(seen):
-                try:
-                    said = base64.b64decode(m[1]).decode()
-                except ValueError:
-                    continue
-                if said in STATES:
-                    self.said = said
-            self.tail = seen[-96:]
-            with lock:
-                self.buf += data
-                del self.buf[:-SCROLLBACK]
-                for q in self.listeners:
-                    q.put(data)
-        code = os.waitstatus_to_exitcode(os.waitpid(self.pid, 0)[1])
+        code = -1  # its holder went without saying (killed, a reboot)
+        try:
+            for line in self.sock.makefile("rb"):
+                message = json.loads(line)
+                if "o" in message:
+                    self._data(base64.b64decode(message["o"]))
+                elif "from" in message:
+                    with lock:
+                        self._from(message["from"])
+                elif "exit" in message:
+                    code = message["exit"]
+                    break
+        except (OSError, ValueError):
+            pass
         with lock:
-            self.exit = code
-            for q in self.listeners:
-                q.put(None)
-            if self.id not in sessions:  # deleted while it ran: drop() left its pty to us
+            self._end(code)
+            if self.id not in sessions:  # deleted while it ran: drop() left the rest to us
                 self.close()
+            else:
+                self.save()
+
+    def _from(self, start):
+        pass
+
+    def _data(self, data):
+        self.output = time.time()
+        # The marker may straddle two reads: look at it with the end of the last one.
+        seen = self.tail + data
+        for m in STATUS.finditer(seen):
+            try:
+                said = base64.b64decode(m[1]).decode()
+            except ValueError:
+                continue
+            if said in STATES:
+                self.said = said
+        self.tail = seen[-96:]
+        with lock:
+            self.buf += data
+            del self.buf[:-SCROLLBACK]
+            for q in self.listeners:
+                q.put(data)
+
+    def _end(self, code):
+        """Caller holds `lock`."""
+        self.exit = code
+        for q in self.listeners:
+            q.put(None)
+
+    def saved(self):
+        return {"exit": self.exit}
+
+    def save(self):
+        """What a server started later takes it back from. Caller holds `lock`."""
+        try:
+            (self.dir / "state.json").write_text(json.dumps(self.saved()))
+        except OSError:  # deleted
+            pass
+
+    @classmethod
+    def restore(cls, folder, meta, saved):
+        """A session the server before this one left: back to its holder, or ended."""
+        s = cls.__new__(cls)
+        for k in META:
+            if k != "ui":
+                setattr(s, k, meta[k])
+        s.dir = folder
+        s._fresh()
+        s._load(saved)
+        s.exit = saved.get("exit")
+        if s.exit is None:
+            try:
+                s._attach(s._resume_from(), tries=1)
+            except OSError:  # its holder is gone too: ended, maybe while no server listened
+                out = folder / "out"
+                if out.exists():
+                    s._data(out.read_bytes()[max(0, s._resume_from()):])
+                code = (folder / "exit").read_text() if (folder / "exit").exists() else "-1"
+                with lock:
+                    s._end(int(code))
+                    s.save()
+        return s
+
+    def _load(self, saved):
+        pass
+
+    def _resume_from(self):
+        return -SCROLLBACK
 
     def write(self, data):
-        while data and self.exit is None:
-            data = data[os.write(self.fd, data):]
+        if self.exit is None:
+            self._ctl({"in": base64.b64encode(data).decode()})
 
     def resize(self, cols, rows):
-        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+        self._ctl({"resize": [int(cols), int(rows)]})
 
     def stop(self):
         if self.exit is not None:
@@ -211,8 +304,10 @@ class Session:
         return self.said or ("working" if quiet < QUIET else "idle")
 
     def close(self):
-        """Lets go of what an ended session still holds. Caller holds `lock`."""
-        os.close(self.fd)
+        """Lets go of what an ended session still holds, its saved state too. Caller holds `lock`."""
+        if hasattr(self, "sock"):
+            self.sock.close()
+        shutil.rmtree(self.dir, ignore_errors=True)
 
     def json(self):
         return {**{k: getattr(self, k) for k in ("id", "project", "kind", "run_id", "started", "exit", "ui")},
@@ -279,12 +374,17 @@ class Chat(Session):
     the bridge speaks, then chat events (src/services/chat/chat-bridge.mjs), each line led by RS. Every
     event is kept in `events` so a page opened later (or again) starts from the whole
     conversation; streamed text is folded into the block it belongs to on the way in."""
-    ui = "chat"
+    ui, mode = "chat", "pipe"
 
     def __init__(self, project, kind, run_id, task=None, images=None):
-        self.id = secrets.token_hex(4)
-        self.project, self.kind, self.run_id = project, kind, run_id
-        self.started, self.exit = time.time(), None
+        super().__init__(project, kind, run_id)
+        if task or images:
+            self.prompt(task or "", images)
+
+    def argv(self, task):
+        return command(self.kind, self.run_id, None, True)
+
+    def _fresh(self):
         self.listeners, self.events = [], []
         self.tasks = []  # what its agent runs in the background right now
         self.ready, self.state, self.waiting = False, "idle", []  # (event, command) of prompts typed before `ready`
@@ -292,36 +392,58 @@ class Chat(Session):
         self.title = self.activity = self.said = ""
         self.cost, self.context, self.sent = None, None, 0
         self.blocks, self.tools, self.boot = {}, {}, None  # where streamed text, results and boot lines go
-        self.proc = subprocess.Popen(command(kind, run_id, None, True), cwd=project, stdin=subprocess.PIPE,
-                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                     start_new_session=True)  # a group of its own, to stop as one
-        self.pid = self.proc.pid
-        threading.Thread(target=self._pump, daemon=True).start()
-        if task or images:
-            self.prompt(task or "", images)
+        self.offset, self.partial = 0, b""  # how much of its output `events` has taken in, and the line it is in
 
-    def _pump(self):
-        for raw in self.proc.stdout:
+    def saved(self):
+        return {k: getattr(self, k) for k in SAVED}
+
+    def _load(self, saved):
+        for k in SAVED:
+            if k in saved:
+                setattr(self, k, saved[k])
+        # Streamed text and results go into the event they belong to, and a waiting prompt is the
+        # very event the page shows: one object each, as they were before the save.
+        self.blocks = {e.get("id"): e for e in self.events if e["type"] == "text"}
+        self.tools = {e.get("id"): e for e in self.events if e["type"] == "tool"}
+        self.boot = self.events[-1] if self.events and self.events[-1]["type"] == "boot" else None
+        users = {e.get("id"): e for e in self.events if e["type"] == "user"}
+        self.waiting = [users.get(w.get("id"), w) for w in self.waiting]
+
+    def _resume_from(self):
+        return self.offset
+
+    def _from(self, start):
+        self.offset, self.partial = start, b""
+
+    def _data(self, data):
+        *lines, self.partial = (self.partial + data).split(b"\n")
+        for raw in lines:
+            self._line(raw)
+
+    def _line(self, raw):
+        with lock:
+            self.offset += len(raw) + 1
             if raw.startswith(RS):
                 try:
                     event = json.loads(raw[1:])
                 except ValueError:
-                    continue
+                    return
                 if isinstance(event, dict) and isinstance(event.get("type"), str):
-                    with lock:
-                        self._take(event)
-                continue
+                    self._take(event)
+                return
             # A progress line redraws itself with carriage returns: its last state is what counts.
-            text = ANSI.sub("", raw.decode(errors="replace").rstrip("\r\n").split("\r")[-1]).rstrip()
+            text = ANSI.sub("", raw.decode(errors="replace").rstrip("\r").split("\r")[-1]).rstrip()
             if text:
-                with lock:
-                    self._take({"type": "boot", "text": text})
-        code = self.proc.wait()
-        with lock:
-            self.exit, self.tasks = code, []
-            self._tell({"type": "exit", "code": code}, keep=True)
-            for q in self.listeners:
-                q.put(None)
+                self._take({"type": "boot", "text": text})
+
+    def _end(self, code):
+        if self.partial:  # its last line, without a newline
+            self._line(self.partial)
+            self.partial = b""
+        self.exit, self.tasks = code, []
+        self._tell({"type": "exit", "code": code}, keep=True)
+        for q in self.listeners:
+            q.put(None)
 
     def _tell(self, event, keep=False):
         """To every open page, and into the log when a page opened later needs it too."""
@@ -408,11 +530,7 @@ class Chat(Session):
         self._tell(e, keep=True)  # user, ask, turn, notice, and whatever a bridge adds
 
     def _send(self, command):
-        try:
-            self.proc.stdin.write(json.dumps(command).encode() + b"\n")
-            self.proc.stdin.flush()
-        except (OSError, ValueError):  # it ended under us: the exit event says so
-            pass
+        self._ctl({"in": base64.b64encode(json.dumps(command).encode() + b"\n").decode()})
 
     def prompt(self, text, images=None, files=None):
         """A message of the user's, with the pictures pasted into it and the files attached: to the
@@ -457,15 +575,9 @@ class Chat(Session):
 
     resize = write
 
-    def close(self):
-        pass
-
     def stop(self):
         if self.exit is None:
-            try:
-                self.proc.stdin.close()
-            except OSError:
-                pass
+            self._ctl({"eof": True})
         super().stop()
 
     def status(self):
@@ -813,9 +925,40 @@ def vscode():
         raise ValueError("`code serve-web` did not start listening")
 
 
+scoped = []
+
+
+def hold(folder, mode, argv, cwd):
+    """Starts a session's process under web/holder.py, which outlives this server. Under systemd
+    it goes into a scope of its own: restarting this server's unit stops everything in its cgroup."""
+    if not scoped:
+        unit = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--"]
+        ok = os.environ.get("INVOCATION_ID") and shutil.which("systemd-run") and subprocess.run(
+            unit + ["true"], capture_output=True).returncode == 0
+        scoped.append(unit if ok else [])
+    with open(folder / "log", "ab") as log:  # what the holder itself says, should it fail
+        subprocess.Popen(scoped[0] + [sys.executable, str(HOLDER), str(folder), mode, "--", *argv], cwd=cwd,
+                         start_new_session=True, stdin=subprocess.DEVNULL, stdout=log, stderr=log)
+
+
+def restore():
+    """Takes back the sessions the server before this one left, running or ended."""
+    for meta in sorted(STATE.glob("*/meta.json"), key=lambda m: m.stat().st_mtime):
+        state = meta.parent / "state.json"
+        try:
+            m = json.loads(meta.read_text())
+            saved = json.loads(state.read_text()) if state.exists() else {}
+            s = (Chat if m["ui"] == "chat" else Session).restore(meta.parent, m, saved)
+        except (OSError, ValueError, KeyError) as e:
+            print(f"  could not take back the session in {meta.parent}: {e}", file=sys.stderr, flush=True)
+            continue
+        with lock:
+            sessions[s.id] = s
+
+
 def drop(s):
-    """Forget a session. Caller holds `lock`. A live one is stopped first, and its pty closed by
-    its pump once it has ended, never under it."""
+    """Forget a session. Caller holds `lock`. A live one is stopped first, and what it holds let
+    go of by its pump once it has ended, never under it."""
     if sessions.pop(s.id, None) and s.exit is not None:
         s.close()
 
@@ -1201,6 +1344,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if (bind := ports_bind(args.bind, os.environ)):
         os.environ["PORTS_BIND"] = bind  # for every run.sh this starts, sessions and --web alike
+    restore()
     server = serve(args.port, args.projects, args.bind, args.allow_host)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # so `finally` cleans up on a plain kill too
     print(f"Sandboxes: http://127.0.0.1:{server.server_address[1]}  (projects: {args.projects})",
@@ -1214,8 +1358,9 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         pass
     finally:
-        for s in list(sessions.values()):
-            s.stop()
+        with lock:  # they run on: what the next server takes them back from
+            for s in list(sessions.values()):
+                s.save()
         if vscode_server:
             try:  # the `code` CLI leaves the server it spawned running when it is terminated
                 os.killpg(vscode_server[0].pid, signal.SIGTERM)

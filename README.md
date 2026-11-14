@@ -146,7 +146,10 @@ diffs ([jsdiff](https://github.com/kpdecker/jsdiff)), the terminal [xterm.js](ht
 all bundled; only the fonts come from a CDN. To work on it, run the server and `npm run dev` in
 `web/ui`, which serves the pages with hot reload and passes `/api` on to the server on port 8787.
 It listens on loopback only and has no login — use an SSH tunnel to reach it from elsewhere.
-Sessions belong to the server process: stopping it stops them.
+Sessions outlive the server: each runs under `web/holder.py`, which keeps its output while no server
+listens, and the next server takes them back from `~/.local/state/claude-sandbox/sessions`, running or
+ended, so a restart (the dashboard's update button, say) cuts nothing off. Under systemd each holder
+runs in a scope of its own (`systemd-run --user --scope`), outside the server unit's cgroup.
 
 ## How a run boots
 

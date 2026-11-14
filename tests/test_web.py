@@ -730,3 +730,8 @@ def test_a_resumed_chat_replays_what_was_said_before(chat):
     assert [(e["type"], e["text"]) for e in s.events if e["type"] in ("user", "text")] == [
         ("user", "What was said before the resume"), ("text", "An earlier answer.")]
     assert chat("resume", "0a1b2c") is s  # one live session per run
+    s.title = "Fix the board"
+    s.stop()
+    chat.until(s, lambda s: s.exit is not None)
+    again = chat("resume", "0a1b2c")  # it takes the ended one's place, and its name: a run stays one session
+    assert list(web.sessions) == [again.id] and again.title == "Fix the board"

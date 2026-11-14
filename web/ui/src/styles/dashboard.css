@@ -3,7 +3,7 @@
    page itself does not scroll: the bar stays where it is, and each side scrolls on its own. */
 :where([data-page=dashboard]) {
   body { height: 100dvh; overflow: hidden; }
-  main { max-width: 1384px; height: 100%; margin: 0 auto; padding: 24px 32px 0; display: flex; flex-direction: column; }
+  main { height: 100%; padding: 24px 32px 0; display: flex; flex-direction: column; }
   .top { flex: none; }
 
   /* Starting a session is writing its first message: the sandbox boots behind it. The project and
@@ -20,16 +20,19 @@
   .starter > button { height: 45px; padding: 0 18px; white-space: nowrap; border-radius: 14px; }
   .top .theme { margin-top: 7px; }
 
-  .board { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 400px);
+  .board { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
            grid-template-rows: minmax(0, 1fr); gap: 12px 24px; margin-top: 20px; }
   /* A side clips what it scrolls: the room around it keeps a focus ring and a window's edge whole. */
   .board > * { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 8px 6px 48px; }
+  /* A line between the two sides, in the middle of the gap. */
+  .board:not(.quiet) .projects { border-left: 1px solid var(--rule); padding-left: 24px; margin-left: -12px; }
   h2.band { margin: 0 0 12px; font-size: 15px; font-weight: 600; color: var(--muted); letter-spacing: 0; }
-  /* With nothing running there is no left side: the projects take the width, panel beside panel. */
+  /* With nothing running there is no left side: the projects take the width, in columns. */
   .board.quiet { grid-template-columns: minmax(0, 1fr); }
-  .board.quiet .projects { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 400px)); gap: 12px; align-content: start; align-items: start; }
-  .board.quiet .projects h2.band { grid-column: 1 / -1; margin: 0; }
-  .board.quiet .project + .project { margin-top: 0; }
+  /* Columns, not a grid: each panel sits right under the one before, with no row to line up with. */
+  .board.quiet .projects { columns: 360px; column-gap: 12px; }
+  .board.quiet .projects h2.band { column-span: all; }
+  .board.quiet .project { break-inside: avoid; margin: 0 0 12px; }
   /* The left: under each project's name, a window per running session, lit in the colour of what
      its agent is doing. */
   .group + .group { margin-top: 22px; }
@@ -60,8 +63,6 @@
   .window .chips { display: flex; gap: 6px; min-width: 0; overflow: hidden; }
   .window .chips:empty { display: none; }
   .window .chips > * { position: relative; z-index: 1; }
-  /* A project's ended sessions, at the foot of its panel. */
-  ul.ended { margin-top: 8px; }
 
   /* The right: a panel per project, its buttons, then what its plugins list (issues, …). */
   .project { padding: 14px 16px 12px; background: var(--panel); border: 1px solid var(--rule); border-radius: 14px; }
@@ -99,6 +100,7 @@
     .top { position: sticky; top: 0; z-index: 3; margin: 0 -14px; padding: 14px 14px 10px; background: var(--page); }
     .board { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; gap: 28px; margin-top: 10px; }
     .board > * { overflow: visible; padding: 0; }
+    .board:not(.quiet) .projects { border-left: 0; margin-left: 0; }
     .window { min-height: 0; }
   }
 }

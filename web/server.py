@@ -808,17 +808,21 @@ def start(project, kind, run_id, task=None, ui=None, images=None):
     elif kind != "resume" or not RUN_ID.fullmatch(run_id or ""):
         raise ValueError("kind must be run, shell, or resume with a 6-hex-char run_id")
     with lock:
+        title = ""
         for s in list(sessions.values()):
             if (s.project, s.run_id, s.kind == "shell") != (project, run_id, kind == "shell"):
                 continue
             # Two containers on one branch would push over each other, and one terminal per
-            # project is enough: hand back the live one. An ended terminal stays (its tab shows
-            # why it ended) until the next one of its project replaces it.
+            # project is enough: hand back the live one. An ended one stays (its tab shows how it
+            # ended) until the next one of its run, or of its project for a terminal, replaces it:
+            # a run is one session however often it is resumed, and a resumed chat replays it.
             if s.exit is None:
                 return s
-            if kind == "shell":
-                drop(s)
+            title = title or getattr(s, "title", "")
+            drop(s)
         s = (Session if kind == "shell" or ui == "terminal" else Chat)(project, kind, run_id, task, *([images] if images else []))
+        if isinstance(s, Chat):
+            s.title = s.title or title
         sessions[s.id] = s
         return s
 

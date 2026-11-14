@@ -194,6 +194,19 @@ def test_the_dashboard_is_a_chat_bar_over_running_sessions_and_projects(board):
     assert bar["y"] + bar["height"] <= left["y"] and left["x"] + left["width"] <= right["x"]
 
 
+def test_with_nothing_running_each_project_sits_right_under_the_one_before(board):
+    board.set_viewport_size({"width": 1280, "height": 800})
+    board.evaluate("""() => {
+        const {state, plugins} = dashboard, p = state.projects[0];
+        plugins[p].lists[0].items = Array.from({length: 12}, (_, i) => ({ref: '#' + i, title: 'Issue ' + i, url: location.origin + '/i/' + i}));
+        state.projects = [p, ...['/b', '/c', '/d'].map(q => p + q)];
+        dashboard.render();
+    }""")
+    boxes = [board.locator(".project").nth(k).bounding_box() for k in range(4)]
+    stacked = [(a, b) for a, b in zip(boxes, boxes[1:]) if a["x"] == b["x"]]
+    assert stacked and all(abs(b["y"] - (a["y"] + a["height"]) - 12) < 1 for a, b in stacked)  # no row's gap under a short one
+
+
 def test_each_side_of_the_dashboard_scrolls_on_its_own_under_a_chat_bar_that_stays(board):
     board.set_viewport_size({"width": 1280, "height": 500})
     board.resume()
@@ -313,7 +326,7 @@ def test_a_running_session_is_a_window_with_its_stop_button_top_right(board):
     assert board.query_selector(".window .lamp, .window .spin, .window .state") is None and "Idle" not in board.inner_text(".window")
     # A strip cut to the card's own rounded shape: a layer as large as the card, painted 4px deep.
     strip = board.eval_on_selector(".window.idle", "e => { const c = getComputedStyle(e, '::before'), r = e.getBoundingClientRect();"
-                                   " return [c.backgroundImage, c.borderTopLeftRadius, parseFloat(c.width) === r.width]; }")
+                                   " return [c.backgroundImage, c.borderTopLeftRadius, Math.abs(parseFloat(c.width) - r.width) < 0.5]; }")
     assert strip[1:] == [board.eval_on_selector(".window", "e => getComputedStyle(e).borderTopLeftRadius"), True]
     assert "4px" in strip[0] and strip[0].startswith("linear-gradient(" +
         board.evaluate("(() => { const p = document.createElement('p'); p.style.color = 'var(--ok)'; document.body.append(p);"
@@ -368,11 +381,14 @@ def test_a_session_has_one_tab_with_a_lamp_in_the_colour_of_what_its_agent_does(
     tab.wait_for_function("decodeURIComponent(document.querySelector('link[rel=icon]').href).includes('stroke')")
     assert tab.is_disabled("#input")
     board.wait_for_selector("ul.ended button[aria-label='Resume session']")  # listed on its project's panel
+    assert " ".join(board.inner_text(".project h4:has-text('Sessions')").split()) == "Sessions 1"  # under its own header
     assert board.query_selector("details") is None and board.query_selector("text=1 ended") is None  # with nothing to unfold
     with tab.expect_navigation():  # resuming takes this tab to the run's new session
         tab.click(".over button:has-text('Resume')")
     tab.wait_for_selector("header .state.idle")
     assert tab.url.endswith("#" + [s for s in state(board) if s["exit"] is None][0]["id"])
+    assert len(state(board)) == 1  # the ended one is replaced: a run stays one session
+    board.wait_for_selector("ul.ended", state="detached")
 
 
 def test_the_first_message_is_written_while_the_sandbox_starts_and_sent_when_it_is_ready(board):

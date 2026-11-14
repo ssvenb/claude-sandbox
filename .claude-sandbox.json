@@ -8,6 +8,9 @@
   },
   "plugins": {
     "project-deps": {
+      "apt": [
+        "libatomic1"
+      ],
       "pip": [
         "uv"
       ],

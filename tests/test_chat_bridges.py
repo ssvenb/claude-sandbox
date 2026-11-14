@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 
 import pytest
 
@@ -349,3 +350,19 @@ def test_a_resumed_copilot_run_replays_its_session_or_starts_a_new_one(tmp_path)
     fresh.until(lambda e: e["type"] == "ready")
     assert [next(iter(c)) for c in fresh.calls()] == ["client", "resume", "create"]
     fresh.close()
+
+
+def test_a_turn_the_api_failed_is_tried_again_until_the_user_steps_in(tmp_path):
+    failed = [{"type": "assistant", "parent_tool_use_id": None, "error": "server_error",
+               "message": {"id": "m1", "content": [{"type": "text", "text": "API Error: 529 Overloaded."}]}},
+              {"type": "result", "subtype": "success", "is_error": True, "total_cost_usd": 0, "duration_ms": 1, "result": "API Error"}]
+    b = Bridge("claude", tmp_path, failed, API_RETRY_SECONDS="1")
+    b.until(lambda e: e["type"] == "ready")
+    b.say(type="prompt", text="do it")
+    b.until(lambda e: len(of(b.events, "turn")) == 2)  # the prompt, then a retry on its own
+    b.say(type="interrupt")  # a stop, a second before the next retry, ends the retrying
+    time.sleep(1.5)
+    b.close()
+    prompts = [c["prompt"] for c in b.calls() if "prompt" in c]
+    assert prompts == ["do it", prompts[1]] and prompts[1].startswith("<api-retry>")
+    assert any(e["type"] == "notice" and "trying again" in e["text"] for e in b.events)

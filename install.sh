@@ -16,7 +16,7 @@ set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 YES=0 DEV=0 WEB=1 LAUNCHERS=1 PROJECTS=()
-NODE_MIN=20.19  # what the web UI's build (Vite) needs: web/ui/package.json's engines
+NODE_MIN=20.19  # what the web UI's build (Vite) needs: web/package.json's engines
 
 usage() { sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 while [ $# -gt 0 ]; do
@@ -125,8 +125,13 @@ if [ "$WEB" = 1 ]; then
    and run ./install.sh again — or pass --no-web to set up run.sh alone."
   fi
   ok "node $(node --version), npm $(npm --version)"
-  (cd "$here/web/ui" && npm ci --no-audit --no-fund && npm run build)
-  ok "built: $here/web/ui/dist"
+  # The app moved from web/ui to web: what git leaves of the old place (ignored, so untracked) goes.
+  if [ -d "$here/web/ui" ]; then
+    rm -rf "$here/web/ui/node_modules" "$here/web/ui/dist"
+    rmdir "$here/web/ui" 2>/dev/null || warn "$here/web/ui is left over from before the web UI moved to web/: remove it."
+  fi
+  (cd "$here/web" && npm ci --no-audit --no-fund && npm run build)
+  ok "built: $here/web/dist"
 
   step "Projects on the dashboard"
   listing="${XDG_CONFIG_HOME:-$HOME/.config}/claude-sandbox/projects"

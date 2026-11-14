@@ -20,7 +20,7 @@ from conftest import REPO
 sys.path.insert(0, str(REPO / "src/server"))
 import server as web  # noqa: E402
 
-UI = REPO / "web/ui"  # the pages: a React app, built into UI/dist, which the server serves
+UI = REPO / "web"  # the pages: a React app, built into UI/dist, which the server serves
 
 
 @pytest.fixture(autouse=True)
@@ -31,7 +31,7 @@ def state(tmp_path, monkeypatch):
 
 
 def build_ui():
-    """Makes sure web/ui/dist is there and no older than what it is built from: `npm run build`
+    """Makes sure web/dist is there and no older than what it is built from: `npm run build`
     (after `npm ci`, without node_modules) when it is not. Without npm, a build that is there is
     used as it is, and with none the test is skipped. Returns dist."""
     dist = UI / "dist"
@@ -43,11 +43,11 @@ def build_ui():
     if not shutil.which("npm"):
         if built:
             return dist  # stale, but all there is
-        pytest.skip("the web UI is not built and there is no npm to build it: `npm ci && npm run build` in web/ui")
+        pytest.skip("the web UI is not built and there is no npm to build it: `npm ci && npm run build` in web")
     steps = ([] if (UI / "node_modules").exists() else [["npm", "ci"]]) + [["npm", "run", "build"]]
     for step in steps:
         done = subprocess.run(step, cwd=UI, capture_output=True, text=True)
-        assert done.returncode == 0, f"{' '.join(step)} in web/ui failed:\n{done.stdout}{done.stderr}"
+        assert done.returncode == 0, f"{' '.join(step)} in web failed:\n{done.stdout}{done.stderr}"
     return dist
 
 

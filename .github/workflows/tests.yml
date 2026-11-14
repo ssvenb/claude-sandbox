@@ -19,9 +19,9 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: web/ui/package-lock.json
+          cache-dependency-path: web/package-lock.json
       # The installer itself: the uv environment with the test tools, Playwright's Chromium, and
-      # the web UI's pages (web/ui/dist), which src/server/server.py serves.
+      # the web UI's pages (web/dist), which src/server/server.py serves.
       - run: ./install.sh --yes --dev --no-launchers
       - run: uv run playwright install-deps chromium  # tests/test_web_ui.py
       - run: uv run pytest -q -rs tests  # -rs: say why a test was skipped (no browser, no node)

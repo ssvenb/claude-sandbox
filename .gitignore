@@ -5,7 +5,7 @@ __pycache__/
 claude-agent.private-key.pem
 # SSH keys for the ssh-credentials plugin: host-only, like every other credential here.
 plugins/ssh-credentials/sandbox-key*
-# The web UI: its dependencies and what `npm run build` makes of it (web/ui).
+# The web UI: its dependencies and what `npm run build` makes of it (web).
 node_modules/
-web/ui/dist/
+web/dist/
 .venv/

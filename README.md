@@ -132,9 +132,9 @@ mounts it from the host (both on by default); without them a resumed run starts 
 on the old branch.
 
 The server needs only `python3` on the host (and `gh` for the PR list). The pages are one
-[React](https://react.dev) app in TypeScript, [web/ui](web/ui), built with [Vite](https://vite.dev)
-(Node 20 or later, with npm) into `web/ui/dist`, which the server hands out: `./install.sh` builds
-it, as does `npm ci && npm run build` in `web/ui`; until it is built the pages answer 503 and say
+[React](https://react.dev) app in TypeScript, [web](web), built with [Vite](https://vite.dev)
+(Node 20 or later, with npm) into `web/dist`, which the server hands out: `./install.sh` builds
+it, as does `npm ci && npm run build` in `web`; until it is built the pages answer 503 and say
 so. The app picks its page by the address — `/` the dashboard, `/chat#<id>` a session's
 conversation, `/session#<id>` a terminal — and is grouped into `src/pages` (the three), `src/components`
 (by feature: `dashboard`, `chat`, `settings`, `terminal`, and `common` for what they share),
@@ -144,7 +144,7 @@ tabs, diffs) and `src/styles`. A session's page loads its own part only where th
 chat its markdown ([react-markdown](https://github.com/remarkjs/react-markdown), never as HTML) and
 diffs ([jsdiff](https://github.com/kpdecker/jsdiff)), the terminal [xterm.js](https://xtermjs.org),
 all bundled; only the fonts come from a CDN. To work on it, run the server and `npm run dev` in
-`web/ui`, which serves the pages with hot reload and passes `/api` on to the server on port 8787.
+`web`, which serves the pages with hot reload and passes `/api` on to the server on port 8787.
 It listens on loopback only and has no login — use an SSH tunnel to reach it from elsewhere.
 Sessions outlive the server: each runs under `src/server/holder.py`, which keeps its output while no server
 listens, and the next server takes them back from `~/.local/state/claude-sandbox/sessions`, running or
@@ -772,7 +772,7 @@ The core is grouped by role under `src/`; each folder has one reason to change.
 | [src/services/chat/](src/services/chat) | `chat-bridge.mjs`: the chat events the agents' `chat.mjs` speak and the web UI draws |
 | [src/shared/](src/shared) | `peer_owner.py`: who is on the other end of a socket, for root-side helpers |
 | [src/server/](src/server) | **the web UI's server** over `run.sh`: `server.py` (sessions, PRs and issues, a tunnel to `code serve-web`, the pages), `holder.py` (what keeps a session running through a restart of the server), `serve.sh` (starts it in the uv environment) |
-| [web/](web) | the web UI's pages, built from `ui/` — a React app (Vite, TypeScript): the dashboard, a session's chat, a terminal (`src/pages`), their components by feature (`src/components`), `src/hooks`, `src/api`, `src/lib`, `src/styles` |
+| [web/](web) | the web UI's pages — a React app (Vite, TypeScript): the dashboard, a session's chat, a terminal (`src/pages`), their components by feature (`src/components`), `src/hooks`, `src/api`, `src/lib`, `src/styles` |
 | [agents/](agents) | the agents themselves |
 | [plugins/](plugins) | the plugins themselves |
 | [tests/](tests) | pytest suite (`uv run pytest`); `tests/e2e` boots the built image |
@@ -785,7 +785,7 @@ piece by piece, to keep the code that has to be maintained here small:
 
 | Hand-written code | Verdict |
 |---|---|
-| Markdown rendering, terminal loading, component plumbing in the web UI | **replaced** by npm packages (React, `react-markdown`, `@xterm/xterm`), bundled by Vite — see [web/ui/package.json](web/ui/package.json) |
+| Markdown rendering, terminal loading, component plumbing in the web UI | **replaced** by npm packages (React, `react-markdown`, `@xterm/xterm`), bundled by Vite — see [web/package.json](web/package.json) |
 | `src/server/server.py`'s HTTP layer → FastAPI/Starlette | kept: the server tunnels VS Code (`code serve-web`) over raw sockets, upgrade requests included, which ASGI does not expose; sessions are ptys and pipes read by threads. A framework would replace the ~80 lines of routing and leave the rest |
 | `.env` scanning (`config.py`) → `python-dotenv` | kept: 30 lines, and its rules must match `env_scan_into`, the bash twin plugins use (a test holds the two together); `python-dotenv` reads quotes and comments differently and has no "commented defaults" mode |
 | GitHub App JWT (`mint-gh-token.py`) → `PyJWT` + `cryptography` | kept: ten lines around `openssl dgst`, against a compiled dependency in every environment |

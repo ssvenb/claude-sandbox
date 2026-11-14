@@ -70,16 +70,16 @@ QUIET = 3  # seconds without output after which an agent that reports nothing co
 # of output means it was interrupted before it could say it stopped (Esc fires no Stop hook).
 STALE = 30
 
-# The pages are one React app (web/ui), built by `npm run build` into web/ui/dist: its index.html
+# The pages are one React app (web), built by `npm run build` into web/dist: its index.html
 # for each of them (it picks the page by its path), and the scripts and styles that loads, under
 # their own paths. Read on every request, so a new build shows on reload.
-DIST = ROOT / "web/ui/dist"
+DIST = ROOT / "web/dist"
 SERVICE = "claude-sandbox-web.service"  # install.sh registers it
 PAGES = ("/", "/session", "/chat")
 STATIC = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".map": "application/json",
           ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon",
           ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".txt": "text/plain; charset=utf-8"}
-UNBUILT = ("The web UI is not built yet: run ./install.sh, or `npm ci && npm run build` in web/ui, "
+UNBUILT = ("The web UI is not built yet: run ./install.sh, or `npm ci && npm run build` in web, "
            "and reload this page.\n")
 
 sessions = {}
@@ -88,7 +88,7 @@ lock = threading.RLock()  # guards `sessions` and every session's buf/listeners/
 
 
 def static(path):
-    """The built file under web/ui/dist that a URL path names, or None: only what a build puts
+    """The built file under web/dist that a URL path names, or None: only what a build puts
     there for a page to load (scripts, styles, fonts, pictures; not index.html, which is the
     pages'), and nothing outside it (no `..`, no symlink out of it)."""
     if not path.startswith("/") or "\\" in path or "\0" in path:

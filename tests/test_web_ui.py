@@ -1,7 +1,7 @@
-"""The web UI (web/ui: the dashboard, a session's chat, the terminal) in a real browser: the
+"""The web UI (web: the dashboard, a session's chat, the terminal) in a real browser: the
 dashboard, a session's chat from its first moment, tabs, closing, favicons, CI marks, day and night.
 
-The server runs from a copy of src/server with the built pages (web/ui/dist, built first when
+The server runs from a copy of src/server with the built pages (web/dist, built first when
 it is missing or older than its sources: see test_web.build_ui), next to a stand-in run.sh
 (tests/stubs/chat_run.py):
 `--web` answers with the JSON below (what the plugins would describe, tested on their own in
@@ -54,9 +54,9 @@ def browser():
 @pytest.fixture
 def board(tmp_path, browser, ui_dist):
     sandbox = tmp_path / "sandbox"
-    (sandbox / "web/ui").mkdir(parents=True)  # the server and the built pages: not the app's sources or node_modules
+    (sandbox / "web").mkdir(parents=True)  # the server and the built pages: not the app's sources or node_modules
     shutil.copytree(REPO / "src/server", sandbox / "src/server", ignore=shutil.ignore_patterns("__pycache__"))
-    shutil.copytree(ui_dist, sandbox / "web/ui/dist")
+    shutil.copytree(ui_dist, sandbox / "web/dist")
     shutil.copytree(REPO / "plugins", sandbox / "plugins")
     shutil.copytree(REPO / "agents", sandbox / "agents")
     (sandbox / "src/orchestrator").mkdir(parents=True)

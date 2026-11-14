@@ -6,6 +6,7 @@ import { getConfig } from '../api/sessions';
 import type { Session } from '../api/types';
 import { Loading } from '../components/common/Spinner';
 import { ThemeSwitch } from '../components/common/ThemeSwitch';
+import { SyncButton } from '../components/common/SyncButton';
 import { DashboardContext, type DashboardActions } from '../components/dashboard/DashboardContext';
 import { NewSession } from '../components/dashboard/NewSession';
 import { NoProjects } from '../components/dashboard/NoProjects';
@@ -42,6 +43,7 @@ export default function Dashboard() {
           <>
             <div className="top">
               {state.projects.length ? <NewSession projects={state.projects} /> : <div className="starter" />}
+              <SyncButton />
               <ThemeSwitch />
             </div>
             {state.projects.length ? (

@@ -149,6 +149,36 @@ if [ "$LAUNCHERS" = 1 ]; then
   case ":$PATH:" in *":$bin:"*) ;; *) warn "$bin is not on your PATH: add it (export PATH=\"\$HOME/.local/bin:\$PATH\") to use them." ;; esac
 fi
 
+if [ "$WEB" = 1 ] && have systemctl; then
+  step "Service (systemd)"
+  service=claude-sandbox-web.service
+  if systemctl cat "$service" >/dev/null 2>&1 || systemctl --user cat "$service" >/dev/null 2>&1; then
+    ok "$service (already registered)"
+  elif systemctl --user show-environment >/dev/null 2>&1; then
+    units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+    mkdir -p "$units"
+    # PATH as this shell has it: the server runs docker, uv, git and jq.
+    cat >"$units/$service" <<UNIT
+[Unit]
+Description=claude-sandbox web UI
+After=network-online.target
+
+[Service]
+ExecStart=$here/web/serve.sh
+Environment="PATH=$PATH"
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+UNIT
+    systemctl --user daemon-reload
+    systemctl --user enable --now "$service"
+    ok "$service (user service; loginctl enable-linger keeps it running while you are logged out)"
+  else
+    warn "no systemd user session: $service not registered."
+  fi
+fi
+
 step "Done"
 say "  In a repo you want an agent to work on:"
 say "    cp $here/.env.example .env      # pick AGENT, fill in its token and any plugin settings"

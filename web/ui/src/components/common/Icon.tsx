@@ -26,6 +26,7 @@ const ICONS = {
       </g>
     ),
   },
+  sync: { body: stroke('M16 10a6 6 0 0 1-10.6 3.9M4 10a6 6 0 0 1 10.6-3.9M15 2.5v3.8h-3.8M5 17.5v-3.8h3.8', 1.8) },
   send: { body: stroke('M10 16V4M4.5 9.5 10 4l5.5 5.5', 2.2) },
   back: { body: stroke('M11.5 4.5 6 10l5.5 5.5', 2.2) },
   sun: {

@@ -736,3 +736,17 @@ def test_a_resumed_chat_replays_what_was_said_before(chat):
     chat.until(s, lambda s: s.exit is not None)
     again = chat("resume", "0a1b2c")  # it takes the ended one's place, and its name: a run stays one session
     assert list(web.sessions) == [again.id] and again.title == "Fix the board"
+
+
+def test_sync_pulls_installs_and_restarts_only_under_systemd(monkeypatch):
+    ran, spawned = [], []
+    monkeypatch.setattr(web.subprocess, "run", lambda step, **_: ran.append(step) or subprocess.CompletedProcess(step, 0, "", ""))
+    monkeypatch.setattr(web.subprocess, "Popen", lambda cmd, **_: spawned.append(cmd))
+    monkeypatch.delenv("INVOCATION_ID", raising=False)
+    assert web.sync() == {"restarting": False} and not spawned
+    assert ran[0][-4:] == ["pull", "--ff-only", "origin", "main"] and ran[1][0].endswith("install.sh")
+    monkeypatch.setenv("INVOCATION_ID", "x")
+    assert web.sync() == {"restarting": True} and web.SERVICE in spawned[0][-1]
+    monkeypatch.setattr(web.subprocess, "run", lambda step, **_: subprocess.CompletedProcess(step, 1, "", "not a fast-forward"))
+    with pytest.raises(ValueError, match="not a fast-forward"):
+        web.sync()

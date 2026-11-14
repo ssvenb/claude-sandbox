@@ -194,6 +194,19 @@ def test_the_dashboard_is_a_chat_bar_over_running_sessions_and_projects(board):
     assert bar["y"] + bar["height"] <= left["y"] and left["x"] + left["width"] <= right["x"]
 
 
+def test_with_nothing_running_each_project_sits_right_under_the_one_before(board):
+    board.set_viewport_size({"width": 1280, "height": 800})
+    board.evaluate("""() => {
+        const {state, plugins} = dashboard, p = state.projects[0];
+        plugins[p].lists[0].items = Array.from({length: 12}, (_, i) => ({ref: '#' + i, title: 'Issue ' + i, url: location.origin + '/i/' + i}));
+        state.projects = [p, ...['/b', '/c', '/d'].map(q => p + q)];
+        dashboard.render();
+    }""")
+    boxes = [board.locator(".project").nth(k).bounding_box() for k in range(4)]
+    stacked = [(a, b) for a, b in zip(boxes, boxes[1:]) if a["x"] == b["x"]]
+    assert stacked and all(abs(b["y"] - (a["y"] + a["height"]) - 12) < 1 for a, b in stacked)  # no row's gap under a short one
+
+
 def test_each_side_of_the_dashboard_scrolls_on_its_own_under_a_chat_bar_that_stays(board):
     board.set_viewport_size({"width": 1280, "height": 500})
     board.resume()

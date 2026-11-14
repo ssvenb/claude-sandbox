@@ -25,11 +25,12 @@
   /* A side clips what it scrolls: the room around it keeps a focus ring and a window's edge whole. */
   .board > * { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 8px 6px 48px; }
   h2.band { margin: 0 0 12px; font-size: 15px; font-weight: 600; color: var(--muted); letter-spacing: 0; }
-  /* With nothing running there is no left side: the projects take the width, panel beside panel. */
+  /* With nothing running there is no left side: the projects take the width, in columns. */
   .board.quiet { grid-template-columns: minmax(0, 1fr); }
-  .board.quiet .projects { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; align-content: start; align-items: start; }
-  .board.quiet .projects h2.band { grid-column: 1 / -1; margin: 0; }
-  .board.quiet .project + .project { margin-top: 0; }
+  /* Columns, not a grid: each panel sits right under the one before, with no row to line up with. */
+  .board.quiet .projects { columns: 360px; column-gap: 12px; }
+  .board.quiet .projects h2.band { column-span: all; }
+  .board.quiet .project { break-inside: avoid; margin: 0 0 12px; }
   /* The left: under each project's name, a window per running session, lit in the colour of what
      its agent is doing. */
   .group + .group { margin-top: 22px; }

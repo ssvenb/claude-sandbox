@@ -69,6 +69,7 @@ STALE = 30
 # for each of them (it picks the page by its path), and the scripts and styles that loads, under
 # their own paths. Read on every request, so a new build shows on reload.
 DIST = HERE / "ui/dist"
+SERVICE = "claude-sandbox-web.service"  # install.sh registers it
 PAGES = ("/", "/session", "/chat")
 STATIC = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".map": "application/json",
           ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon",
@@ -794,6 +795,21 @@ def drop(s):
         s.close()
 
 
+def sync():
+    """Pulls main into this checkout and runs install.sh; then, under systemd, restarts this server."""
+    root = HERE.parent
+    for step in (["git", "-C", str(root), "pull", "--ff-only", "origin", "main"], [str(root / "install.sh"), "--yes"]):
+        done = subprocess.run(step, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        if done.returncode:
+            raise ValueError(f"{' '.join(step[:4])} failed:\n" + (done.stderr or done.stdout)[-2000:])
+    if not os.environ.get("INVOCATION_ID"):  # systemd sets it in the services it starts
+        return {"restarting": False}
+    # Detached and a moment late, so this reply gets out before the restart takes the server down.
+    subprocess.Popen(["sh", "-c", f"sleep 1; systemctl --user restart {SERVICE} || systemctl restart {SERVICE}"],
+                     start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return {"restarting": True}
+
+
 def start(project, kind, run_id, task=None, ui=None, images=None):
     """A new session, or the live one it would double. An agent's session is a chat unless
     `ui` is "terminal" (its own TUI in a pty, as `run.sh` in your terminal); a shell is a terminal."""
@@ -999,6 +1015,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("no such session, or it has no checkout on this machine")
                 vscode()
                 self.reply(200, {"folder": folder})
+            elif url.path == "/api/sync":
+                self.reply(200, sync())
             elif m := re.fullmatch(r"/api/sessions/(\w+)/(prompt|interrupt|answer|model|effort|task)", url.path):
                 s = self.session(m[1])
                 if s is None:

@@ -27,12 +27,13 @@ interface Props {
 /** A running session as a window: what it was asked and what it is at right now. How it is
  *  doing is its colour (its class), spelled out only for a screen reader. */
 export function SessionWindow({ session: s, items }: Props) {
-  const { show, stop } = useDashboardActions();
+  const { show, stop, remove } = useDashboardActions();
   return (
     <article className={'window ' + s.status} aria-label={`${titled(s)}: ${s.status ? SAYS[s.status] : ''}`}>
       <div className="name">
         <button className="open" onClick={() => show(s)} title={s.title || ''}>{titled(s)}</button>
         <button className="icon stop" onClick={() => stop(s)} aria-label="Stop session" title="Stop"><Icon name="stop" /></button>
+        <button className="icon" onClick={() => remove(s)} aria-label="Delete session" title="Delete"><Icon name="trash" /></button>
       </div>
       <Doing session={s} />
       <div className="chips"><SessionChips session={s} items={items} /></div>

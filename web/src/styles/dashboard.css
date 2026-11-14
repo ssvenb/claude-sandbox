@@ -51,8 +51,9 @@
   .window.idle { --top: var(--ok); }
   .window.question { border-color: var(--ask); }
   /* How it is doing is the colour along its top, and nothing else: its name, and the button that stops it. */
-  .window .name { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
-  .window .name .stop { margin: -2px 0 0 auto; position: relative; z-index: 1; }  /* above the window's own click */
+  .window .name { display: flex; align-items: flex-start; gap: 4px; min-width: 0; }
+  .window .name .icon { margin-top: -2px; position: relative; z-index: 1; }  /* above the window's own click */
+  .window .name .stop { margin-left: auto; }
   .window button.open { all: unset; cursor: pointer; flex: 1; min-width: 0; font-size: 17px; font-weight: 650; letter-spacing: -.012em; line-height: 1.25;
                         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
   .window button.open::after { content: ""; position: absolute; inset: 0; border-radius: 14px; }  /* the whole window opens it */

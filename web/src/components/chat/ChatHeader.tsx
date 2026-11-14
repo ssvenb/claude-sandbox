@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { AgentInfo } from '../../api/events';
 import type { Item, Session, SessionStatus } from '../../api/types';
 import { projectName, SHORT, titled } from '../../lib/session';
@@ -25,6 +26,8 @@ interface Props {
 
 /** Which session this is and how it is doing, with the buttons that end it. */
 export function ChatHeader({ session, gone, info, state, items, onStop, onDelete, onCode }: Props) {
+  // On a phone the chips and the theme switch drop down in a row of their own, on request.
+  const [more, setMore] = useState(false);
   if (gone) {
     return (
       <header id="bar">
@@ -36,13 +39,16 @@ export function ChatHeader({ session, gone, info, state, items, onStop, onDelete
   if (!session) return <header id="bar" />;
   const agent = info.agent && (info.model ? `${info.agent}, ${info.model}` : info.agent);
   return (
-    <header id="bar">
+    <header id="bar" className={more ? 'open' : ''}>
       <HomeLink />
       <div className="who">
         <b title={session.title || ''}>{titled(session)}</b>
         <span>{[projectName(session.project), session.run_id, agent].filter(Boolean).join(' / ')}</span>
       </div>
-      <div className="chips">{items.map((i, k) => <Chip key={k} item={i} />)}</div>
+      <div className="extra">
+        <div className="chips">{items.map((i, k) => <Chip key={k} item={i} />)}</div>
+        <ThemeSwitch />
+      </div>
       <span className={'state ' + (state ?? 'ended')}>
         <span className={'lamp ' + (state ?? '')} />
         {state ? SHORT[state] : 'Ended'}
@@ -54,7 +60,7 @@ export function ChatHeader({ session, gone, info, state, items, onStop, onDelete
         <button className="icon stop" onClick={onStop} aria-label="Stop session" title="Stop"><Icon name="stop" /></button>
       )}
       <button className="icon" onClick={onDelete} aria-label="Delete session" title="Delete"><Icon name="trash" /></button>
-      <ThemeSwitch />
+      <button className="icon more" onClick={() => setMore(!more)} aria-expanded={more} aria-label="More" title="More"><Icon name="down" /></button>
     </header>
   );
 }

@@ -359,8 +359,10 @@ def test_a_running_session_is_a_window_with_its_stop_button_top_right(board):
         board.evaluate("(() => { const p = document.createElement('p'); p.style.color = 'var(--ok)'; document.body.append(p);"
                        " const c = getComputedStyle(p).color; p.remove(); return c; })()"))
     assert board.get_attribute(".window", "aria-label").endswith(": idle, waiting for its next task")  # said to a screen reader
-    stop, card = board.locator(".window button[aria-label='Stop session']").bounding_box(), board.locator(".window").bounding_box()
-    assert stop["y"] - card["y"] < 20 and card["x"] + card["width"] - stop["x"] - stop["width"] < 20
+    # Stop, then delete, in the window's top right corner.
+    stop, delete, card = (board.locator(q).bounding_box() for q in
+                          (".window button[aria-label='Stop session']", ".window button[aria-label='Delete session']", ".window"))
+    assert stop["y"] - card["y"] < 20 and stop["x"] < delete["x"] and card["x"] + card["width"] - delete["x"] - delete["width"] < 20
     board.click(".window button[aria-label='Stop session']")
     board.wait_for_selector(".window", state="detached")  # stopped, not opened
 

@@ -56,7 +56,7 @@ button.primary:hover:not(:disabled) { filter: brightness(1.07); }
    button's colour. */
 button.glyph { width: 34px; height: 34px; padding: 0; display: inline-grid; place-items: center; flex: none; }
 button.glyph svg { width: 18px; height: 18px; }
-button.icon { border-color: transparent; color: var(--muted); padding: 4px 7px; display: inline-flex;
+button.icon { color: var(--muted); padding: 6px; display: inline-flex;
               align-items: center; gap: 6px; flex: none; }
 button.icon:hover { color: var(--ink); background: var(--sunk); }
 button.icon svg { width: 16px; height: 16px; display: block; }
@@ -119,7 +119,7 @@ a.chip.done { border-color: color-mix(in srgb, var(--ask) 45%, transparent); }
 [hidden], .hidden { display: none !important; }
 /* Fingers need more to aim at than a pointer does. */
 @media (pointer: coarse) {
-  button.icon { padding: 9px 10px; }
+  button.icon { padding: 9px; }
   button.icon svg { width: 18px; height: 18px; }
   button.glyph { width: 40px; height: 40px; }
   .theme button { padding: 7px 9px; }

@@ -1,5 +1,5 @@
-"""Published ports: src/publish-ports.py in the container, src/portd.py (the central proxy) and
-src/lib/host-ports.sh (its lifecycle) on the host."""
+"""Published ports: src/services/ports/publish-ports.py in the container, src/services/ports/portd.py (the central proxy) and
+src/services/ports/lease.py (its lifecycle) on the host."""
 import json
 import os
 import socket
@@ -10,10 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from conftest import REPO, load
+from conftest import REPO, orchestrator, load
+from services.ports.lease import Ports, items_file
 
-publish = load("src/publish-ports.py")
-portd = load("src/portd.py")
+publish = load("src/services/ports/publish-ports.py")
+portd = load("src/services/ports/portd.py")
 
 
 def echo_server(sock: socket.socket, prefix: bytes = b"") -> socket.socket:
@@ -191,39 +192,53 @@ def test_links_name_the_host_the_way_the_page_can_reach_it():
 
 # --- its lifecycle on the host ----------------------------------------------------------------
 
-def test_a_run_joins_the_central_proxy_and_the_last_one_out_stops_it(sb, short_tmp):
-    sb.env["TMPDIR"] = str(short_tmp)
-    run = sb.bash("PORTS='3000  5173'\nports_start\ncat \"$PORTS_DIR/portd.pid\" >\"$PORTS_DIR/../pid\"\n"
-                  "for _ in $(seq 50); do [ -s \"$PORTS_DIR/ports.json\" ] && break; sleep 0.1; done\n"
-                  "ls \"$PORTS_DIR/runs\"").ok()
+def ports_env(tmp, **env):
+    return {"TMPDIR": str(tmp), **env}
+
+
+def test_a_run_joins_the_central_proxy_and_the_last_one_out_stops_it(short_tmp, capsys):
+    lease = Ports(ports_env(short_tmp, PORTS="3000  5173"), "abc123")
+    args = lease.start()
     base = short_tmp / f"sandbox-ports-{os.getuid()}-127.0.0.1"
-    assert f"{base}/runs/abc123:/run/ports/sockets" in run.mounts
-    assert run.env["PORTS_BIND"] == "127.0.0.1"
-    assert run.env["PORTS"] == "3000 5173"
-    assert "--add-host=host.docker.internal:host-gateway" in run.args
-    assert run.out.split()[-1] == "abc123"
-    # The snippet's shell ran its exit hook: the run's directory, and the proxy, are gone.
+    assert args == ["--add-host=host.docker.internal:host-gateway", "-v", f"{base}/runs/abc123:/run/ports/sockets",
+                    "-e", "PORTS_BIND=127.0.0.1", "-e", "PORTS=3000 5173"]
+    assert "🔌 Ports: 3000, 5173 published on 127.0.0.1" in capsys.readouterr().out
+    assert (base / f"users/{os.getpid()}").read_text() == "abc123\n"
+    assert os.listdir(base / "runs") == ["abc123"]
+    pid = int((base / "portd.pid").read_text())
+    for _ in range(50):
+        if (base / "ports.json").exists():
+            break
+        time.sleep(0.1)
+    lease.release()
+    # The run's directory, and the proxy, are gone with the last run out.
     assert not (base / "runs/abc123").exists() and not (base / "portd.pid").exists()
-    pid = int((short_tmp / "pid").read_text())
     for _ in range(50):
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
             break
+        try:  # our child: reap it, or it lingers as a zombie that kill(0) still finds
+            os.waitpid(pid, os.WNOHANG)
+        except ChildProcessError:
+            pass
         time.sleep(0.1)
     else:
         raise AssertionError("the proxy outlived its last user")
 
 
-def test_a_second_run_shares_the_proxy_and_keeps_it_when_the_first_leaves(sb, short_tmp):
-    sb.env["TMPDIR"] = str(short_tmp)
+def test_a_second_run_shares_the_proxy_and_keeps_it_when_the_first_leaves(short_tmp):
     base = short_tmp / f"sandbox-ports-{os.getuid()}-127.0.0.1"
     other = subprocess.Popen(["sleep", "30"])
     try:
         base.joinpath("users").mkdir(parents=True)
         base.joinpath("runs/0a0a0a").mkdir(parents=True)
+        base.joinpath("runs/dead00").mkdir(parents=True)  # its run.sh is gone: pruned on the way in
         (base / f"users/{other.pid}").write_text("0a0a0a\n")
-        sb.bash("ports_start\nports_release\ntrap - EXIT", PORTS="3000").ok()
+        lease = Ports(ports_env(short_tmp, PORTS="3000"), "abc123")
+        lease.start()
+        assert not (base / "runs/dead00").exists()
+        lease.release()
         assert (base / "runs/0a0a0a").is_dir() and (base / "portd.pid").exists()  # still in use
         assert not (base / "runs/abc123").exists()
     finally:
@@ -237,21 +252,29 @@ def test_a_second_run_shares_the_proxy_and_keeps_it_when_the_first_leaves(sb, sh
 @pytest.mark.parametrize("env, message", [({"PORTS_BIND": "localhost; rm"}, "PORTS_BIND must be an IP"),
                                           ({"PORTS": "3000,5173"}, "PORTS must list port numbers"),
                                           ({"PORTS": "70000"}, "PORTS must list port numbers")])
-def test_settings_that_are_refused(sb, short_tmp, env, message):
-    sb.bash("ports_start", TMPDIR=short_tmp, **env).dies(message)
+def test_settings_that_are_refused(short_tmp, env, message):
+    with pytest.raises(orchestrator.Die, match=message):
+        Ports(ports_env(short_tmp, **env), "abc123").start()
 
 
-def test_without_configured_ports_a_run_opens_none(sb, short_tmp):
-    run = sb.bash("ports_start", TMPDIR=short_tmp).ok()
-    assert "none published" in run.out
-    assert not any("/run/ports" in m for m in run.mounts) and "PORTS" not in run.env
-    assert "--add-host=host.docker.internal:host-gateway" in run.args  # the host is still reachable
+def test_without_configured_ports_a_run_opens_none(short_tmp, capsys):
+    lease = Ports(ports_env(short_tmp), "abc123")
+    assert lease.start() == ["--add-host=host.docker.internal:host-gateway"]  # the host is still reachable
+    assert "none published" in capsys.readouterr().out
+    lease.release()
     assert not (short_tmp / f"sandbox-ports-{os.getuid()}-127.0.0.1").exists()  # no proxy
 
 
-def test_web_lists_the_proxys_items_as_live(sb, short_tmp):
-    run = sb.bash("ports_web\necho \"$WEB_JSON\"", TMPDIR=short_tmp, PORTS_BIND="0.0.0.0").ok()
-    assert json.loads(run.out)["live"] == [f"{short_tmp}/sandbox-ports-{os.getuid()}-0.0.0.0/items.json"]
+def test_a_directory_that_is_not_yours_is_refused(short_tmp):
+    (short_tmp / "elsewhere").mkdir()
+    (short_tmp / f"sandbox-ports-{os.getuid()}-127.0.0.1").symlink_to(short_tmp / "elsewhere")
+    with pytest.raises(orchestrator.Die, match="is not yours"):
+        Ports(ports_env(short_tmp, PORTS="3000"), "abc123").start()
+
+
+def test_web_lists_the_proxys_items_as_live(short_tmp):
+    assert items_file(ports_env(short_tmp, PORTS_BIND="0.0.0.0")) == \
+        f"{short_tmp}/sandbox-ports-{os.getuid()}-0.0.0.0/items.json"
 
 
 # --- dev-server -------------------------------------------------------------------------------

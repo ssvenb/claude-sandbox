@@ -3,8 +3,10 @@ import glob
 import json
 import os
 import re
+import signal
 import socket
 import subprocess
+import time
 from datetime import datetime, timezone
 
 import pytest
@@ -177,3 +179,74 @@ def test_a_chat_runs_without_a_terminal_behind_the_agents_bridge(sb, run_sh):
     assert "RESUME=1" in run
     run = calls(run_sh("--run-id", "0a1b2c", CLAUDE_CODE_OAUTH_TOKEN="t"), "run")[-1]
     assert run[:3] == ["run", "-it", "--rm"] and "AGENT_UI=chat" not in run
+
+
+def test_a_plugin_refusing_stops_the_run_before_docker(run_sh):
+    done = run_sh()  # no CLAUDE_CODE_OAUTH_TOKEN: the agent's host.sh dies
+    assert done.returncode == 1 and done.calls == []
+    assert "CLAUDE_CODE_OAUTH_TOKEN must be set" in done.stderr and "Traceback" not in done.stderr
+
+
+def test_what_a_host_stage_exports_reaches_docker(sb, run_sh):
+    """herdr's host.sh exports HERDR_AGENT for the docker client itself, as it did when host.sh was
+    sourced into run.sh."""
+    seen = sb.tmp / "herdr"
+    sb.stub("docker", f'[ "$1" != run ] || echo "${{HERDR_AGENT-unset}}" >"{seen}"\n')
+    assert run_sh(CLAUDE_CODE_OAUTH_TOKEN="t", HERDR_ENV="1").returncode == 0
+    assert seen.read_text() == "claude\n"
+
+
+def test_the_container_exit_status_is_the_runs(sb, run_sh):
+    sb.stub("docker", '[ "$1" != run ] || exit 3\n')
+    assert run_sh(CLAUDE_CODE_OAUTH_TOKEN="t").returncode == 3
+    sb.stub("docker", '[ "$1" != build ] || exit 5\n')
+    assert run_sh(CLAUDE_CODE_OAUTH_TOKEN="t").returncode == 5
+
+
+def test_a_hangup_cleans_up_and_leaves_the_docker_client_be(sb, run_sh, short_tmp):
+    """The web UI stops a session with a SIGHUP to its process group: the stage's exit hooks run
+    and the run leaves the port proxy, while `docker run` is left to the `docker rm` that follows."""
+    started = sb.tmp / "started"
+    sb.stub("docker", f'[ "$1" != run ] || {{ trap "" HUP; echo $$ >"{started}"; sleep 30; }}\n')
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    config = json.loads(json.dumps(BASE))  # upstream-proxy: a proxy on this machine, stopped by an exit hook
+    config["plugins"]["upstream-proxy"] = {"routes": [{"name": "api", "port": port, "upstream": "http://127.0.0.1:9"}]}
+    sb.config(config)
+    env = sb._env({"CLAUDE_CODE_OAUTH_TOKEN": "t", "PORTS": "3000", "TMPDIR": str(short_tmp)})
+    # Files, not pipes: the docker client, left running, would hold a pipe open past run.sh.
+    out, err = open(sb.tmp / "out", "w"), open(sb.tmp / "err", "w")
+    proc = subprocess.Popen([REPO / "run.sh", "--run-id", "0a1b2c", "--chat"], cwd=sb.cwd, env=env,
+                            stdin=subprocess.PIPE, stdout=out, stderr=err, start_new_session=True)
+    try:
+        for _ in range(300):
+            if started.exists() and started.read_text().strip():
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError((sb.tmp / "err").read_text())
+        base = f"{short_tmp}/sandbox-ports-{os.getuid()}-127.0.0.1"
+        [proxy_dir] = glob.glob(f"{short_tmp}/upstream-proxy-*")
+        assert os.listdir(f"{base}/runs") == ["0a1b2c"] and "proxy.pid" in os.listdir(proxy_dir)
+        os.killpg(proc.pid, signal.SIGHUP)
+        assert proc.wait(timeout=30) == 128 + signal.SIGHUP, (sb.tmp / "err").read_text()
+        assert os.listdir(f"{base}/runs") == []  # left the port proxy
+        assert os.listdir(proxy_dir) == ["lock"]  # the stage's exit hook stopped upstream-proxy's
+        os.kill(int(started.read_text()), 0)  # the docker client is still there
+    finally:
+        if started.exists() and started.read_text().strip():
+            try:
+                os.kill(int(started.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if proc.poll() is None:
+            os.killpg(proc.pid, signal.SIGKILL)
+        out.close()
+        err.close()
+
+
+def test_a_web_action_needs_its_plugin_enabled(run_sh):
+    done = run_sh("--web-action", "github-auth", "close-pr", "3")  # github-auth is off in BASE
+    assert done.returncode == 1 and done.stdout == ""
+    assert "Plugin 'github-auth' is not enabled for this project." in done.stderr

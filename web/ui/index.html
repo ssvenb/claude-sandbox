@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dashboard</title>
+<link id="icon" rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231b1d36'/%3E%3Crect x='6' y='6' width='9' height='9' rx='2' fill='%23f2b84b'/%3E%3Crect x='17' y='6' width='9' height='9' rx='2' fill='%233a3e6e'/%3E%3Crect x='6' y='17' width='9' height='9' rx='2' fill='%233a3e6e'/%3E%3Crect x='17' y='17' width='9' height='9' rx='2' fill='%23f2b84b'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&family=JetBrains+Mono:wght@400;600&display=swap">
+<script>
+// Before anything is painted (the app itself runs only once the page is parsed): the day or
+// night the reader pinned (the switch is ThemeSwitch), and which of the three pages this is,
+// for the styles: "/" the dashboard, "/chat" a session's chat, "/session" a terminal.
+(() => {
+  const root = document.documentElement;
+  let pinned = null;
+  try { pinned = localStorage.getItem('theme'); } catch {}
+  if (pinned === 'light' || pinned === 'dark') root.dataset.theme = pinned;
+  const page = {'/chat': 'chat', '/session': 'terminal'}[location.pathname] || 'dashboard';
+  root.dataset.page = page;
+  if (page !== 'dashboard') {  // a session's tab: its name and its lamp come with the session
+    document.title = 'Session';
+    document.getElementById('icon').removeAttribute('href');
+    document.querySelector('meta[name=viewport]').content += ', interactive-widget=resizes-content';
+  }
+})();
+</script>
+<script type="module" src="/src/main.tsx"></script>
+</head>
+<body>
+<div id="root"></div>
+</body>
+</html>

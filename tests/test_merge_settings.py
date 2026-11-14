@@ -1,11 +1,11 @@
-"""src/merge-settings.py: plugin policy fragments → one managed-settings file."""
+"""src/services/settings/merge-settings.py: plugin policy fragments → one managed-settings file."""
 import json
 import subprocess
 import sys
 
 from conftest import REPO
 
-MERGE = REPO / "src/merge-settings.py"
+MERGE = REPO / "src/services/settings/merge-settings.py"
 
 
 def merge(tmp_path, *docs):
@@ -37,7 +37,7 @@ def test_no_fragments_is_an_empty_policy(tmp_path):
 
 
 def test_base_plus_branch_guard_installs_the_hook():
-    out = subprocess.run([sys.executable, MERGE, REPO / "settings-base.json", REPO / "plugins/branch-guard/settings.json"],
+    out = subprocess.run([sys.executable, MERGE, REPO / "src/services/settings/settings-base.json", REPO / "plugins/branch-guard/settings.json"],
                          capture_output=True, text=True, check=True).stdout
     [entry] = json.loads(out)["hooks"]["PreToolUse"]
     assert entry["matcher"] == "Bash"

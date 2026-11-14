@@ -30,7 +30,7 @@ class Bridge:
             ["node", REPO / f"agents/{agent}/chat.mjs"], cwd=tmp / "work", text=True,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env={"PATH": os.environ["PATH"], "HOME": str(tmp), "RUN_ID": "0a1b2c",
-                 "SANDBOX_LIB": str(REPO / "src/lib"), "AGENT_SDK_DIR": str(REPO / "tests/stubs/sdk"),
+                 "SANDBOX_LIB": str(REPO / "src/services/chat"), "AGENT_SDK_DIR": str(REPO / "tests/stubs/sdk"),
                  "CLAUDE_BIN": "/opt/claude", "COPILOT_CLI_PATH": "/opt/copilot",
                  "FAKE_LOG": str(self.log), "FAKE_SCRIPT": str(tmp / "script"), **env})
         self.events = []

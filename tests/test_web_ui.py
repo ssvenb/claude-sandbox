@@ -1,7 +1,9 @@
-"""web/index.html, web/chat.html and web/session.html in a real browser: the dashboard, a session's
-chat from its first moment, tabs, closing, favicons, CI marks, day and night.
+"""The web UI (web/ui: the dashboard, a session's chat, the terminal) in a real browser: the
+dashboard, a session's chat from its first moment, tabs, closing, favicons, CI marks, day and night.
 
-The server and its pages run from a copy of web/, next to a stand-in run.sh (tests/stubs/chat_run.py):
+The server runs from a copy of web/server.py with the built pages (web/ui/dist, built first when
+it is missing or older than its sources: see test_web.build_ui), next to a stand-in run.sh
+(tests/stubs/chat_run.py):
 `--web` answers with the JSON below (what the plugins would describe, tested on their own in
 test_plugin_hosts.py), `--web-action` is logged to `actions`, and a session is a sandbox that boots
 and then an agent behind a chat bridge, whose turn depends on what it is asked ("ask", "long", …).
@@ -18,7 +20,7 @@ import urllib.request
 import pytest
 
 from conftest import REPO
-from test_web import FAKE_CODE, STUB
+from test_web import FAKE_CODE, STUB, ui_dist  # noqa: F401 (a fixture)
 
 sync_api = pytest.importorskip("playwright.sync_api")
 
@@ -48,13 +50,15 @@ def browser():
 
 
 @pytest.fixture
-def board(tmp_path, browser):
+def board(tmp_path, browser, ui_dist):
     sandbox = tmp_path / "sandbox"
-    shutil.copytree(REPO / "web", sandbox / "web", ignore=shutil.ignore_patterns("__pycache__"))
+    (sandbox / "web/ui").mkdir(parents=True)  # the server and the built pages: not the app's sources or node_modules
+    shutil.copy(REPO / "web/server.py", sandbox / "web")
+    shutil.copytree(ui_dist, sandbox / "web/ui/dist")
     shutil.copytree(REPO / "plugins", sandbox / "plugins")
     shutil.copytree(REPO / "agents", sandbox / "agents")
-    (sandbox / "src").mkdir()
-    shutil.copy(REPO / "src/kernel.json", sandbox / "src")
+    (sandbox / "src/orchestrator").mkdir(parents=True)
+    shutil.copy(REPO / "src/orchestrator/kernel.json", sandbox / "src/orchestrator")
     shutil.copy(REPO / ".claude-sandbox.example.json", sandbox)
     tool(sandbox / "run.sh", STUB.read_text())
     tool(tmp_path / "bin/docker", DOCKER)
@@ -99,6 +103,7 @@ def board(tmp_path, browser):
     page.on("dialog", dialog)
     page.goto(base)
     page.wait_for_selector("a .num")
+    page.evaluate("document.fonts.ready")  # the web fonts are in: nothing changes its width under a test that measures
     page.actions = sandbox / "actions"
     page.web_json = sandbox / "web.json"
 
@@ -194,11 +199,11 @@ def test_each_side_of_the_dashboard_scrolls_on_its_own_under_a_chat_bar_that_sta
     board.resume()
     # More on each side than fits: sessions on the left, a long list on the right.
     board.evaluate("""() => {
-        const s = state.sessions[0];
+        const {state, plugins} = dashboard, s = state.sessions[0];
         state.sessions = Array.from({length: 30}, (_, i) => ({...s, id: 'x' + i, run_id: null}));
         const said = plugins[state.projects[0]];
         said.lists[0].items = Array.from({length: 40}, (_, i) => ({ref: '#' + i, title: 'Issue ' + i, url: location.origin + '/i/' + i}));
-        render();
+        dashboard.render();
     }""")
     box = lambda sel: board.locator(sel).bounding_box()
     bar = box(".starter")
@@ -226,8 +231,8 @@ def test_a_list_with_nothing_on_it_is_not_shown(board):
     board.wait_for_selector(".project h4:has-text('Pull requests')")
     assert [" ".join(h.inner_text().split()) for h in board.query_selector_all(".project h4")] == ["Issues 1", "Pull requests 1"]
     # The last issue was closed, and the run's pull request merged.
-    board.evaluate("() => { const said = plugins[state.projects[0]]; said.lists[0].items = [];"
-                   " said.run_items = said.run_items.filter(i => i.ref !== '#3'); render(); }")
+    board.evaluate("() => { const said = dashboard.plugins[dashboard.state.projects[0]]; said.lists[0].items = [];"
+                   " said.run_items = said.run_items.filter(i => i.ref !== '#3'); dashboard.render(); }")
     assert board.query_selector(".project h4") is None and "None" not in board.inner_text(".project")
     assert board.inner_text(".project .head h3").startswith("proj")  # the project stays, with its buttons
 
@@ -520,15 +525,16 @@ def test_the_pages_follow_the_browsers_day_or_night_unless_one_is_pinned(board):
     assert paper(tab) == "rgb(15, 17, 35)"
     term = opens_tab(board, lambda: board.click("button[aria-label='Terminal']"))
     term.emulate_media(color_scheme="light")
-    term.wait_for_function("term.options.theme.background === '#fbfbfe'")  # and so does the terminal
+    # and so does the terminal (which comes with xterm.js, loaded after the page itself)
+    term.wait_for_function("window.term && term.options.theme.background === '#fbfbfe'")
     term.emulate_media(color_scheme="dark")
     term.wait_for_function("term.options.theme.background === '#0f1123'")
 
 
 def test_one_terminal_per_project_on_this_machine(board):
     term = opens_tab(board, lambda: board.click("button[aria-label='Terminal']"))
-    term.wait_for_selector("text=terminal")
-    assert "<path" in icon(term)
+    term.wait_for_selector("header .what:has-text('terminal')")
+    term.wait_for_function("decodeURIComponent(document.querySelector('link[rel=icon]').href).includes('<path')")
     term.click(".xterm")
     term.keyboard.type("echo $(basename $PWD)-$((40+2))\n")
     term.wait_for_selector("text=proj-42")  # in the project's directory

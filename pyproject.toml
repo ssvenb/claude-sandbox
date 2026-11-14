@@ -1,0 +1,21 @@
+[project]
+name = "claude-sandbox"
+version = "0.1.0"
+description = "A Docker sandbox for running CLI coding agents autonomously, with a web UI."
+readme = "README.md"
+requires-python = ">=3.9"
+# The host side (src/orchestrator, src/services, web/server.py) is standard library only, on
+# purpose: see "Dependencies" in the README for what was weighed and left out.
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "playwright>=1.45",  # tests/test_web_ui.py; then `uv run playwright install chromium`
+]
+
+[tool.uv]
+package = false  # an application run from its checkout (run.sh, web/server.py), not a library
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

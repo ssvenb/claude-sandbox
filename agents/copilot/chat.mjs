@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Chat bridge (runs as 'node', started by launch.sh when the session is a web chat): Copilot CLI
 // through the GitHub Copilot SDK instead of its TUI, speaking the sandbox's chat events on stdio
-// (src/lib/chat-bridge.mjs). The SDK drives the same `copilot` runtime the terminal would, over
+// (src/services/chat/chat-bridge.mjs). The SDK drives the same `copilot` runtime the terminal would, over
 // JSON-RPC, with its sessions, tools, skills and slash commands; only the screen is ours.
 import { execFileSync } from 'node:child_process';
 

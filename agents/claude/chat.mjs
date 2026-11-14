@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Chat bridge (runs as 'node', started by launch.sh when the session is a web chat): Claude Code
 // through the Claude Agent SDK instead of its TUI, speaking the sandbox's chat events on stdio
-// (src/lib/chat-bridge.mjs). The SDK drives the same `claude` binary the terminal would, with the
+// (src/services/chat/chat-bridge.mjs). The SDK drives the same `claude` binary the terminal would, with the
 // same settings, hooks, MCP servers, skills and slash commands; only the screen is ours.
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';

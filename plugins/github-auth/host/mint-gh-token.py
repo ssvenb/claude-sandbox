@@ -3,7 +3,7 @@
 
 Runs on the HOST: reads the App key from $GH_PRIVATE_KEY_FILE, which never enters the
 container. Installation tokens are hard-capped at 1h by GitHub, so run.sh's credential
-refresher (src/lib/host-credentials.sh) calls this at startup and again every 40 minutes.
+refresher (src/services/credentials/credentials.sh) calls this at startup and again every 40 minutes.
 """
 import base64
 import json

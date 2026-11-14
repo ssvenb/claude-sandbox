@@ -161,15 +161,20 @@ class Session:
     def _attach(self, start, tries=100):
         """Talks to its holder from here on: output from byte `start` on (negative: the last bytes)."""
         sock = socket.socket(socket.AF_UNIX)
-        for i in range(tries):
-            try:
-                sock.connect(str(self.dir / "sock"))
-                break
-            except (FileNotFoundError, ConnectionRefusedError):
-                if i == tries - 1:
-                    sock.close()
-                    raise
-                time.sleep(0.05)
+        # A socket's path is at most 108 bytes: a longer one is reached through its folder's descriptor.
+        folder = os.open(self.dir, os.O_PATH)
+        try:
+            for i in range(tries):
+                try:
+                    sock.connect(f"/proc/self/fd/{folder}/sock")
+                    break
+                except (FileNotFoundError, ConnectionRefusedError):
+                    if i == tries - 1:
+                        sock.close()
+                        raise
+                    time.sleep(0.05)
+        finally:
+            os.close(folder)
         self.sock, self.sending = sock, threading.Lock()
         self.pid = int((self.dir / "pid").read_text())
         self._ctl({"from": start})

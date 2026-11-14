@@ -57,15 +57,14 @@ def ui_dist():
 
 
 @pytest.fixture
-def ui(tmp_path, ui_dist, state):
+def ui(tmp_path, ui_dist):
     project = tmp_path / "proj"
     project.mkdir()
     listing = tmp_path / "projects"
     listing.write_text(f"# comment\n\n{project}\n")
     proc = subprocess.Popen([REPO / "web/server.py", "--port", "0", "--projects", listing,
                              ], stdout=subprocess.PIPE, text=True,
-                            env={"PATH": f"{tmp_path}/bin:/usr/bin:/bin", "SHELL": "/bin/sh", "HOME": str(tmp_path),
-                                 "XDG_STATE_HOME": str(state)})  # short enough for a socket's path
+                            env={"PATH": f"{tmp_path}/bin:/usr/bin:/bin", "SHELL": "/bin/sh", "HOME": str(tmp_path)})
     base = proc.stdout.readline().split()[1]
 
     def call(path, body=None, **headers):
@@ -79,7 +78,7 @@ def ui(tmp_path, ui_dist, state):
     for s in json.load(call("/api/state"))["sessions"]:  # they would outlive the server
         call(f"/api/sessions/{s['id']}/delete", b"")
     for _ in range(100):  # each one's folder goes once it has ended
-        if not any(state.glob("*/*/*")):
+        if not any(tmp_path.glob(".local/state/claude-sandbox/sessions/*")):
             break
         time.sleep(0.05)
     proc.terminate()

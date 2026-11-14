@@ -73,7 +73,8 @@ def main():
         return min(n, total), log.read()
 
     server = socket.socket(socket.AF_UNIX)
-    server.bind(str(folder / "sock"))
+    os.chdir(folder)  # a socket's path is at most 108 bytes: bound here by its name alone
+    server.bind("sock")
     server.listen()
     clients = {}  # socket → [what it sent that is not a whole line yet, attached?]
     code = None

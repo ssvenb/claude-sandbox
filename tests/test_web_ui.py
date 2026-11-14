@@ -387,6 +387,8 @@ def test_a_session_has_one_tab_with_a_lamp_in_the_colour_of_what_its_agent_does(
         tab.click(".over button:has-text('Resume')")
     tab.wait_for_selector("header .state.idle")
     assert tab.url.endswith("#" + [s for s in state(board) if s["exit"] is None][0]["id"])
+    assert len(state(board)) == 1  # the ended one is replaced: a run stays one session
+    board.wait_for_selector("ul.ended", state="detached")
 
 
 def test_the_first_message_is_written_while_the_sandbox_starts_and_sent_when_it_is_ready(board):

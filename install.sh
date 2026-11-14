@@ -106,7 +106,9 @@ fi
 ok "$(uv --version)"
 if [ "$DEV" = 1 ]; then
   uv sync --project "$here" --frozen
-  uv run --project "$here" --no-sync playwright install chromium
+  # Only the tests need it, so a failure (e.g. a missing system library) must not stop the web UI's build.
+  uv run --project "$here" --no-sync playwright install chromium \
+    || warn "Playwright's Chromium did not install: the browser tests will not run (see the error above)."
 else
   # --inexact: a second run without --dev leaves the test tools of an earlier --dev in place.
   uv sync --project "$here" --frozen --no-dev --inexact

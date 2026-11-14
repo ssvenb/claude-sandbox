@@ -64,8 +64,8 @@ fi
 # would just make the agent waste turns working around it.
 case " ${ENABLED_PLUGINS:-} " in
   *" branch-guard "*)
-    printf ' You cannot leave this branch: a PreToolUse hook blocks every `git checkout`, `git switch`, `git branch` and `git worktree` command outright, and allows pushes only to %s. Do not attempt to switch or create a branch, and use `git restore` rather than `git checkout` to discard changes to a file.\n' \
-      "$AGENT_BRANCH" >> "$AGENT_PROMPT_FILE" ;;
+    printf ' You cannot leave this branch: a PreToolUse hook blocks every `git checkout`, `git switch`, `git branch` and `git worktree` command outright, and allows pushes only to %s. Do not attempt to switch or create a branch, and use `git restore` rather than `git checkout` to discard changes to a file. Push by naming the branch (`git push origin %s`), never `HEAD`: a blocked command does not run at all, so a commit chained before that push is lost too.\n' \
+      "$AGENT_BRANCH" "$AGENT_BRANCH" >> "$AGENT_PROMPT_FILE" ;;
   *)
     printf ' Stay on this branch for all of your work.\n' >> "$AGENT_PROMPT_FILE" ;;
 esac

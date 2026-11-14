@@ -215,22 +215,22 @@ def test_a_hangup_cleans_up_and_leaves_the_docker_client_be(sb, run_sh, short_tm
     config["plugins"]["upstream-proxy"] = {"routes": [{"name": "api", "port": port, "upstream": "http://127.0.0.1:9"}]}
     sb.config(config)
     env = sb._env({"CLAUDE_CODE_OAUTH_TOKEN": "t", "PORTS": "3000", "TMPDIR": str(short_tmp)})
+    # Files, not pipes: the docker client, left running, would hold a pipe open past run.sh.
+    out, err = open(sb.tmp / "out", "w"), open(sb.tmp / "err", "w")
     proc = subprocess.Popen([REPO / "run.sh", "--run-id", "0a1b2c", "--chat"], cwd=sb.cwd, env=env,
-                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            start_new_session=True)
+                            stdin=subprocess.PIPE, stdout=out, stderr=err, start_new_session=True)
     try:
         for _ in range(300):
             if started.exists() and started.read_text().strip():
                 break
             time.sleep(0.1)
         else:
-            raise AssertionError(proc.communicate(timeout=5))
+            raise AssertionError((sb.tmp / "err").read_text())
         base = f"{short_tmp}/sandbox-ports-{os.getuid()}-127.0.0.1"
         [proxy_dir] = glob.glob(f"{short_tmp}/upstream-proxy-*")
         assert os.listdir(f"{base}/runs") == ["0a1b2c"] and "proxy.pid" in os.listdir(proxy_dir)
         os.killpg(proc.pid, signal.SIGHUP)
-        out, err = proc.communicate(timeout=30)
-        assert proc.returncode == 128 + signal.SIGHUP, err
+        assert proc.wait(timeout=30) == 128 + signal.SIGHUP, (sb.tmp / "err").read_text()
         assert os.listdir(f"{base}/runs") == []  # left the port proxy
         assert os.listdir(proxy_dir) == ["lock"]  # the stage's exit hook stopped upstream-proxy's
         os.kill(int(started.read_text()), 0)  # the docker client is still there
@@ -242,6 +242,8 @@ def test_a_hangup_cleans_up_and_leaves_the_docker_client_be(sb, run_sh, short_tm
                 pass
         if proc.poll() is None:
             os.killpg(proc.pid, signal.SIGKILL)
+        out.close()
+        err.close()
 
 
 def test_a_web_action_needs_its_plugin_enabled(run_sh):

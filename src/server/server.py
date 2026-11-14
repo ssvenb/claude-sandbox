@@ -1324,6 +1324,8 @@ def ports_bind(bind, env):
     wherever the page was opened — unless PORTS_BIND says otherwise (the shell's, or a project's)."""
     if env.get("PORTS_BIND") or bind in ("127.0.0.1", "localhost"):
         return env.get("PORTS_BIND")
+    if bind and not re.fullmatch(r"[0-9.]+|.*:.*", bind):
+        bind = socket.gethostbyname(bind)  # a name, e.g. a VPN's: PORTS_BIND takes only an address
     return bind or "0.0.0.0"
 
 

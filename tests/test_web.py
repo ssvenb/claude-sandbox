@@ -113,11 +113,16 @@ def test_a_projects_terminal_runs_there_streams_and_is_one_per_project(ui):
     assert json.load(ui("/api/state"))["sessions"] == []
 
 
+def test_a_proxy_may_put_the_page_on_another_port(ui):
+    assert ui("/", Host="127.0.0.1:45319").status == 200  # e.g. a sandbox's published port
+
+
 @pytest.mark.parametrize("body, headers, status", [
     ({"project": "/etc", "kind": "shell"}, {}, 400),                       # not a configured project
     ({"kind": "resume", "run_id": "x; rm -rf"}, {}, 400),                  # not a run id
     ({"kind": "shell"}, {"Origin": "http://evil.example"}, 403),           # another site's page
     ({"kind": "shell"}, {"Host": "evil.example"}, 403),                    # DNS rebinding
+    ({"kind": "shell"}, {"Host": "127.0.0.1:1", "Origin": "http://127.0.0.1:2"}, 403),  # another port's page
 ])
 def test_requests_that_must_not_start_anything(ui, body, headers, status):
     body = {"project": ui.project, **body}
@@ -173,9 +178,8 @@ def test_sessions_publish_their_ports_where_the_page_listens():
 def test_allow_host_adds_a_name_to_the_allowlist(tmp_path):
     server = web.serve(0, tmp_path / "projects", allow_hosts=["box.vpn.example"])
     try:
-        port = server.server_address[1]
-        assert {f"box.vpn.example:{port}", f"127.0.0.1:{port}"} <= server.hosts
-        assert f"evil.example:{port}" not in server.hosts
+        assert {"box.vpn.example", "127.0.0.1"} <= server.hosts
+        assert "evil.example" not in server.hosts
     finally:
         server.server_close()
 

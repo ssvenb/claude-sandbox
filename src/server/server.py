@@ -1038,10 +1038,12 @@ class Handler(BaseHTTPRequestHandler):
     def guard(self):
         # This server types into terminals on your machine. Any web page you visit can aim
         # requests at localhost, so only our own page gets through: the Host check stops DNS
-        # rebinding, the Origin check stops cross-site requests.
+        # rebinding, the Origin check stops cross-site requests. Any port: a proxy (a sandbox's
+        # published port) may put this server on another, and the name is what rebinding forges.
         host = self.headers.get("Host", "")
-        if host in self.server.hosts and self.headers.get("Origin", f"http://{host}") == f"http://{host}":
+        if host.rsplit(":", 1)[0] in self.server.hosts and self.headers.get("Origin", f"http://{host}") == f"http://{host}":
             return True
+        print(f"forbidden: Host={host!r} Origin={self.headers.get('Origin')!r} {self.command} {self.path}", file=sys.stderr, flush=True)
         self.reply(403, {"error": "forbidden"})
         return False
 
@@ -1336,7 +1338,7 @@ def serve(port, projects_file, bind="127.0.0.1", allow_hosts=()):
     server = ThreadingHTTPServer((bind, port), Handler)
     server.daemon_threads = True
     port = server.server_address[1]
-    server.hosts = {f"{name}:{port}" for name in local_names(bind) | set(allow_hosts)}
+    server.hosts = local_names(bind) | set(allow_hosts)
     server.projects_file = projects_file
     server.bind = bind
     return server
@@ -1361,7 +1363,8 @@ if __name__ == "__main__":
     print(f"Sandboxes: http://127.0.0.1:{server.server_address[1]}  (projects: {args.projects})",
           flush=True)
     if args.bind not in ("127.0.0.1", "localhost"):
-        print("  also on: " + ", ".join(sorted(h for h in server.hosts if not h.startswith(("127.", "localhost")))),
+        print("  also on: " + ", ".join(sorted(f"{h}:{server.server_address[1]}" for h in server.hosts
+                                               if not h.startswith(("127.", "localhost")))),
               "  (no login: anyone who can reach it can start sandboxes as you)", flush=True)
         print(f"  sessions publish their ports on {os.environ.get('PORTS_BIND', '127.0.0.1')}", flush=True)
     try:

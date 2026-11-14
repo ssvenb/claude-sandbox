@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 
 const lib = process.env.SANDBOX_LIB || '/usr/local/lib/sandbox';
-const { emit, clip, sdk, commands, executable, questions, images } = await import(`${lib}/chat-bridge.mjs`);
+const { emit, clip, sdk, commands, executable, questions, images, attach } = await import(`${lib}/chat-bridge.mjs`);
 
 process.removeAllListeners('warning');  // the SDK's note that bypass mode skips canUseTool for all but the two tools consult() handles
 emit({ type: 'hello', agent: 'claude' });
@@ -189,7 +189,7 @@ const done = commands(async c => {
   if (c.type === 'prompt' && typeof c.text === 'string') {
     giveUp();
     emit({ type: 'status', state: 'working' });
-    push(c.text, images(c));
+    push(await attach(c), images(c));
   } else if (c.type === 'interrupt') {
     giveUp();
     asking.drop();

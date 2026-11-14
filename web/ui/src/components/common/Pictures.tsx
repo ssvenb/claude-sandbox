@@ -16,8 +16,8 @@ export function ImageTray({ pictures, id, onRemoved }: TrayProps) {
     <div className="shots" id={id}>
       {pictures.held.map((p, k) => (
         <span className="shot" key={k}>
-          <img src={src(p)} alt="Pasted image" />
-          <button type="button" aria-label="Remove image" title="Remove" onClick={() => { pictures.drop(p); onRemoved?.(); }}>
+          {PICTURE.test(p.type) ? <img src={src(p)} alt="Pasted image" /> : <span className="file">{p.name}</span>}
+          <button type="button" aria-label={PICTURE.test(p.type) ? 'Remove image' : 'Remove file'} title="Remove" onClick={() => { pictures.drop(p); onRemoved?.(); }}>
             ✕
           </button>
         </span>
@@ -26,13 +26,14 @@ export function ImageTray({ pictures, id, onRemoved }: TrayProps) {
   );
 }
 
-/** The pictures of a message that was sent, as it shows them. */
-export function SentImages({ images }: { images: Picture[] }) {
+/** The pictures and the names of the files of a message that was sent, as it shows them. */
+export function SentImages({ images = [], files = [] }: { images?: Picture[]; files?: string[] }) {
   return (
     <div className="shots">
       {images.filter(p => PICTURE.test(p.type) && /^[A-Za-z0-9+/=]+$/.test(p.data)).map((p, k) => (
         <img key={k} src={src(p)} alt="Image" />
       ))}
+      {files.map((name, k) => <span className="file" key={'f' + k}>{name}</span>)}
     </div>
   );
 }

@@ -11,6 +11,7 @@ and then an agent behind a chat bridge, whose turn depends on what it is asked (
 test_web.py. Skipped without Playwright (pip install playwright, then
 `python -m playwright install chromium`, or a chromium on the PATH).
 """
+import base64
 import json
 import os
 import shutil
@@ -284,6 +285,25 @@ def test_images_are_pasted_into_either_chat_bar_and_sent_with_the_message(board)
     tab.reload()  # a page opened later shows them too
     tab.wait_for_selector(".you >> nth=1")
     assert tab.locator(".you img").count() == 2
+
+
+def test_files_are_attached_in_the_chat_bar_and_sent_with_the_message(board):
+    tab = opens_tab(board, lambda: board.click("button[aria-label='New session']"))
+    tab.wait_for_selector("#input")
+    with tab.expect_file_chooser() as chooser:
+        tab.click("#attach")
+    chooser.value.set_files([{"name": "notes.txt", "mimeType": "text/plain", "buffer": b"hi"},
+                             {"name": "shot.png", "mimeType": "image/png", "buffer": base64.b64decode(PNG)}])
+    tab.wait_for_selector("#shots .shot .file:text-is('notes.txt')")
+    tab.wait_for_selector("#shots .shot img")
+    tab.fill("#input", "read these")
+    tab.keyboard.press("Enter")
+    tab.wait_for_selector(".you:has-text('read these') .file:text-is('notes.txt')")
+    assert tab.locator("#shots .shot").count() == 0 and tab.locator(".you img").count() == 1
+    tab.wait_for_function("document.querySelectorAll('.turn').length === 1")
+    assert json.loads(board.commands.read_text().splitlines()[-1]) == {
+        "type": "prompt", "text": "read these", "images": [{"type": "image/png", "data": PNG}],
+        "files": [{"name": "notes.txt", "data": "aGk="}]}
 
 
 def test_what_runs_in_the_background_has_a_panel_of_its_own_where_each_task_can_be_stopped(board):

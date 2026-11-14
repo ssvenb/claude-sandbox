@@ -11,7 +11,7 @@ interface Base {
   /** What holds it: the subagent call it belongs to, or the box a tool call is in. */
   up: ToolRecord | ToolsRecord | null;
 }
-export interface YouRecord extends Base { kind: 'you'; text: string; images?: Picture[]; queued: boolean }
+export interface YouRecord extends Base { kind: 'you'; text: string; images?: Picture[]; files?: string[]; queued: boolean }
 export interface SayRecord extends Base { kind: 'say'; text: string; streaming: boolean }
 export interface ThinkRecord extends Base { kind: 'think'; text: string; streaming: boolean }
 /** A run of tool calls, in one box. */
@@ -150,10 +150,10 @@ export class Transcript {
   }
 
   private user(e: Extract<ChatEvent, { type: 'user' }>): void {
-    const r = this.place(this.record<YouRecord>('you', { text: e.text, images: e.images, queued: !!e.queued }));
+    const r = this.place(this.record<YouRecord>('you', { text: e.text, images: e.images, files: e.files, queued: !!e.queued }));
     if (e.id) this.users.set(e.id, r);
     // It is called what it was first asked.
-    if (this.session && !this.session.title) this.session.title = e.text.replace(/\s+/g, ' ').slice(0, 140) || 'Image';
+    if (this.session && !this.session.title) this.session.title = e.text.replace(/\s+/g, ' ').slice(0, 140) || (e.files?.length ? 'File' : 'Image');
     this.wantsFollow = true;
   }
 

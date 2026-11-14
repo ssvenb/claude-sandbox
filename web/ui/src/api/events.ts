@@ -60,7 +60,7 @@ export type ChatEvent =
   | { type: 'boot'; text: string }
   | { type: 'hello'; agent: string }
   | ({ type: 'ready' } & AgentInfo)
-  | { type: 'user'; text: string; id?: string; images?: Picture[]; queued?: boolean }
+  | { type: 'user'; text: string; id?: string; images?: Picture[]; files?: string[]; queued?: boolean }
   | { type: 'sent'; id: string }
   | { type: 'text' | 'delta'; id: string; kind?: 'text' | 'thinking'; text: string; parent?: string }
   | { type: 'tool'; id: string; name?: string; title?: string; input?: ToolInput; parent?: string; done?: boolean; output?: unknown; error?: boolean; partial?: boolean }

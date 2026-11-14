@@ -1,9 +1,9 @@
 import { useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { message } from '../../api/client';
 import type { AgentInfo, Command } from '../../api/events';
-import type { Picture } from '../../api/types';
+import type { Picture, Upload } from '../../api/types';
 import { useAutoGrow } from '../../hooks/useAutoGrow';
-import { usePastedImages } from '../../hooks/usePastedImages';
+import { PICTURE, usePastedImages } from '../../hooks/usePastedImages';
 import { Icon } from '../common/Icon';
 import { ImageTray } from '../common/Pictures';
 import { CommandMenu } from './CommandMenu';
@@ -25,7 +25,8 @@ interface Props {
   /** An interrupt is on its way. */
   halting: boolean;
   /** Sends a message; throws when it could not be sent. */
-  onSend: (text: string, images: Picture[]) => Promise<unknown>;
+  /** Pictures go to the model as such; any other file is saved in the sandbox and named in the message. */
+  onSend: (text: string, images: Picture[], files: Upload[]) => Promise<unknown>;
   onInterrupt: () => void;
   onModel: (id: string) => void;
   onEffort: (level: string) => void;
@@ -54,7 +55,7 @@ function matching(commands: Command[], typed: string): Command[] {
 /** Where the next message is written: the field, pasted pictures over it, the agent's commands
  *  as a slash is typed, its model and effort, and the buttons that send and interrupt. */
 export function Composer({ session, info, model, effort, ready, ended, working, halting, onSend, onInterrupt, onModel, onEffort }: Props) {
-  const input = useRef<HTMLTextAreaElement>(null), form = useRef<HTMLFormElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null), form = useRef<HTMLFormElement>(null), picker = useRef<HTMLInputElement>(null);
   const pictures = usePastedImages();
   const [typed, setTyped] = useState<string | null>(null);  // the name after a lone slash, while that is all there is
   const [closed, setClosed] = useState(false);
@@ -112,16 +113,17 @@ export function Composer({ session, info, model, effort, ready, ended, working, 
     e.preventDefault();
     const el = input.current!, text = el.value;
     if (!(text.trim() || pictures.count()) || ended) return;
-    const images = pictures.take();
+    const held = pictures.take();
     el.value = '';
     kept.set('');
     setClosed(true);
     grow();
     try {
-      await onSend(text, images);
+      await onSend(text, held.filter(p => PICTURE.test(p.type)).map(({ type, data }) => ({ type, data })),
+        held.filter(p => !PICTURE.test(p.type)).map(p => ({ name: p.name ?? 'file', data: p.data })));
     } catch (err) {  // not sent: back in the field, to try again
       el.value = text;
-      pictures.put(images);
+      pictures.put(held);
       grow();
       alert(message(err));
     }
@@ -134,6 +136,14 @@ export function Composer({ session, info, model, effort, ready, ended, working, 
       <textarea id="input" ref={input} rows={1} aria-label="Message to the agent" autoComplete="off" disabled={ended}
         placeholder={ended ? 'Session ended' : 'Message'} onChange={onChange} onKeyDown={onKeyDown} onPaste={pictures.onPaste} />
       <div className="bar">
+        <input ref={picker} type="file" multiple hidden onChange={e => {
+          void pictures.add([...e.target.files ?? []]).then(() => input.current?.focus());
+          e.target.value = '';  // the same file again is a change too
+        }} />
+        <button className="round" id="attach" type="button" title="Attach files" aria-label="Attach files" disabled={ended}
+          onClick={() => picker.current!.click()}>
+          <Icon name="clip" />
+        </button>
         <ModelPicker models={info.models ?? []} model={model} onChoose={onModel} />
         <EffortPicker efforts={info.efforts ?? []} effort={effort} onChoose={onEffort} />
         <span className="hint" />

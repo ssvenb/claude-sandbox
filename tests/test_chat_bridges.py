@@ -194,6 +194,19 @@ def test_images_pasted_into_a_prompt_reach_each_agent_as_its_sdk_takes_them(tmp_
     c.close()
 
 
+def test_files_attached_to_a_prompt_are_saved_in_the_sandbox_and_named_in_it(tmp_path):
+    turn = [{"type": "result", "subtype": "success", "is_error": False, "total_cost_usd": 0, "duration_ms": 1, "result": ""}]
+    (tmp_path / "tmp").mkdir()
+    b = Bridge("claude", tmp_path, turn, TMPDIR=str(tmp_path / "tmp"))
+    b.until(lambda e: e["type"] == "ready")
+    b.say(type="prompt", text="read it", files=[{"name": "../../notes.txt", "data": "aGk="}, {"name": "bad", "data": "<b>"}])
+    b.until(lambda e: e["type"] == "turn")
+    [saved] = (tmp_path / "tmp").glob("uploads-*/*")
+    assert saved.name == "1-notes.txt" and saved.read_text() == "hi"  # only its last part: nothing lands elsewhere
+    assert [c["prompt"] for c in b.calls() if "prompt" in c] == [f"read it\n\nAttached files:\n- {saved}"]
+    b.close()
+
+
 def test_a_claude_that_does_not_report_its_state_is_idle_once_its_turn_ends(tmp_path):
     b = Bridge("claude", tmp_path, CLAUDE_TURN, FAKE_STATELESS="1")
     b.until(lambda e: e["type"] == "ready")

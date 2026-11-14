@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { message } from '../api/client';
 import type { Answers, StreamMessage } from '../api/events';
 import * as server from '../api/sessions';
-import type { AppState, Item, Picture } from '../api/types';
+import type { AppState, Item, Picture, Upload } from '../api/types';
 import { deleteAfterAsking, stopAfterAsking } from '../lib/sessionActions';
 import { announceDeleted, onSessionDeleted, sessionTab } from '../lib/tabs';
 import { Transcript } from '../lib/transcript';
@@ -30,7 +30,7 @@ export interface ChatSession {
   interrupt: () => Promise<void>;
   answer: (ask: string, reply: { answers: Answers } | { cancel: true }) => void;
   /** Sends a message; throws when it could not be sent. */
-  send: (text: string, images: Picture[]) => Promise<unknown>;
+  send: (text: string, images: Picture[], files: Upload[]) => Promise<unknown>;
   choose: (what: 'model' | 'effort', value: string) => void;
   stopTask: (task: string) => Promise<unknown>;
 }
@@ -135,7 +135,8 @@ export function useChatSession(id: string): ChatSession {
       update();
       server.sendAnswer(id, ask, reply).catch(e => alert(message(e)));
     },
-    send: (text: string, images: Picture[]) => server.sendPrompt(id, text, images.length ? images : undefined),
+    send: (text: string, images: Picture[], files: Upload[]) =>
+      server.sendPrompt(id, text, images.length ? images : undefined, files.length ? files : undefined),
     choose: (what: 'model' | 'effort', value: string) => {
       transcript.chosen[what] = value;
       update();

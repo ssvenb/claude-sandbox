@@ -12,7 +12,7 @@ import { ToolCall } from './ToolCall';
 function UserMessage({ message }: { message: YouRecord }) {
   return (
     <div className={'you' + (message.queued ? ' queued' : '')}>
-      {!!message.images?.length && <SentImages images={message.images} />}
+      {!!(message.images?.length || message.files?.length) && <SentImages images={message.images} files={message.files} />}
       {message.text}
     </div>
   );

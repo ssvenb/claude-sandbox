@@ -3,6 +3,7 @@ may drive it."""
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -18,9 +19,37 @@ from conftest import REPO
 sys.path.insert(0, str(REPO / "web"))
 import server as web  # noqa: E402
 
+UI = REPO / "web/ui"  # the pages: a React app, built into UI/dist, which the server serves
+
+
+def build_ui():
+    """Makes sure web/ui/dist is there and no older than what it is built from: `npm run build`
+    (after `npm ci`, without node_modules) when it is not. Without npm, a build that is there is
+    used as it is, and with none the test is skipped. Returns dist."""
+    dist = UI / "dist"
+    sources = [f for f in (*(UI / "src").rglob("*"), *(UI / name for name in (
+        "index.html", "package.json", "package-lock.json", "vite.config.ts", "tsconfig.json"))) if f.is_file()]
+    built = (dist / "index.html").stat().st_mtime if (dist / "index.html").exists() else 0
+    if built >= max(f.stat().st_mtime for f in sources):
+        return dist
+    if not shutil.which("npm"):
+        if built:
+            return dist  # stale, but all there is
+        pytest.skip("the web UI is not built and there is no npm to build it: `npm ci && npm run build` in web/ui")
+    steps = ([] if (UI / "node_modules").exists() else [["npm", "ci"]]) + [["npm", "run", "build"]]
+    for step in steps:
+        done = subprocess.run(step, cwd=UI, capture_output=True, text=True)
+        assert done.returncode == 0, f"{' '.join(step)} in web/ui failed:\n{done.stdout}{done.stderr}"
+    return dist
+
+
+@pytest.fixture(scope="session")
+def ui_dist():
+    return build_ui()
+
 
 @pytest.fixture
-def ui(tmp_path):
+def ui(tmp_path, ui_dist):
     project = tmp_path / "proj"
     project.mkdir()
     listing = tmp_path / "projects"
@@ -135,20 +164,48 @@ def test_allow_host_adds_a_name_to_the_allowlist(tmp_path):
     finally:
         server.server_close()
 
-def test_the_session_page_is_served_next_to_the_status_page(ui):
-    assert b'src="/dashboard/main.js"' in ui("/").read() and b"/api/project" in ui("/dashboard/main.js").read()
-    assert b"/stream" in ui("/session").read()
-    assert b'src="/chat/main.js"' in ui("/chat").read() and b"/events" in ui("/chat/main.js").read()
-    for shared, kind in (("/ui.css", "text/css"), ("/lib/ui.js", "text/javascript"), ("/vendor/preact.module.js", "text/javascript"),
-                         ("/chat/chat.css", "text/css"), ("/theme.js", "text/javascript")):
-        got = ui(shared)
-        assert got.status == 200 and got.headers["Content-Type"].startswith(kind)
+def test_the_pages_are_one_built_app_and_what_it_loads_is_served_under_its_own_path(ui):
+    page = ui("/").read()
+    assert b'<div id="root">' in page and ui("/").headers["Content-Type"].startswith("text/html")
+    assert ui("/chat").read() == page and ui("/session").read() == page  # the app picks the page by its path
+    assert b"localStorage.getItem('theme')" in page  # the pinned day or night, set before the first paint
+    scripts, styles = re.findall(rb'src="(/assets/[^"]+\.js)"', page), re.findall(rb'href="(/assets/[^"]+\.css)"', page)
+    assert len(scripts) == 1 and styles
+    script = ui(scripts[0].decode())
+    assert script.status == 200 and script.headers["Content-Type"].startswith("text/javascript")
+    code = script.read()
+    assert b"/api/project" in code  # the dashboard; a session's page loads its own part, only where there is one
+    for part in (b"Message to the agent", b"xterm"):  # the chat's composer, the terminal's xterm.js
+        assert part not in code
+        [chunk] = [f.name for f in (UI / "dist/assets").glob("*.js") if part in f.read_bytes()]
+        got = ui(f"/assets/{chunk}")
+        assert got.status == 200 and got.headers["Content-Type"].startswith("text/javascript") and chunk.encode() in code
+    for style in styles:
+        got = ui(style.decode())
+        assert got.status == 200 and got.headers["Content-Type"].startswith("text/css")
 
 
-@pytest.mark.parametrize("path", ["/server.py", "/../run.sh", "/lib/../../run.sh", "/vendor/LICENSE-preact", "/nope.js",
-                                  "/%2e%2e/run.sh", "/lib"])
-def test_only_the_pages_scripts_and_styles_are_served(ui, path):
+@pytest.mark.parametrize("path", ["/server.py", "/../server.py", "/assets/../../server.py", "/../../run.sh", "/index.html",
+                                  "/assets/nope.js", "/%2e%2e/server.py", "/assets", "/ui/package.json", "/package.json"])
+def test_only_what_the_build_made_for_the_pages_is_served(ui, path):
     assert ui(path).status == 404
+
+
+def test_without_a_build_the_pages_say_how_to_make_one(tmp_path):
+    shutil.copytree(REPO / "web", tmp_path / "web", ignore=shutil.ignore_patterns("__pycache__", "ui"))
+    proc = subprocess.Popen([tmp_path / "web/server.py", "--port", "0", "--projects", tmp_path / "projects"],
+                            stdout=subprocess.PIPE, text=True, env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)})
+    try:
+        base = proc.stdout.readline().split()[1]
+        for page in ("/", "/chat", "/session"):
+            with pytest.raises(urllib.error.HTTPError) as e:
+                urllib.request.urlopen(base + page, timeout=10)
+            assert e.value.code == 503 and e.value.headers["Content-Type"].startswith("text/plain")
+            assert "npm ci && npm run build" in e.value.read().decode()
+        assert json.load(urllib.request.urlopen(base + "/api/state", timeout=10))["sessions"] == []  # the API is there all the same
+    finally:
+        proc.terminate()
+        proc.wait(5)
 
 
 # Stands in for `code serve-web`: echoes each request's head back as the response body.

@@ -95,15 +95,15 @@ RUN chown -R root:root /opt/plugins \
 
 # The frameworks the boot scripts source, the loopback-ownership check root helpers import, the
 # settings merger, and the base policy the plugin settings.json fragments are merged into at runtime.
-COPY src/lib/plugins.sh /usr/local/lib/sandbox/plugins.sh
-COPY src/lib/agents.sh /usr/local/lib/sandbox/agents.sh
-COPY src/lib/peer_owner.py /usr/local/lib/sandbox/peer_owner.py
+COPY src/contract/container/plugins.sh /usr/local/lib/sandbox/plugins.sh
+COPY src/contract/container/agents.sh /usr/local/lib/sandbox/agents.sh
+COPY src/shared/peer_owner.py /usr/local/lib/sandbox/peer_owner.py
 # What the agents' chat bridges (agents/<name>/chat.mjs) share: the wire to the web UI.
-COPY src/lib/chat-bridge.mjs /usr/local/lib/sandbox/chat-bridge.mjs
-COPY src/merge-settings.py /usr/local/bin/merge-settings.py
+COPY src/services/chat/chat-bridge.mjs /usr/local/lib/sandbox/chat-bridge.mjs
+COPY src/services/settings/merge-settings.py /usr/local/bin/merge-settings.py
 # Root-only: offers the ports the agent's servers listen on to the host's central port proxy.
-COPY src/publish-ports.py /usr/local/lib/sandbox/publish-ports.py
-COPY settings-base.json /usr/local/share/sandbox/settings-base.json
+COPY src/services/ports/publish-ports.py /usr/local/lib/sandbox/publish-ports.py
+COPY src/services/settings/settings-base.json /usr/local/share/sandbox/settings-base.json
 RUN chmod 555 /usr/local/bin/merge-settings.py \
     && chmod 444 /usr/local/lib/sandbox/plugins.sh /usr/local/lib/sandbox/agents.sh \
                  /usr/local/lib/sandbox/peer_owner.py /usr/local/lib/sandbox/chat-bridge.mjs \
@@ -111,8 +111,8 @@ RUN chmod 555 /usr/local/bin/merge-settings.py \
     && chmod 500 /usr/local/lib/sandbox/publish-ports.py
 
 # entrypoint.sh boots as root; agent-setup.sh is the part it runs as 'node'.
-COPY src/entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY src/agent-setup.sh /usr/local/bin/agent-setup.sh
+COPY src/boot/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY src/boot/agent-setup.sh /usr/local/bin/agent-setup.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/agent-setup.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

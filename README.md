@@ -14,24 +14,32 @@ token — and each run works on its own
 ## Quick start
 
 ```bash
+./install.sh              # once: checks the host, creates the uv environment, builds the web UI,
+                          # links `claude-sandbox` and `claude-sandbox-web` into ~/.local/bin
 # configuration is per-project: put it in the repo you work on, not here
 cp .env.example ~/code/my-repo/.env   # pick AGENT, fill in its token and any plugin variables
 cd ~/code/my-repo
-./run.sh                  # build + fresh run (generates a RUN_ID)
-./run.sh --resume a1b2c3  # re-attach to an existing run: its branch and its conversation
+claude-sandbox                  # build + fresh run (generates a RUN_ID); the same as <checkout>/run.sh
+claude-sandbox --resume a1b2c3  # re-attach to an existing run: its branch and its conversation
 ```
 
-`python3` (3.9 or later) and `jq` are required on the host. `run.sh` builds the image itself (tagged `claude-agent:$AGENT`), so
+The host needs Docker, `git`, `jq` and [uv](https://docs.astral.sh/uv/) (which brings Python),
+plus Node 20.19+ to build the web UI. `./install.sh` checks for each, offers to install what your
+package manager has (`--yes`: without asking) and uv itself, and is safe to run again;
+`--no-web` sets up `run.sh` alone, `--dev` adds the test tools, `--project DIR` lists a project on
+the dashboard. `run.sh` builds the image itself (tagged `claude-agent:$AGENT`), so
 a manual `docker build -t claude-agent:claude --build-arg AGENT=claude .` is only needed if you
 want to build without running.
 
 ## Web UI
 
 ```bash
-mkdir -p ~/.config/claude-sandbox
-printf '%s\n' ~/code/my-repo ~/code/other-repo > ~/.config/claude-sandbox/projects
-./web/server.py           # http://127.0.0.1:8787  (--port N, --projects FILE, --allow-host NAME)
+./install.sh --project ~/code/my-repo --project ~/code/other-repo   # builds the UI, lists the projects
+claude-sandbox-web        # http://127.0.0.1:8787  (--port N, --projects FILE, --allow-host NAME)
 ```
+
+The projects are lines of `~/.config/claude-sandbox/projects`; `claude-sandbox-web` is
+`web/serve.sh`, the server (`web/server.py`) in the uv environment.
 
 The home page is a dashboard of all your sandboxes. On top is a box to start a session by writing
 its first message, with the project it is for beside it. Under it, on the left, is what is
@@ -85,7 +93,7 @@ terminal would, through the vendor's own SDK — the
 [GitHub Copilot SDK](https://www.npmjs.com/package/@github/copilot-sdk) for `copilot` — so settings, hooks,
 MCP servers, skills, slash commands and the run's conversation are the ones the terminal has, and
 a run started in one can be resumed in the other. What differs per agent ends at the bridge: each
-translates its SDK's messages into one set of chat events ([src/lib/chat-bridge.mjs](src/lib/chat-bridge.mjs)
+translates its SDK's messages into one set of chat events ([src/services/chat/chat-bridge.mjs](src/services/chat/chat-bridge.mjs)
 lists them) on the container's stdout, and takes prompts, answers, interrupts and model changes on
 its stdin, so the page knows no agent. An agent without a `chat.mjs` cannot be started with
 `--chat`; `{"ui": "terminal"}` in the request that starts a session (`POST /api/sessions`) runs
@@ -123,23 +131,32 @@ agent's home directory, so it only outlives the container while `claude-home` / 
 mounts it from the host (both on by default); without them a resumed run starts a new conversation
 on the old branch.
 
-Needs only `python3` on the host (and `gh` for the PR list); the pages load their fonts, and the
-terminal page xterm.js, from a CDN. The pages are [Preact](https://preactjs.com) components written
-with [htm](https://github.com/developit/htm) tagged templates, plain ES modules the server hands out
-as they are: no build step and no Node on the host. Preact and htm are vendored in
-[web/vendor](web/vendor), which says how to update them.
+The server needs only `python3` on the host (and `gh` for the PR list). The pages are one
+[React](https://react.dev) app in TypeScript, [web/ui](web/ui), built with [Vite](https://vite.dev)
+(Node 20 or later, with npm) into `web/ui/dist`, which the server hands out: `./install.sh` builds
+it, as does `npm ci && npm run build` in `web/ui`; until it is built the pages answer 503 and say
+so. The app picks its page by the address — `/` the dashboard, `/chat#<id>` a session's
+conversation, `/session#<id>` a terminal — and is grouped into `src/pages` (the three), `src/components`
+(by feature: `dashboard`, `chat`, `settings`, `terminal`, and `common` for what they share),
+`src/hooks` (the event stream, polling, the theme, …), `src/api` (typed calls to `/api/*` and the
+shapes of what comes back), `src/lib` (what is not React: a conversation built from its events,
+tabs, diffs) and `src/styles`. A session's page loads its own part only where there is one: the
+chat its markdown ([react-markdown](https://github.com/remarkjs/react-markdown), never as HTML) and
+diffs ([jsdiff](https://github.com/kpdecker/jsdiff)), the terminal [xterm.js](https://xtermjs.org),
+all bundled; only the fonts come from a CDN. To work on it, run the server and `npm run dev` in
+`web/ui`, which serves the pages with hot reload and passes `/api` on to the server on port 8787.
 It listens on loopback only and has no login — use an SSH tunnel to reach it from elsewhere.
 Sessions belong to the server process: stopping it stops them.
 
 ## How a run boots
 
 ```
-run.sh (host: src/host, Python)
+run.sh (host: src/orchestrator, Python)
   ├─ loads the worked-on repo's config, resolves AGENT and the ENABLE_<PLUGIN> flags, validates config + capabilities
-  ├─ src/lib/host-stage.sh (one bash, alive until the container is gone; its exit hooks run then)
+  ├─ src/contract/host/stage.sh (one bash, alive until the container is gone; its exit hooks run then)
   │    ├─ each enabled plugin's host.sh, then the agent's host.sh, contribute `docker run` args
   │    └─ mints the credentials plugins registered, mounts them at /run/credentials (ro), refreshes them in the background
-  ├─ joins the central port proxy (src/portd.py) when PORTS lists any
+  ├─ joins the central port proxy (src/services/ports/portd.py) when PORTS lists any
   ├─ docker build --build-arg AGENT=... --build-arg ENABLED_PLUGINS=...
   └─ docker run → entrypoint.sh (root)
        ├─ chown /workspace to node
@@ -184,7 +201,7 @@ An agent is a directory under `agents/<name>/`. Only `agent.json` is required; t
 | `host.sh` | you | on the host, **after** every plugin's `host.sh` |
 | `agent-init.sh` | `node` | in the container, before the plugins' agent stage |
 | `launch.sh` | `node` | last: turns `$AGENT_PROMPT` into flags and starts the agent |
-| `chat.mjs` | `node` | in place of the agent's TUI for a web chat (`run.sh --chat`): drives the agent through its SDK and speaks the chat events of [src/lib/chat-bridge.mjs](src/lib/chat-bridge.mjs) on stdio |
+| `chat.mjs` | `node` | in place of the agent's TUI for a web chat (`run.sh --chat`): drives the agent through its SDK and speaks the chat events of [src/services/chat/chat-bridge.mjs](src/services/chat/chat-bridge.mjs) on stdio |
 
 `agent.json` carries `name`, `description`, `managedSettings` — the path the agent reads its
 managed (enterprise) policy from, which is where plugin `settings.json` fragments are merged.
@@ -306,7 +323,7 @@ built, so misconfiguration fails fast and cheaply.
 
 Every setting a project can make in its `.claude-sandbox.json` is declared by its owner — a plugin
 in its `plugin.json`, an agent in its `agent.json`, the sandbox itself in
-[src/kernel.json](src/kernel.json) — as a `settings` list. The web UI draws its settings form from
+[src/orchestrator/kernel.json](src/orchestrator/kernel.json) — as a `settings` list. The web UI draws its settings form from
 these, and `web/server.py` checks values against them before it writes the file.
 
 ```json
@@ -356,7 +373,7 @@ can't perturb each other.
 
 ### `host.sh` — host stage (your user)
 
-Sourced in bash (`src/lib/host-stage.sh`, which `run.sh` starts once it has resolved the run) with
+Sourced in bash (`src/contract/host/stage.sh`, which `run.sh` starts once it has resolved the run) with
 your full environment, including the worked-on repo's settings. Every enabled plugin's `host.sh`
 and then the agent's are sourced into that one shell, so a variable one sets is seen by the next,
 and what one exports reaches `docker` too. The shell lives until the container is gone, which is
@@ -411,7 +428,7 @@ Validation that can be done here should be done here: it runs before the build.
 
 A token derived from something long-lived — an App private key, your own cloud login — is minted
 on the host, never in the container: `register_credential` hands the core a function that prints
-it, and `src/lib/host-credentials.sh` does the rest for every plugin alike.
+it, and `src/services/credentials/credentials.sh` does the rest for every plugin alike.
 
 - **First mint** after every plugin's (and the agent's) host stage, so the function may use what a
   later plugin set — `github-auth` picks the installation that owns git-workspace's `REPO_URL`. A
@@ -563,10 +580,10 @@ dashboard edits its `env` block):
 
 Nothing else is published, and the dashboard shows nothing else; with `PORTS` unset a sandbox
 opens no ports at all, and no proxy is started for it. Inside the container a root helper
-(`src/publish-ports.py`, started by `entrypoint.sh`) notices when a non-root process listens on one
+(`src/services/ports/publish-ports.py`, started by `entrypoint.sh`) notices when a non-root process listens on one
 of those ports — on any address, `127.0.0.1` included — and offers it as a unix socket in a
 directory mounted from the host, under a root-only `/run/ports` the agent cannot reach. One central
-proxy on your machine (`src/portd.py`, managed by `src/host/ports.py`), shared by every sandbox
+proxy on your machine (`src/services/ports/portd.py`, managed by `src/services/ports/lease.py`), shared by every sandbox
 of every project, gives each such port a port of its own on `$PORTS_BIND` (default `127.0.0.1`):
 the same number while it is free, otherwise any free one, and the same one again when that
 session's server restarts. The first `run.sh` starts the proxy; it exits once no `run.sh` using it
@@ -653,7 +670,7 @@ working before the user has asked for anything.
 
 ### `settings.json` — managed policy fragment
 
-Merged by `src/merge-settings.py` into the selected agent's `managedSettings` path at boot
+Merged by `src/services/settings/merge-settings.py` into the selected agent's `managedSettings` path at boot
 (`/etc/claude-code/managed-settings.json` for `claude`), in priority order, starting from
 `settings-base.json` (an empty `{}`). Merge rules:
 
@@ -734,25 +751,44 @@ Volume mounts are contributed by plugins via `pass_mount`; the core `docker run`
 
 ## Repository layout
 
+The core is grouped by role under `src/`; each folder has one reason to change.
+
 | Path | Purpose |
 |------|---------|
-| [run.sh](run.sh) | host entry point; runs [src/host](src/host) |
-| [src/host/](src/host) | the host side in Python: project config and settings (`config.py`), agent (`agents.py`) and plugin (`plugins.py`) resolution, the port proxy (`ports.py`), the plugins' stages (`stage.py`), build and `docker run` (`main.py`) |
-| [src/lib/host-stage.sh](src/lib/host-stage.sh) | the bash that sources the plugins' and the agent's `host.sh` / `web.sh` |
-| [web/](web) | web UI over `run.sh`: `server.py` (sessions, PRs and issues, a tunnel to `code serve-web`) and the pages it serves — the dashboard (`index.html`, `dashboard/`), a session's chat (`chat.html`, `chat/`), a terminal (`session.html`); `lib/` is what they share, `vendor/` Preact and htm |
+| [install.sh](install.sh) | sets a checkout up: host requirements, the uv environment, the web UI's build, the `claude-sandbox` commands |
+| [run.sh](run.sh) | host entry point; runs [src/orchestrator](src/orchestrator) in the uv environment |
+| [pyproject.toml](pyproject.toml), [uv.lock](uv.lock) | the uv project: Python version, and the test tools as its `dev` group |
 | [Dockerfile](Dockerfile) | image: base tools, agent install stage, plugin install stage, permissions |
-| [settings-base.json](settings-base.json) | empty policy base plugin fragments merge into |
-| [src/kernel.json](src/kernel.json) | the sandbox's own settings (`AGENT`, ports), declared as plugins declare theirs |
-| [src/entrypoint.sh](src/entrypoint.sh) | container root stage and privilege handoff |
-| [src/agent-setup.sh](src/agent-setup.sh) | container agent stage and agent launch |
-| [src/merge-settings.py](src/merge-settings.py) | deep-merges settings fragments |
-| [src/lib/host-plugins.sh](src/lib/host-plugins.sh) | what a plugin's `host.sh` / `web.sh` is sourced with (`pass_*`, `on_exit`, `web_*`) |
-| [src/lib/host-agents.sh](src/lib/host-agents.sh) | the agent's host stage |
-| [src/lib/host-credentials.sh](src/lib/host-credentials.sh) | `register_credential`: minting and refreshing |
-| [src/lib/host-project-config.sh](src/lib/host-project-config.sh) | `plugin_config`, `plugin_config_json`: a plugin's section of `.claude-sandbox.json` |
-| [src/lib/host-project-env.sh](src/lib/host-project-env.sh) | `project_env`, `env_scan_into`: the worked-on repo's `.env`, scanned |
-| [src/lib/plugins.sh](src/lib/plugins.sh) | container-side plugin framework (stage runner, fragment/secret listing) |
-| [src/lib/agents.sh](src/lib/agents.sh) | container-side agent framework (manifest lookup, stage runner) |
+| [src/orchestrator/](src/orchestrator) | **decides what a run is and starts it** (Python): the command line, build and `docker run` (`main.py`), project config and settings (`config.py`), agent (`agents.py`) and plugin (`plugins.py`) resolution, the plugins' stages (`stage.py`), the sandbox's own settings (`kernel.json`) |
+| [src/contract/host/](src/contract/host) | **what a plugin's or agent's `host.sh` / `web.sh` is sourced with** (bash): `stage.sh` (the shell that sources them), `plugins.sh` (`pass_*`, `on_exit`, `web_*`), `agents.sh`, `project-config.sh` (`plugin_config`), `project-env.sh` (`project_env`, `env_scan_into`) |
+| [src/contract/container/](src/contract/container) | the same contract in the image: `plugins.sh` (stage runner, fragment/secret listing), `agents.sh` (manifest lookup, stage runner) |
+| [src/boot/](src/boot) | **from started container to running agent**: `entrypoint.sh` (root stage, privilege handoff), `agent-setup.sh` (agent stage, launch) |
+| [src/services/ports/](src/services/ports) | published ports, both sides: `lease.py` (a run joining the proxy), `portd.py` (the proxy), `publish-ports.py` (in the container) |
+| [src/services/credentials/](src/services/credentials) | `register_credential`: minting on the host, refreshing, the `/run/credentials` mount |
+| [src/services/settings/](src/services/settings) | the agent's managed policy: `merge-settings.py` deep-merges plugin fragments into `settings-base.json` |
+| [src/services/chat/](src/services/chat) | `chat-bridge.mjs`: the chat events the agents' `chat.mjs` speak and the web UI draws |
+| [src/shared/](src/shared) | `peer_owner.py`: who is on the other end of a socket, for root-side helpers |
+| [web/](web) | web UI over `run.sh`: `server.py` (sessions, PRs and issues, a tunnel to `code serve-web`) and the pages it serves, built from `ui/` — a React app (Vite, TypeScript): the dashboard, a session's chat, a terminal (`src/pages`), their components by feature (`src/components`), `src/hooks`, `src/api`, `src/lib`, `src/styles` |
 | [agents/](agents) | the agents themselves |
 | [plugins/](plugins) | the plugins themselves |
-| [tests/](tests) | pytest suite; `tests/e2e` boots the built image |
+| [tests/](tests) | pytest suite (`uv run pytest`); `tests/e2e` boots the built image |
+
+## Dependencies
+
+The project is a [uv](https://docs.astral.sh/uv/) project: `uv sync` creates `.venv` from
+`uv.lock`, and `run.sh` and `web/serve.sh` run in it. What a library could replace was weighed
+piece by piece, to keep the code that has to be maintained here small:
+
+| Hand-written code | Verdict |
+|---|---|
+| Markdown rendering, terminal loading, component plumbing in the web UI | **replaced** by npm packages (React, `react-markdown`, `@xterm/xterm`), bundled by Vite — see [web/ui/package.json](web/ui/package.json) |
+| `web/server.py`'s HTTP layer → FastAPI/Starlette | kept: the server tunnels VS Code (`code serve-web`) over raw sockets, upgrade requests included, which ASGI does not expose; sessions are ptys and pipes read by threads. A framework would replace the ~80 lines of routing and leave the rest |
+| `.env` scanning (`config.py`) → `python-dotenv` | kept: 30 lines, and its rules must match `env_scan_into`, the bash twin plugins use (a test holds the two together); `python-dotenv` reads quotes and comments differently and has no "commented defaults" mode |
+| GitHub App JWT (`mint-gh-token.py`) → `PyJWT` + `cryptography` | kept: ten lines around `openssl dgst`, against a compiled dependency in every environment |
+| Settings validation (`web/server.py`) → `pydantic` / `jsonschema` | kept: the types are declared by plugin manifests at run time, so a schema library would need a translation layer as long as the checks |
+| Credential-injecting proxy (`upstream-proxy`), port proxy (`portd.py`) | kept: socket plumbing with a security boundary and their own tests; no library does this job as is |
+| Command line (`main.py`) | kept: 40 lines whose exact refusals the web UI shows |
+
+So the Python side has no runtime dependencies; uv pins the interpreter and the test tools
+(`pytest`, `playwright`). Scripts that run inside the container use the image's system Python and
+stay standard library by necessity.

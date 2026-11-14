@@ -8,3 +8,5 @@ build/
 **/*.private-key.pem
 # Same for SSH keys: run.sh reads them on the host, so they must not be baked into /opt/plugins.
 plugins/ssh-credentials/sandbox-key*
+# Nothing of the web UI goes into the image, and node_modules would bloat the build context.
+web/

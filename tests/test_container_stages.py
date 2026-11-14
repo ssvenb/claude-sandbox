@@ -18,7 +18,7 @@ def stub_agent(sb):
     return lambda: out.read_text().split("\0")[:-1]
 
 
-# --- src/lib/plugins.sh, src/lib/agents.sh -------------------------------------------------
+# --- src/contract/container/plugins.sh, src/contract/container/agents.sh -------------------------------------------------
 
 def test_stages_run_in_the_order_the_host_resolved(sb):
     root = sb.tmp / "plugins"

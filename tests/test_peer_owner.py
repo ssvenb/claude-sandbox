@@ -1,4 +1,4 @@
-"""src/lib/peer_owner.py: is a loopback connection's client end held by a process of this sandbox?
+"""src/shared/peer_owner.py: is a loopback connection's client end held by a process of this sandbox?
 
 owned_here switches euid per process owner and back to root; unprivileged, the switch back would
 fail, so the tests make it a no-op and only ever look at processes of the test's own user.

@@ -1,8 +1,8 @@
 """Shared harness: run the host-side bash libraries, plugin stages and Python helpers in isolation.
 
 Host stages are sourced into a fresh `bash` with the stage's libraries loaded and `set -euo
-pipefail`, exactly as src/lib/host-stage.sh sources them; the `docker run`/`docker build`
-arguments they contribute are read back afterwards. What src/host resolves before a stage (the
+pipefail`, exactly as src/contract/host/stage.sh sources them; the `docker run`/`docker build`
+arguments they contribute are read back afterwards. What src/orchestrator resolves before a stage (the
 project's config and settings) is done by that Python, in-process (Sandbox.staged). Container
 stages are sourced into `sh` the same way agent-setup.sh does, with the frameworks pointed at this
 checkout instead of /opt.
@@ -25,15 +25,16 @@ REPO = Path(__file__).resolve().parent.parent
 
 # The root helpers import peer_owner from /usr/local/lib/sandbox (where the image installs it);
 # importing it here first makes them use this checkout's copy.
-sys.path.insert(0, str(REPO / "src/lib"))
+sys.path.insert(0, str(REPO / "src/shared"))
 import peer_owner  # noqa: E402,F401
 
 sys.path.insert(0, str(REPO / "src"))
-import host  # noqa: E402
-from host import config as host_config  # noqa: E402
+import orchestrator  # noqa: E402
+from orchestrator import config as host_config  # noqa: E402
 
-HOST_LIBS = "\n".join(f". src/lib/{lib}.sh" for lib in (
-    "host-plugins", "host-credentials", "host-agents", "host-project-config", "host-project-env"))
+HOST_LIBS = "\n".join(f". src/{lib}.sh" for lib in (
+    "contract/host/plugins", "services/credentials/credentials", "contract/host/agents",
+    "contract/host/project-config", "contract/host/project-env"))
 
 
 def load(rel: str):
@@ -147,12 +148,12 @@ cd "{REPO}"
 
     def staged(self, snippet: str, **env) -> Run:
         """snippet in a stage's shell: the project's config loaded and its settings applied by
-        src/host first, as run.sh does (a refusal there fails the Run), then its .env scanned."""
+        src/orchestrator first, as run.sh does (a refusal there fails the Run), then its .env scanned."""
         merged = self._env(env)
         try:
             project = host_config.load_project(merged)
             host_config.apply_settings(merged, project)
-        except host.Die as e:
+        except orchestrator.Die as e:
             return Run(1, "", f"❌ {e}\n")
         config = json.dumps(project.config) if project.config is not None else ""
         return self.bash("project_env_load\n" + snippet, **{**merged, "PROJECT_CONFIG_JSON": config})
@@ -169,8 +170,8 @@ cd "{REPO}"
         prompt = self.tmp / "prompt"
         prompt.write_text("")
         script = f"""set -e
-. "{REPO}/src/lib/plugins.sh"
-. "{REPO}/src/lib/agents.sh"
+. "{REPO}/src/contract/container/plugins.sh"
+. "{REPO}/src/contract/container/agents.sh"
 {snippet}
 """
         base = {"PLUGIN_ROOT": REPO / "plugins", "AGENT_ROOT": REPO / "agents",

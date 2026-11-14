@@ -69,7 +69,7 @@ def test_env_example_documents_every_required_variable(var):
 
 TYPES = {"boolean", "string", "path", "text", "integer", "enum", "list", "map", "object", "json"}
 # Who declares settings: the kernel, each agent, each plugin.
-OWNERS = ([("kernel", REPO / "src/kernel.json")] + [(f"agents/{a}", REPO / "agents" / a / "agent.json") for a in AGENTS]
+OWNERS = ([("kernel", REPO / "src/orchestrator/kernel.json")] + [(f"agents/{a}", REPO / "agents" / a / "agent.json") for a in AGENTS]
           + [(f"plugins/{p}", REPO / "plugins" / p / "plugin.json") for p in PLUGINS])
 # Where the settings files are: set in .env.example or the shell only, never in the config file.
 NOT_IN_CONFIG = {"PROJECT_CONFIG_FILE", "PROJECT_ENV_FILE"}
@@ -114,7 +114,7 @@ def test_every_sandbox_variable_is_declared_by_exactly_one_owner():
 
 
 def test_the_kernel_offers_every_agent():
-    agent = next(s for s in json.loads((REPO / "src/kernel.json").read_text())["settings"] if s.get("env") == "AGENT")
+    agent = next(s for s in json.loads((REPO / "src/orchestrator/kernel.json").read_text())["settings"] if s.get("env") == "AGENT")
     assert sorted(agent["choices"]) == AGENTS
 
 
@@ -134,7 +134,7 @@ def test_scripts_run_directly_are_executable_in_git():
     listed = subprocess.run(["git", "ls-files", "-s"], cwd=REPO, capture_output=True, text=True,
                             check=True).stdout
     modes = {line.split("\t")[1]: line.split()[0] for line in listed.splitlines()}
-    direct = ["run.sh", "src/agent-setup.sh"] + [
+    direct = ["run.sh", "install.sh", "web/serve.sh", "src/boot/agent-setup.sh"] + [
         path for path in modes if re.match(r"plugins/[^/]+/(host|root|bin)/", path)]
     for path in direct:
         assert modes[path] == "100755", path

@@ -1,13 +1,13 @@
-"""The host side under src/host (Python: config, precedence, plugins, agents) and the bash
-libraries the plugins' stages are sourced with, src/lib/host-*.sh (helpers, credentials)."""
+"""The host side under src/orchestrator (Python: config, precedence, plugins, agents) and the bash
+libraries the plugins' stages are sourced with, src/contract/host/*.sh (helpers, credentials)."""
 import json
 import os
 import time
 
 import pytest
 
-from conftest import REPO, host
-from host import agents, config, plugins
+from conftest import REPO, orchestrator
+from orchestrator import agents, config, plugins
 
 
 def scan(sb, text, commented=False, shell="python"):
@@ -20,7 +20,7 @@ def scan(sb, text, commented=False, shell="python"):
     return dict(item.split("=", 1) for item in run.out.split("\0")[:-1])
 
 
-# --- .env files: src/host/config.py and host-project-env.sh read them alike ---------------
+# --- .env files: src/orchestrator/config.py and contract/host/project-env.sh read them alike ---------------
 
 BOTH = pytest.mark.parametrize("shell", ["python", "bash"])
 
@@ -133,7 +133,7 @@ def test_config_env_scalars_become_strings(sb):
     assert run.out.endswith("0 true 1.5 3000\n")
 
 
-# --- plugins: discovery, enablement, validation (src/host/plugins.py) ---------------------
+# --- plugins: discovery, enablement, validation (src/orchestrator/plugins.py) ---------------------
 
 @pytest.fixture
 def fake_plugins(sb):
@@ -158,7 +158,7 @@ def resolve(sb, root, validate=False, **env):
         enabled = plugins.resolve(found, env, project, env.get("AGENT") or "claude")
         if validate:
             plugins.validate(enabled, found, env)
-    except host.Die as e:
+    except orchestrator.Die as e:
         return f"❌ {e}"
     return " ".join(p.name for p in enabled)
 
@@ -238,7 +238,7 @@ def test_required_capabilities_name_their_providers(sb, fake_plugins):
     assert "<none available>" in resolve(sb, fake_plugins.root, True, ENABLE_CONSUMER=0)
 
 
-# --- host-plugins.sh: what a host.sh is sourced with ---------------------------------------
+# --- contract/host/plugins.sh: what a host.sh is sourced with ---------------------------------------
 
 def test_pass_helpers_build_the_docker_command_line(sb, tmp_path):
     run = sb.bash(f'SET=value EMPTY=""\npass_env SET EMPTY UNSET\npass_value COMPUTED "a b"\n'
@@ -270,7 +270,7 @@ def test_host_stage_sources_each_enabled_plugin_with_its_name_and_dir(sb, fake_p
     assert "after=[unset]" in run.out
 
 
-# --- host-credentials.sh -------------------------------------------------------------------
+# --- services/credentials/credentials.sh -------------------------------------------------------------------
 
 @pytest.mark.parametrize("args, message", [
     ("Bad_Name 60 mint", "must be lowercase letters"),
@@ -338,12 +338,12 @@ def test_refresher_follows_the_wall_clock(sb):
     assert "could not refresh tok; retrying in a minute" in log
 
 
-# --- agents (src/host/agents.py) ----------------------------------------------------------
+# --- agents (src/orchestrator/agents.py) ----------------------------------------------------------
 
 def agent(sb, **env):
     try:
         return agents.resolve_agent(sb._env(env))
-    except host.Die as e:
+    except orchestrator.Die as e:
         return f"❌ {e}"
 
 

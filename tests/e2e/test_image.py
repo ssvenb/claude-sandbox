@@ -292,7 +292,7 @@ def test_processes_outside_the_sandbox_are_refused_on_its_loopback(image):
 
 
 def test_ports_the_agent_listens_on_are_offered_to_the_host_out_of_its_reach(image, tmp_path):
-    """src/publish-ports.py: a server of the agent's, on localhost only, shows up as a socket in the
+    """src/services/ports/publish-ports.py: a server of the agent's, on localhost only, shows up as a socket in the
     directory run.sh mounts, which the agent itself cannot reach."""
     sockets = tmp_path / "sockets"
     sockets.mkdir()

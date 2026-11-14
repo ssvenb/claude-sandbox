@@ -5,7 +5,7 @@ a chat page per session, each in its own tab; a terminal page for a project's sh
 in the browser (`code serve-web`) on a run's checkout.
 
 Runs on the HOST, as you, next to run.sh — a session is `run.sh --chat` with the project as its
-cwd: the agent behind its chat bridge (agents/<name>/chat.mjs), whose events (src/lib/chat-bridge.mjs)
+cwd: the agent behind its chat bridge (agents/<name>/chat.mjs), whose events (src/services/chat/chat-bridge.mjs)
 come out of run.sh's stdout and go to the page as server-sent events, while prompts come back as
 POSTs. The page is there from the first moment: what is typed while the sandbox still builds and
 boots waits here and is handed to the agent the moment it is ready. A project's terminal is your
@@ -46,7 +46,7 @@ HERE = Path(__file__).resolve().parent
 RUN_SH = HERE.parent / "run.sh"
 PLUGINS = HERE.parent / "plugins"
 AGENTS = HERE.parent / "agents"
-KERNEL = HERE.parent / "src/kernel.json"  # the settings of the sandbox itself, as plugins declare theirs
+KERNEL = HERE.parent / "src/orchestrator/kernel.json"  # the settings of the sandbox itself, as plugins declare theirs
 EXAMPLE = HERE.parent / ".claude-sandbox.example.json"  # what each plugin's section may hold
 CONFIG = ".claude-sandbox.json"  # a project's own sandbox configuration, next to its checkout
 RUN_ID = re.compile(r"[0-9a-f]{6}")
@@ -65,10 +65,16 @@ QUIET = 3  # seconds without output after which an agent that reports nothing co
 # of output means it was interrupted before it could say it stopped (Esc fires no Stop hook).
 STALE = 30
 
-# The pages, and the scripts and styles they load (their Preact components, the vendored Preact
-# and htm, see web/vendor). Read on every request, so an edit shows on reload; no build step.
-PAGES = {"/": "index.html", "/session": "session.html", "/chat": "chat.html"}
-STATIC = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"}
+# The pages are one React app (web/ui), built by `npm run build` into web/ui/dist: its index.html
+# for each of them (it picks the page by its path), and the scripts and styles that loads, under
+# their own paths. Read on every request, so a new build shows on reload.
+DIST = HERE / "ui/dist"
+PAGES = ("/", "/session", "/chat")
+STATIC = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".map": "application/json",
+          ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon",
+          ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".txt": "text/plain; charset=utf-8"}
+UNBUILT = ("The web UI is not built yet: run ./install.sh, or `npm ci && npm run build` in web/ui, "
+           "and reload this page.\n")
 
 sessions = {}
 described = {}  # project → what describe() last said about it
@@ -76,12 +82,14 @@ lock = threading.RLock()  # guards `sessions` and every session's buf/listeners/
 
 
 def static(path):
-    """The script or style sheet under web/ that a URL path names, or None: only .js and .css files,
-    and nothing outside web/ (no `..`, no symlink out of it)."""
+    """The built file under web/ui/dist that a URL path names, or None: only what a build puts
+    there for a page to load (scripts, styles, fonts, pictures; not index.html, which is the
+    pages'), and nothing outside it (no `..`, no symlink out of it)."""
     if not path.startswith("/") or "\\" in path or "\0" in path:
         return None
-    file = (HERE / path.lstrip("/")).resolve()
-    if file.suffix not in STATIC or not file.is_relative_to(HERE) or not file.is_file():
+    root = DIST.resolve()
+    file = (root / path.lstrip("/")).resolve()
+    if file.suffix not in STATIC or not file.is_relative_to(root) or not file.is_file():
         return None
     return file
 
@@ -244,7 +252,7 @@ def tool_label(name, given):
 
 class Chat(Session):
     """An agent behind its chat bridge: `run.sh --chat` on pipes. Its stdout is boot output until
-    the bridge speaks, then chat events (src/lib/chat-bridge.mjs), each line led by RS. Every
+    the bridge speaks, then chat events (src/services/chat/chat-bridge.mjs), each line led by RS. Every
     event is kept in `events` so a page opened later (or again) starts from the whole
     conversation; streamed text is folded into the block it belongs to on the way in."""
     ui = "chat"
@@ -913,7 +921,10 @@ class Handler(BaseHTTPRequestHandler):
         query = {k: v[0] for k, v in parse_qs(url.query).items()}
         known = projects(self.server.projects_file)
         if url.path in PAGES:
-            self.reply(200, (HERE / PAGES[url.path]).read_bytes(), "text/html; charset=utf-8")
+            try:
+                self.reply(200, (DIST / "index.html").read_bytes(), "text/html; charset=utf-8")
+            except OSError:
+                self.reply(503, UNBUILT.encode(), "text/plain; charset=utf-8")
         elif (asset := static(url.path)) is not None:
             self.reply(200, asset.read_bytes(), STATIC[asset.suffix])
         elif url.path == "/api/state":

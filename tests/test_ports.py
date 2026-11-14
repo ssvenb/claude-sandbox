@@ -1,5 +1,5 @@
-"""Published ports: src/publish-ports.py in the container, src/portd.py (the central proxy) and
-src/host/ports.py (its lifecycle) on the host."""
+"""Published ports: src/services/ports/publish-ports.py in the container, src/services/ports/portd.py (the central proxy) and
+src/services/ports/lease.py (its lifecycle) on the host."""
 import json
 import os
 import socket
@@ -10,11 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from conftest import REPO, host, load
-from host.ports import Ports, items_file
+from conftest import REPO, orchestrator, load
+from services.ports.lease import Ports, items_file
 
-publish = load("src/publish-ports.py")
-portd = load("src/portd.py")
+publish = load("src/services/ports/publish-ports.py")
+portd = load("src/services/ports/portd.py")
 
 
 def echo_server(sock: socket.socket, prefix: bytes = b"") -> socket.socket:
@@ -253,7 +253,7 @@ def test_a_second_run_shares_the_proxy_and_keeps_it_when_the_first_leaves(short_
                                           ({"PORTS": "3000,5173"}, "PORTS must list port numbers"),
                                           ({"PORTS": "70000"}, "PORTS must list port numbers")])
 def test_settings_that_are_refused(short_tmp, env, message):
-    with pytest.raises(host.Die, match=message):
+    with pytest.raises(orchestrator.Die, match=message):
         Ports(ports_env(short_tmp, **env), "abc123").start()
 
 
@@ -268,7 +268,7 @@ def test_without_configured_ports_a_run_opens_none(short_tmp, capsys):
 def test_a_directory_that_is_not_yours_is_refused(short_tmp):
     (short_tmp / "elsewhere").mkdir()
     (short_tmp / f"sandbox-ports-{os.getuid()}-127.0.0.1").symlink_to(short_tmp / "elsewhere")
-    with pytest.raises(host.Die, match="is not yours"):
+    with pytest.raises(orchestrator.Die, match="is not yours"):
         Ports(ports_env(short_tmp, PORTS="3000"), "abc123").start()
 
 

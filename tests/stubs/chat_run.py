@@ -4,7 +4,7 @@
 `--web` prints web.json from next to it, `--web-action` is logged to `actions`. A session without
 `--chat` is the old terminal "agent": it says it has a question, waits for a line, exits 4. With
 `--chat` it is a sandbox that boots (a few lines of output, STUB_BOOT seconds apart), then an
-agent behind a chat bridge, speaking src/lib/chat-bridge.mjs on stdio (the boot waits for as long
+agent behind a chat bridge, speaking src/services/chat/chat-bridge.mjs on stdio (the boot waits for as long
 as a file `hold` lies next to this one): each prompt gets a turn
 that thinks, runs tools and answers. What the prompt says picks the turn:
 

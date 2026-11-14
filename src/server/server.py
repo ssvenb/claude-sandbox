@@ -1356,6 +1356,8 @@ if __name__ == "__main__":
                         help="file listing one project directory per line (default: %(default)s)")
     args = parser.parse_args()
     if (bind := ports_bind(args.bind, os.environ)):
+        if args.bind and bind != args.bind and not os.environ.get("PORTS_BIND"):
+            os.environ["PORTS_NAME"] = args.bind  # a name resolved to its address: the port links keep the name
         os.environ["PORTS_BIND"] = bind  # for every run.sh this starts, sessions and --web alike
     restore()
     server = serve(args.port, args.projects, args.bind, args.allow_host)

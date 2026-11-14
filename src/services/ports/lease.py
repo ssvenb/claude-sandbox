@@ -136,7 +136,11 @@ class Ports:
                 pid = ""
             if not pid or not _alive(pid):
                 with open(self.dir / "portd.log", "a") as log:
-                    proxy = subprocess.Popen([str(SANDBOX / "src/services/ports/portd.py"), "--bind", bind, str(self.dir)],
+                    # The name PORTS_BIND was resolved from (the web UI's --bind), for the links; only a host name.
+                    name = self.env.get("PORTS_NAME") or ""
+                    name = name if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", name) else ""
+                    proxy = subprocess.Popen([str(SANDBOX / "src/services/ports/portd.py"), "--bind", bind,
+                                              "--name", name, str(self.dir)],
                                              stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT)
                 (self.dir / "portd.pid").write_text(f"{proxy.pid}\n")
         say(f"🔌 Ports: {', '.join(ports)} published on {bind}")

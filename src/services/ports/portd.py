@@ -4,7 +4,7 @@
 Runs on the HOST, one per user (and bind address), shared by every sandbox of every project: the
 first run.sh starts it, and it exits once no run.sh that uses it is alive.
 
-Usage: portd.py [--bind ADDR] <dir>
+Usage: portd.py [--bind ADDR] [--name HOST] <dir>
 
 Each sandbox has a network namespace of its own, so two of them can both serve on :3000. Inside,
 a root helper (src/services/ports/publish-ports.py) watches what the agent listens on and offers each port as a unix
@@ -175,13 +175,14 @@ def offered(runs_dir: str, live: dict[str, str]) -> dict[tuple[str, int], str]:
     return found
 
 
-def url_host(bind: str) -> str:
+def url_host(bind: str, name: str = "") -> str:
     """How the page should name this machine in a link: by whatever name the page itself was
     opened by ({host}, filled in by the page) — on every interface that reaches the port, and on
-    loopback the page is on this machine too — or, bound to one address, by that address."""
+    loopback the page is on this machine too — or, bound to one address, by the name that address
+    was given as (--name), else by the address."""
     if bind in ("0.0.0.0", "::", "127.0.0.1", "::1"):
         return "{host}"
-    return f"[{bind}]" if ":" in bind else bind
+    return name or (f"[{bind}]" if ":" in bind else bind)
 
 
 def write(path: str, data) -> None:
@@ -192,8 +193,8 @@ def write(path: str, data) -> None:
 
 
 class Daemon:
-    def __init__(self, base: str, bind: str):
-        self.base, self.bind = base, bind
+    def __init__(self, base: str, bind: str, name: str = ""):
+        self.base, self.bind, self.name = base, bind, name
         self.runs, self.users = os.path.join(base, "runs"), os.path.join(base, "users")
         self.published: dict[tuple[str, int], Published] = {}
         self.assigned: dict[tuple[str, int], int] = {}  # host port a run's port had, to get it again
@@ -235,7 +236,7 @@ class Daemon:
                         for p in self.published.values()), key=lambda p: (p["run_id"], p["port"]))
         if ports == self.said:
             return
-        host = url_host(self.bind)
+        host = url_host(self.bind, self.name)
         items = [{"run_id": p["run_id"], "ref": f":{p['port']}", "url": f"http://{host}:{p['host_port']}/",
                   "title": f"Port {p['port']} of the sandbox, published on {self.bind}:{p['host_port']}"}
                  for p in ports]
@@ -274,6 +275,7 @@ class Daemon:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--bind", default="127.0.0.1", help="address published ports listen on")
+    ap.add_argument("--name", default="", help="host name the links use for --bind's address")
     ap.add_argument("dir")
     args = ap.parse_args()
     # Every sandbox uses this one process, so it must not die with the terminal of the run that
@@ -282,7 +284,7 @@ def main() -> int:
         os.setsid()
     except OSError:
         pass
-    daemon = Daemon(args.dir, args.bind)
+    daemon = Daemon(args.dir, args.bind, args.name)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     try:
         daemon.run()

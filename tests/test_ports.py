@@ -188,6 +188,8 @@ def test_links_name_the_host_the_way_the_page_can_reach_it():
     assert portd.url_host("0.0.0.0") == "{host}"
     assert portd.url_host("192.168.1.5") == "192.168.1.5"
     assert portd.url_host("fd00::1") == "[fd00::1]"
+    assert portd.url_host("100.64.0.1", "box.vpn.example") == "box.vpn.example"  # the web UI's --bind name
+    assert portd.url_host("0.0.0.0", "box.vpn.example") == "{host}"
 
 
 # --- its lifecycle on the host ----------------------------------------------------------------
@@ -225,6 +227,18 @@ def test_a_run_joins_the_central_proxy_and_the_last_one_out_stops_it(short_tmp, 
         time.sleep(0.1)
     else:
         raise AssertionError("the proxy outlived its last user")
+
+
+@pytest.mark.parametrize("name, passed", [("box.vpn.example", "box.vpn.example"), ("-x; rm", "")])
+def test_the_proxy_names_its_links_by_ports_name_only_when_it_is_a_host_name(short_tmp, name, passed):
+    lease = Ports(ports_env(short_tmp, PORTS="3000", PORTS_NAME=name), "abc123")
+    lease.start()
+    try:
+        base = short_tmp / f"sandbox-ports-{os.getuid()}-127.0.0.1"
+        cmdline = Path(f"/proc/{(base / 'portd.pid').read_text().strip()}/cmdline").read_bytes().split(b"\0")
+        assert cmdline[cmdline.index(b"--name") + 1] == passed.encode()
+    finally:
+        lease.release()
 
 
 def test_a_second_run_shares_the_proxy_and_keeps_it_when_the_first_leaves(short_tmp):

@@ -381,7 +381,7 @@ def test_a_session_has_one_tab_with_a_lamp_in_the_colour_of_what_its_agent_does(
     tab.wait_for_function("decodeURIComponent(document.querySelector('link[rel=icon]').href).includes('stroke')")
     assert tab.is_disabled("#input")
     board.wait_for_selector("ul.ended button[aria-label='Resume session']")  # listed on its project's panel
-    assert " ".join(board.inner_text(".project h4:has-text('Ended')").split()) == "Ended sessions 1"  # under its own header
+    assert " ".join(board.inner_text(".project h4:has-text('Sessions')").split()) == "Sessions 1"  # under its own header
     assert board.query_selector("details") is None and board.query_selector("text=1 ended") is None  # with nothing to unfold
     with tab.expect_navigation():  # resuming takes this tab to the run's new session
         tab.click(".over button:has-text('Resume')")

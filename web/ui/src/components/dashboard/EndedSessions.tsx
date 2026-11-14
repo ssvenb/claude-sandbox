@@ -19,7 +19,7 @@ export function EndedSessions({ ended }: { ended: EndedSession[] }) {
   if (!ended.length) return null;
   return (
     <>
-    <h4>Ended sessions<span className="count">{ended.length}</span></h4>
+    <h4>Sessions<span className="count">{ended.length}</span></h4>
     <ul className="ended">
       {ended.map(({ session: s, items, resumable }) => (
         <li key={s.id}>

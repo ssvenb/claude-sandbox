@@ -18,6 +18,8 @@ export function EndedSessions({ ended }: { ended: EndedSession[] }) {
   const { show, start, remove } = useDashboardActions();
   if (!ended.length) return null;
   return (
+    <>
+    <h4>Ended sessions<span className="count">{ended.length}</span></h4>
     <ul className="ended">
       {ended.map(({ session: s, items, resumable }) => (
         <li key={s.id}>
@@ -36,5 +38,6 @@ export function EndedSessions({ ended }: { ended: EndedSession[] }) {
         </li>
       ))}
     </ul>
+    </>
   );
 }

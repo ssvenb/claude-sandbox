@@ -60,8 +60,6 @@
   .window .chips { display: flex; gap: 6px; min-width: 0; overflow: hidden; }
   .window .chips:empty { display: none; }
   .window .chips > * { position: relative; z-index: 1; }
-  /* A project's ended sessions, at the foot of its panel. */
-  ul.ended { margin-top: 8px; }
 
   /* The right: a panel per project, its buttons, then what its plugins list (issues, …). */
   .project { padding: 14px 16px 12px; background: var(--panel); border: 1px solid var(--rule); border-radius: 14px; }

@@ -1,4 +1,4 @@
-"""web/server.py: chats on pipes and terminals in ptys, streamed to the page; only our own page
+"""src/server/server.py: chats on pipes and terminals in ptys, streamed to the page; only our own page
 may drive it."""
 import base64
 import json
@@ -17,7 +17,7 @@ import pytest
 
 from conftest import REPO
 
-sys.path.insert(0, str(REPO / "web"))
+sys.path.insert(0, str(REPO / "src/server"))
 import server as web  # noqa: E402
 
 UI = REPO / "web/ui"  # the pages: a React app, built into UI/dist, which the server serves
@@ -62,7 +62,7 @@ def ui(tmp_path, ui_dist):
     project.mkdir()
     listing = tmp_path / "projects"
     listing.write_text(f"# comment\n\n{project}\n")
-    proc = subprocess.Popen([REPO / "web/server.py", "--port", "0", "--projects", listing,
+    proc = subprocess.Popen([REPO / "src/server/server.py", "--port", "0", "--projects", listing,
                              ], stdout=subprocess.PIPE, text=True,
                             env={"PATH": f"{tmp_path}/bin:/usr/bin:/bin", "SHELL": "/bin/sh", "HOME": str(tmp_path)})
     base = proc.stdout.readline().split()[1]
@@ -206,8 +206,8 @@ def test_only_what_the_build_made_for_the_pages_is_served(ui, path):
 
 
 def test_without_a_build_the_pages_say_how_to_make_one(tmp_path):
-    shutil.copytree(REPO / "web", tmp_path / "web", ignore=shutil.ignore_patterns("__pycache__", "ui"))
-    proc = subprocess.Popen([tmp_path / "web/server.py", "--port", "0", "--projects", tmp_path / "projects"],
+    shutil.copytree(REPO / "src/server", tmp_path / "src/server", ignore=shutil.ignore_patterns("__pycache__"))
+    proc = subprocess.Popen([tmp_path / "src/server/server.py", "--port", "0", "--projects", tmp_path / "projects"],
                             stdout=subprocess.PIPE, text=True, env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)})
     try:
         base = proc.stdout.readline().split()[1]
@@ -688,7 +688,7 @@ def test_a_prompt_takes_files_and_its_events_keep_only_their_names(chat):
                 s.prompt("look", None, bad)
     finally:
         s.stop()
-        s.proc.wait(5)
+        chat.until(s, lambda s: s.exit is not None)
 
 
 def test_a_chat_streams_its_events_and_takes_answers_and_interrupts(chat, tmp_path):

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Claude Code hook: say in the terminal stream whether the agent is working, idle, or waiting on
-an answer, for web/server.py to pick up and colour the session's dot with.
+an answer, for src/server/server.py to pick up and colour the session's dot with.
 
 The state goes out as a user variable, `ESC ] 1337 ; SetUserVar=agent_status=<base64> BEL` (the
 iTerm2/WezTerm convention): terminals that do not know it ignore it, xterm.js among them. Hooks

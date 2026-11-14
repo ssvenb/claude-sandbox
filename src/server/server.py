@@ -11,12 +11,12 @@ POSTs. The page is there from the first moment: what is typed while the sandbox 
 boots waits here and is handed to the agent the moment it is ready. A project's terminal is your
 shell in a pty. Standard library only; the terminal page loads xterm.js from a CDN.
 
-    web/server.py [--port 8787] [--bind 127.0.0.1] [--allow-host NAME]... [--projects FILE]
+    src/server/server.py [--port 8787] [--bind 127.0.0.1] [--allow-host NAME]... [--projects FILE]
 
 FILE lists one project directory per line (default ~/.config/claude-sandbox/projects) and is
 re-read on every request. A line may be a glob (`~/code/*`); a match ending in `.git` stands for
 its repo, so `~/code/*/.git` lists only the git checkouts. Sessions outlive this process: each
-runs under web/holder.py, which keeps its output while no server listens, and a server that starts
+runs under src/server/holder.py, which keeps its output while no server listens, and a server that starts
 takes back the sessions the last one left (STATE), running or ended — a restart cuts nothing off.
 """
 import argparse
@@ -41,17 +41,18 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent.parent  # the checkout
 HOLDER = HERE / "holder.py"
 # A session's holder's socket and output, and what this server knew of it when it stopped.
 STATE = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "claude-sandbox/sessions"
 META = ("id", "project", "kind", "run_id", "started", "ui")
 SAVED = ("exit", "events", "info", "todos", "tasks", "ready", "state", "waiting", "title", "activity", "said",
          "cost", "context", "sent", "offset")  # of a chat
-RUN_SH = HERE.parent / "run.sh"
-PLUGINS = HERE.parent / "plugins"
-AGENTS = HERE.parent / "agents"
-KERNEL = HERE.parent / "src/orchestrator/kernel.json"  # the settings of the sandbox itself, as plugins declare theirs
-EXAMPLE = HERE.parent / ".claude-sandbox.example.json"  # what each plugin's section may hold
+RUN_SH = ROOT / "run.sh"
+PLUGINS = ROOT / "plugins"
+AGENTS = ROOT / "agents"
+KERNEL = ROOT / "src/orchestrator/kernel.json"  # the settings of the sandbox itself, as plugins declare theirs
+EXAMPLE = ROOT / ".claude-sandbox.example.json"  # what each plugin's section may hold
 CONFIG = ".claude-sandbox.json"  # a project's own sandbox configuration, next to its checkout
 RUN_ID = re.compile(r"[0-9a-f]{6}")
 SCROLLBACK = 256 * 1024  # bytes replayed to a browser that (re)opens a terminal
@@ -72,7 +73,7 @@ STALE = 30
 # The pages are one React app (web/ui), built by `npm run build` into web/ui/dist: its index.html
 # for each of them (it picks the page by its path), and the scripts and styles that loads, under
 # their own paths. Read on every request, so a new build shows on reload.
-DIST = HERE / "ui/dist"
+DIST = ROOT / "web/ui/dist"
 SERVICE = "claude-sandbox-web.service"  # install.sh registers it
 PAGES = ("/", "/session", "/chat")
 STATIC = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".map": "application/json",
@@ -132,7 +133,7 @@ def command(kind, run_id, task=None, chat=False):
 
 class Session:
     """A terminal: a project's shell, or an agent's own TUI (`"ui": "terminal"`), in a pty, held by
-    web/holder.py so it outlives this server."""
+    src/server/holder.py so it outlives this server."""
     ui, mode = "terminal", "pty"
 
     def __init__(self, project, kind, run_id, task=None):
@@ -934,7 +935,7 @@ scoped = []
 
 
 def hold(folder, mode, argv, cwd):
-    """Starts a session's process under web/holder.py, which outlives this server. Under systemd
+    """Starts a session's process under src/server/holder.py, which outlives this server. Under systemd
     it goes into a scope of its own: restarting this server's unit stops everything in its cgroup."""
     if not scoped:
         unit = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--"]
@@ -970,7 +971,7 @@ def drop(s):
 
 def sync():
     """Pulls main into this checkout and runs install.sh; then, under systemd, restarts this server."""
-    root = HERE.parent
+    root = ROOT
     for step in (["git", "-C", str(root), "pull", "--ff-only", "origin", "main"], [str(root / "install.sh"), "--yes"]):
         done = subprocess.run(step, capture_output=True, text=True, stdin=subprocess.DEVNULL)
         if done.returncode:

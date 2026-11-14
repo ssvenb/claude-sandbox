@@ -1,5 +1,5 @@
 // What every agent's chat bridge (agents/<name>/chat.mjs) shares: the wire between the bridge, in
-// the container, and web/server.py on the host. It is the container's own stdio (`docker run -i`):
+// the container, and src/server/server.py on the host. It is the container's own stdio (`docker run -i`):
 //
 //   bridge → host   one JSON object per line on stdout, each line led by an ASCII record separator
 //                   (RS, 0x1e). Anything else on stdout is boot output, which the host shows as such.

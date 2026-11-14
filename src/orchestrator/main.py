@@ -36,7 +36,7 @@ def parse(argv: list[str]) -> dict:
     i = 0
     while i < len(argv):
         arg = argv[i]
-        # --run-id starts a FRESH run under an id the caller picked (web/server.py does, to know
+        # --run-id starts a FRESH run under an id the caller picked (src/server/server.py does, to know
         # which run a session is before the container says so); --resume re-attaches to one.
         if arg in ("--resume", "--run-id"):
             opts["resume"] = opts["resume"] or arg == "--resume"

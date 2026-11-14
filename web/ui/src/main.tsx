@@ -1,5 +1,5 @@
 // One app, three pages, picked by the address: "/" the dashboard, "/chat#<id>" a session's
-// conversation, "/session#<id>" a terminal. web/server.py serves the same index.html for each.
+// conversation, "/session#<id>" a terminal. src/server/server.py serves the same index.html for each.
 import { lazy, StrictMode, Suspense, type ComponentType, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Loading } from './components/common/Spinner';

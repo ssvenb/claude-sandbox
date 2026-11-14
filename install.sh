@@ -147,8 +147,8 @@ if [ "$LAUNCHERS" = 1 ]; then
   ln -sfn "$here/run.sh" "$bin/claude-sandbox"
   ok "claude-sandbox      → $here/run.sh"
   if [ "$WEB" = 1 ]; then
-    ln -sfn "$here/web/serve.sh" "$bin/claude-sandbox-web"
-    ok "claude-sandbox-web  → $here/web/serve.sh"
+    ln -sfn "$here/src/server/serve.sh" "$bin/claude-sandbox-web"
+    ok "claude-sandbox-web  → $here/src/server/serve.sh"
   fi
   case ":$PATH:" in *":$bin:"*) ;; *) warn "$bin is not on your PATH: add it (export PATH=\"\$HOME/.local/bin:\$PATH\") to use them." ;; esac
 fi
@@ -156,10 +156,16 @@ fi
 if [ "$WEB" = 1 ] && have systemctl; then
   step "Service (systemd)"
   service=claude-sandbox-web.service
-  if systemctl cat "$service" >/dev/null 2>&1 || systemctl --user cat "$service" >/dev/null 2>&1; then
+  units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+  start="ExecStart=$here/src/server/serve.sh"
+  if [ -f "$units/$service" ] && ! grep -qxF "$start" "$units/$service"; then
+    # One this script wrote before the server moved out of web/: pointed at where it is now.
+    sed -i "s|^ExecStart=.*|$start|" "$units/$service"
+    systemctl --user daemon-reload
+    ok "$service (now runs $here/src/server/serve.sh)"
+  elif systemctl cat "$service" >/dev/null 2>&1 || systemctl --user cat "$service" >/dev/null 2>&1; then
     ok "$service (already registered)"
   elif systemctl --user show-environment >/dev/null 2>&1; then
-    units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
     mkdir -p "$units"
     # PATH as this shell has it: the server runs docker, uv, git and jq.
     cat >"$units/$service" <<UNIT
@@ -168,7 +174,7 @@ Description=claude-sandbox web UI
 After=network-online.target
 
 [Service]
-ExecStart=$here/web/serve.sh
+$start
 Environment="PATH=$PATH"
 Restart=on-failure
 

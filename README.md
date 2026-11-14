@@ -39,7 +39,7 @@ claude-sandbox-web        # http://127.0.0.1:8787  (--port N, --projects FILE, -
 ```
 
 The projects are lines of `~/.config/claude-sandbox/projects`; `claude-sandbox-web` is
-`web/serve.sh`, the server (`web/server.py`) in the uv environment.
+`src/server/serve.sh`, the server (`src/server/server.py`) in the uv environment.
 
 The home page is a dashboard of all your sandboxes. On top is a box to start a session by writing
 its first message, with the project it is for beside it. Under it, on the left, is what is
@@ -146,7 +146,7 @@ diffs ([jsdiff](https://github.com/kpdecker/jsdiff)), the terminal [xterm.js](ht
 all bundled; only the fonts come from a CDN. To work on it, run the server and `npm run dev` in
 `web/ui`, which serves the pages with hot reload and passes `/api` on to the server on port 8787.
 It listens on loopback only and has no login — use an SSH tunnel to reach it from elsewhere.
-Sessions outlive the server: each runs under `web/holder.py`, which keeps its output while no server
+Sessions outlive the server: each runs under `src/server/holder.py`, which keeps its output while no server
 listens, and the next server takes them back from `~/.local/state/claude-sandbox/sessions`, running or
 ended, so a restart (the dashboard's update button, say) cuts nothing off. Under systemd each holder
 runs in a scope of its own (`systemd-run --user --scope`), outside the server unit's cgroup.
@@ -327,7 +327,7 @@ built, so misconfiguration fails fast and cheaply.
 Every setting a project can make in its `.claude-sandbox.json` is declared by its owner — a plugin
 in its `plugin.json`, an agent in its `agent.json`, the sandbox itself in
 [src/orchestrator/kernel.json](src/orchestrator/kernel.json) — as a `settings` list. The web UI draws its settings form from
-these, and `web/server.py` checks values against them before it writes the file.
+these, and `src/server/server.py` checks values against them before it writes the file.
 
 ```json
 "settings": [
@@ -771,7 +771,8 @@ The core is grouped by role under `src/`; each folder has one reason to change.
 | [src/services/settings/](src/services/settings) | the agent's managed policy: `merge-settings.py` deep-merges plugin fragments into `settings-base.json` |
 | [src/services/chat/](src/services/chat) | `chat-bridge.mjs`: the chat events the agents' `chat.mjs` speak and the web UI draws |
 | [src/shared/](src/shared) | `peer_owner.py`: who is on the other end of a socket, for root-side helpers |
-| [web/](web) | web UI over `run.sh`: `server.py` (sessions, PRs and issues, a tunnel to `code serve-web`) and the pages it serves, built from `ui/` — a React app (Vite, TypeScript): the dashboard, a session's chat, a terminal (`src/pages`), their components by feature (`src/components`), `src/hooks`, `src/api`, `src/lib`, `src/styles` |
+| [src/server/](src/server) | **the web UI's server** over `run.sh`: `server.py` (sessions, PRs and issues, a tunnel to `code serve-web`, the pages), `holder.py` (what keeps a session running through a restart of the server), `serve.sh` (starts it in the uv environment) |
+| [web/](web) | the web UI's pages, built from `ui/` — a React app (Vite, TypeScript): the dashboard, a session's chat, a terminal (`src/pages`), their components by feature (`src/components`), `src/hooks`, `src/api`, `src/lib`, `src/styles` |
 | [agents/](agents) | the agents themselves |
 | [plugins/](plugins) | the plugins themselves |
 | [tests/](tests) | pytest suite (`uv run pytest`); `tests/e2e` boots the built image |
@@ -779,16 +780,16 @@ The core is grouped by role under `src/`; each folder has one reason to change.
 ## Dependencies
 
 The project is a [uv](https://docs.astral.sh/uv/) project: `uv sync` creates `.venv` from
-`uv.lock`, and `run.sh` and `web/serve.sh` run in it. What a library could replace was weighed
+`uv.lock`, and `run.sh` and `src/server/serve.sh` run in it. What a library could replace was weighed
 piece by piece, to keep the code that has to be maintained here small:
 
 | Hand-written code | Verdict |
 |---|---|
 | Markdown rendering, terminal loading, component plumbing in the web UI | **replaced** by npm packages (React, `react-markdown`, `@xterm/xterm`), bundled by Vite — see [web/ui/package.json](web/ui/package.json) |
-| `web/server.py`'s HTTP layer → FastAPI/Starlette | kept: the server tunnels VS Code (`code serve-web`) over raw sockets, upgrade requests included, which ASGI does not expose; sessions are ptys and pipes read by threads. A framework would replace the ~80 lines of routing and leave the rest |
+| `src/server/server.py`'s HTTP layer → FastAPI/Starlette | kept: the server tunnels VS Code (`code serve-web`) over raw sockets, upgrade requests included, which ASGI does not expose; sessions are ptys and pipes read by threads. A framework would replace the ~80 lines of routing and leave the rest |
 | `.env` scanning (`config.py`) → `python-dotenv` | kept: 30 lines, and its rules must match `env_scan_into`, the bash twin plugins use (a test holds the two together); `python-dotenv` reads quotes and comments differently and has no "commented defaults" mode |
 | GitHub App JWT (`mint-gh-token.py`) → `PyJWT` + `cryptography` | kept: ten lines around `openssl dgst`, against a compiled dependency in every environment |
-| Settings validation (`web/server.py`) → `pydantic` / `jsonschema` | kept: the types are declared by plugin manifests at run time, so a schema library would need a translation layer as long as the checks |
+| Settings validation (`src/server/server.py`) → `pydantic` / `jsonschema` | kept: the types are declared by plugin manifests at run time, so a schema library would need a translation layer as long as the checks |
 | Credential-injecting proxy (`upstream-proxy`), port proxy (`portd.py`) | kept: socket plumbing with a security boundary and their own tests; no library does this job as is |
 | Command line (`main.py`) | kept: 40 lines whose exact refusals the web UI shows |
 

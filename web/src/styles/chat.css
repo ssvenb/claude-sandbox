@@ -21,9 +21,10 @@
   header .state.question { background: var(--ask-wash); color: var(--ask); }
   header .state.idle { background: var(--ok-wash); color: var(--ok); }
   header .chips { display: flex; gap: 6px; min-width: 0; overflow: hidden; }
-  /* The chips and the theme switch: in the bar on a desk, in a row that drops down under it on a phone. */
+  /* The chips and the buttons: in the bar on a desk, chips before the state; in a row that drops down under it on a phone. */
   header .extra { display: contents; }
-  header .theme { order: 1; }
+  header .home, header .who { order: -2; }
+  header .chips { order: -1; }
   header .more { display: none; }
   header .more svg { transition: transform .15s; }
   header.open .more svg { transform: rotate(180deg); }
@@ -216,6 +217,7 @@
     header { padding: 8px 10px; gap: 6px; }
     header { flex-wrap: wrap; }
     header .more { display: inline-flex; }
+    header .theme { display: none; }  /* the one on the dashboard sets it for every page */
     header .extra { display: none; order: 1; flex-basis: 100%; align-items: center; gap: 6px; }
     header.open .extra { display: flex; animation: drop .15s ease-out; }
     header .chips { flex: 1; flex-wrap: wrap; }

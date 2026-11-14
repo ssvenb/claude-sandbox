@@ -26,7 +26,7 @@ interface Props {
 
 /** Which session this is and how it is doing, with the buttons that end it. */
 export function ChatHeader({ session, gone, info, state, items, onStop, onDelete, onCode }: Props) {
-  // On a phone the chips and the theme switch drop down in a row of their own, on request.
+  // On a phone the chips and the buttons (not the theme switch) drop down in a row of their own, on request.
   const [more, setMore] = useState(false);
   if (gone) {
     return (
@@ -45,21 +45,21 @@ export function ChatHeader({ session, gone, info, state, items, onStop, onDelete
         <b title={session.title || ''}>{titled(session)}</b>
         <span>{[projectName(session.project), session.run_id, agent].filter(Boolean).join(' / ')}</span>
       </div>
-      <div className="extra">
-        <div className="chips">{items.map((i, k) => <Chip key={k} item={i} />)}</div>
-        <ThemeSwitch />
-      </div>
       <span className={'state ' + (state ?? 'ended')}>
         <span className={'lamp ' + (state ?? '')} />
         {state ? SHORT[state] : 'Ended'}
       </span>
-      {session.workspace && (
-        <BusyButton className="icon vscode" onClick={onCode} aria-label="VS Code" title="VS Code"><Icon name="vscode" /></BusyButton>
-      )}
-      {state && (
-        <button className="icon stop" onClick={onStop} aria-label="Stop session" title="Stop"><Icon name="stop" /></button>
-      )}
-      <button className="icon" onClick={onDelete} aria-label="Delete session" title="Delete"><Icon name="trash" /></button>
+      <div className="extra">
+        <div className="chips">{items.map((i, k) => <Chip key={k} item={i} />)}</div>
+        {session.workspace && (
+          <BusyButton className="icon vscode" onClick={onCode} aria-label="VS Code" title="VS Code"><Icon name="vscode" /></BusyButton>
+        )}
+        {state && (
+          <button className="icon stop" onClick={onStop} aria-label="Stop session" title="Stop"><Icon name="stop" /></button>
+        )}
+        <button className="icon" onClick={onDelete} aria-label="Delete session" title="Delete"><Icon name="trash" /></button>
+        <ThemeSwitch />
+      </div>
       <button className="icon more" onClick={() => setMore(!more)} aria-expanded={more} aria-label="More" title="More"><Icon name="down" /></button>
     </header>
   );

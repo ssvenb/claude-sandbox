@@ -6,7 +6,7 @@
 import { execFileSync } from 'node:child_process';
 
 const lib = process.env.SANDBOX_LIB || '/usr/local/lib/sandbox';
-const { emit, clip, sdk, commands, executable, questions, images } = await import(`${lib}/chat-bridge.mjs`);
+const { emit, clip, sdk, commands, executable, questions, images, attach } = await import(`${lib}/chat-bridge.mjs`);
 
 emit({ type: 'hello', agent: 'copilot' });
 const { CopilotClient, RuntimeConnection, approveAll } = await sdk('@github/copilot-sdk');
@@ -190,7 +190,7 @@ await commands(async c => {
       if (/^\/\S/.test(c.text)) await slash(c.text);
       else {
         const attachments = images(c).map((p, i) => ({ type: 'blob', data: p.data, mimeType: p.type, displayName: `image ${i + 1}` }));
-        await session.send({ prompt: c.text, ...(attachments.length && { attachments }) });
+        await session.send({ prompt: await attach(c), ...(attachments.length && { attachments }) });
       }
     } catch (e) {
       fail(e.message);

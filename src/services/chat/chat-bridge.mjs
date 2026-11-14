@@ -25,9 +25,9 @@
 //   model      {id}, effort {level}              what the next turn runs on
 //   notice     {level, text}                     info, warning or error
 //
-// and the commands: prompt {text, images: [{type, data}]}, interrupt {}, answer {id, answers |
+// and the commands: prompt {text, images: [{type, data}], files: [{name, data}]}, interrupt {}, answer {id, answers |
 // cancel}, model {id}, effort {level}, task {id} (stop that background task). An image is its
-// media type and its bytes in base64.
+// media type and its bytes in base64; a file, its name and its bytes in base64.
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
@@ -46,6 +46,25 @@ export function clip(text, max = 16000) {
 export const images = command => (Array.isArray(command.images) ? command.images : []).filter(p =>
   p && /^image\/(png|jpeg|gif|webp)$/.test(p.type) && typeof p.data === 'string' && /^[A-Za-z0-9+/]+=*$/.test(p.data))
   .map(p => ({ type: p.type, data: p.data }));
+
+// The files attached to a prompt, saved in the sandbox: the prompt's text, with where they are said
+// at its end. A name is only its last part, so nothing lands outside the folder made for them.
+export async function attach(command) {
+  const files = (Array.isArray(command.files) ? command.files : []).filter(f =>
+    f && typeof f.name === 'string' && typeof f.data === 'string' && /^[A-Za-z0-9+/]*=*$/.test(f.data));
+  if (!files.length) return command.text;
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { basename, join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'uploads-'));
+  const paths = files.map((f, i) => {
+    const name = basename(f.name.replace(/\\/g, '/')).replace(/^\.+$/, '') || `file-${i + 1}`;
+    const path = join(dir, `${i + 1}-${name}`);  // numbered: two files of one name both stay
+    writeFileSync(path, Buffer.from(f.data, 'base64'));
+    return path;
+  });
+  return `${command.text}${command.text.trim() ? '\n\n' : ''}Attached files:\n${paths.map(p => `- ${p}`).join('\n')}`;
+}
 
 // The agent's SDK, from where its install.sh put it (outside any project, so not on a resolve path).
 export async function sdk(name) {

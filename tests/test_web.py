@@ -656,6 +656,26 @@ def test_a_prompt_takes_the_images_pasted_into_it(chat, monkeypatch):
         s.proc.wait(5)
 
 
+def test_a_prompt_takes_files_and_its_events_keep_only_their_names(chat):
+    s = chat()
+    try:
+        chat.until(s, lambda s: s.ready)
+        notes = {"name": "notes.txt", "data": "aGk="}
+        s.prompt("", None, [notes])
+        commands = chat.tmp / "commands"
+        chat.until(s, lambda s: commands.exists())
+        assert json.loads(commands.read_text().splitlines()[-1]) == {"type": "prompt", "text": "", "files": [notes]}
+        [said] = [e for e in s.events if e["type"] == "user"]
+        assert s.json()["title"] == "File" and said["files"] == ["notes.txt"] and "aGk=" not in str(said)
+        for bad in ([{"name": "../x", "data": "aGk="}], [{"name": "x", "data": "<b>"}], [{"name": "", "data": ""}], [notes] * 9,
+                    [{"name": "big", "data": "A" * (14 << 20)}], "x"):
+            with pytest.raises(ValueError):
+                s.prompt("look", None, bad)
+    finally:
+        s.stop()
+        s.proc.wait(5)
+
+
 def test_a_chat_streams_its_events_and_takes_answers_and_interrupts(chat, tmp_path):
     (tmp_path / "projects").write_text(f"{tmp_path}\n")
     server = web.serve(0, tmp_path / "projects")

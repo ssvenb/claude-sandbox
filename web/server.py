@@ -242,6 +242,29 @@ def pictures(images):
     return [{"type": p["type"], "data": p["data"]} for p in images]
 
 
+FILES, FILE_BYTES = 8, 10 << 20  # files attached to a prompt, and each one's size
+
+
+def uploads(files):
+    """The files attached to a prompt that are not pictures, checked: each its name and its bytes in base64."""
+    if files is None:
+        return []
+    if not isinstance(files, list) or len(files) > FILES:
+        raise ValueError(f"a prompt takes up to {FILES} files")
+    for f in files:
+        if not isinstance(f, dict) or not isinstance(f.get("name"), str) or not isinstance(f.get("data"), str):
+            raise ValueError("a file is its name and its data")
+        if not f["name"].strip() or "/" in f["name"] or "\\" in f["name"] or "\0" in f["name"] or f["name"] in (".", ".."):
+            raise ValueError("a file's name is a plain name, without a folder")
+        if len(f["data"]) * 3 // 4 > FILE_BYTES:
+            raise ValueError("a file is at most 10 MB")
+        try:
+            base64.b64decode(f["data"], validate=True)
+        except ValueError:
+            raise ValueError("a file's data is base64") from None
+    return [{"name": f["name"], "data": f["data"]} for f in files]
+
+
 def tool_label(name, given):
     """A tool call in a few words, for a session's row: what it runs, reads or looks for."""
     given = given if isinstance(given, dict) else {}
@@ -264,7 +287,7 @@ class Chat(Session):
         self.started, self.exit = time.time(), None
         self.listeners, self.events = [], []
         self.tasks = []  # what its agent runs in the background right now
-        self.ready, self.state, self.waiting = False, "idle", []  # prompts typed before `ready`
+        self.ready, self.state, self.waiting = False, "idle", []  # (event, command) of prompts typed before `ready`
         self.info, self.todos = {}, []
         self.title = self.activity = self.said = ""
         self.cost, self.context, self.sent = None, None, 0
@@ -353,10 +376,10 @@ class Chat(Session):
             self._tell({"type": "ready", **self.info})
             if first:  # what was typed while the sandbox started, in the order it was typed
                 waiting, self.waiting = self.waiting, []
-                for prompt in waiting:
-                    prompt.pop("queued", None)
-                    self._send({"type": "prompt", **{k: prompt[k] for k in ("text", "images") if k in prompt}})
-                    self._tell({"type": "sent", "id": prompt["id"]})
+                for event, command in waiting:
+                    event.pop("queued", None)
+                    self._send(command)
+                    self._tell({"type": "sent", "id": event["id"]})
                 if waiting:
                     self.state = "working"
                 self._tell({"type": "status", "state": self.status()})
@@ -391,24 +414,26 @@ class Chat(Session):
         except (OSError, ValueError):  # it ended under us: the exit event says so
             pass
 
-    def prompt(self, text, images=None):
-        """A message of the user's, with the pictures pasted into it: to the agent at once, or kept
-        until it is ready."""
-        images = pictures(images)
-        if not isinstance(text, str) or not (text.strip() or images):
+    def prompt(self, text, images=None, files=None):
+        """A message of the user's, with the pictures pasted into it and the files attached: to the
+        agent at once, or kept until it is ready. Of a file, the page's events keep only its name."""
+        images, files = pictures(images), uploads(files)
+        if not isinstance(text, str) or not (text.strip() or images or files):
             raise ValueError("a prompt is text")
         with lock:
             if self.exit is not None:
                 raise ValueError("this session has ended: resume it to go on")
             self.sent += 1
-            event = {"type": "user", "id": f"u{self.sent}", "text": text, **({"images": images} if images else {})}
-            self.title = self.title or " ".join(text.split())[:140] or "Image"
+            event = {"type": "user", "id": f"u{self.sent}", "text": text, **({"images": images} if images else {}),
+                     **({"files": [f["name"] for f in files]} if files else {})}
+            self.title = self.title or " ".join(text.split())[:140] or ("File" if files and not images else "Image")
+            command = {"type": "prompt", "text": text, **({"images": images} if images else {}), **({"files": files} if files else {})}
             if self.ready:
-                self._send({"type": "prompt", "text": text, **({"images": images} if images else {})})
+                self._send(command)
                 self.state = "working"
             else:
                 event["queued"] = True
-                self.waiting.append(event)
+                self.waiting.append((event, command))
             self._tell(event, keep=True)
             self._tell({"type": "status", "state": self.status()})
 
@@ -1027,7 +1052,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(req, dict):
                     raise ValueError("the request must be a JSON object")
                 if m[2] == "prompt":
-                    s.prompt(req.get("text"), req.get("images"))
+                    s.prompt(req.get("text"), req.get("images"), req.get("files"))
                 else:  # only the fields a bridge reads, under the name the path gave
                     s.tell({"type": m[2], **{k: req[k] for k in ("id", "answers", "cancel", "level") if k in req}})
                 self.reply(200, {})

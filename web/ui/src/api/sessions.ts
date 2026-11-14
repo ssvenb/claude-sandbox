@@ -1,7 +1,7 @@
 // The server's API, call by call.
 import { api, post } from './client';
 import type { Answers } from './events';
-import type { AppState, JsonObject, NewSession, Offer, Picture, ProjectConfig, ProjectInfo, Session } from './types';
+import type { AppState, JsonObject, NewSession, Offer, Picture, ProjectConfig, Upload, ProjectInfo, Session } from './types';
 
 const session = (id: string) => `/api/sessions/${id}`;
 const project = (path: string) => 'project=' + encodeURIComponent(path);
@@ -16,7 +16,8 @@ export const deleteSession = (id: string, tidy: string[]) => post<{ failed?: str
 
 // A chat.
 export const eventsUrl = (id: string) => session(id) + '/events';
-export const sendPrompt = (id: string, text: string, images?: Picture[]) => post(session(id) + '/prompt', { text, images });
+export const sendPrompt = (id: string, text: string, images?: Picture[], files?: Upload[]) =>
+  post(session(id) + '/prompt', { text, images, files });
 export const sendAnswer = (id: string, ask: string, reply: { answers: Answers } | { cancel: true }) =>
   post(session(id) + '/answer', { id: ask, ...reply });
 export const interruptSession = (id: string) => post(session(id) + '/interrupt');

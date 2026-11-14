@@ -3,9 +3,17 @@
 export type SessionStatus = 'starting' | 'working' | 'idle' | 'question';
 export type SessionKind = 'run' | 'resume' | 'shell';
 
-/** A picture pasted into a message: its media type and its bytes in base64. */
+/** A picture pasted into a message: its media type and its bytes in base64. Held in the tray, it may
+ *  be any file attached by hand, then with its name: what is not a picture goes as a file. */
 export interface Picture {
   type: string;
+  data: string;
+  name?: string;
+}
+
+/** A file attached to a message that is not a picture: saved in the sandbox for the agent to read. */
+export interface Upload {
+  name: string;
   data: string;
 }
 

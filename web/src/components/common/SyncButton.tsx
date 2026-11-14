@@ -5,7 +5,7 @@ import { Icon } from './Icon';
 const TITLE = 'Update: pull main, run install.sh, restart the server';
 
 async function sync() {
-  if (!confirm(TITLE + '?\nSessions this server runs are cut off by the restart.')) return;
+  if (!confirm(TITLE + '?\nSessions keep running: the restarted server takes them back.')) return;
   try {
     const { restarting } = await post<{ restarting: boolean }>('/api/sync');
     if (!restarting) return alert('Updated. This server does not run as claude-sandbox-web.service: restart it yourself.');

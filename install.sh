@@ -16,7 +16,7 @@ set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 YES=0 DEV=0 WEB=1 LAUNCHERS=1 PROJECTS=()
-NODE_MIN=20.19  # what the web UI's build (Vite) needs: web/ui/package.json's engines
+NODE_MIN=20.19  # what the web UI's build (Vite) needs: web/package.json's engines
 
 usage() { sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 while [ $# -gt 0 ]; do
@@ -111,6 +111,10 @@ ok "environment: $here/.venv"
 
 if [ "$WEB" = 1 ]; then
   step "Web UI (React, built with npm)"
+  if ! have node && [ -n "${SHELL:-}" ]; then
+    # Run from a service or cron, PATH lacks what the user's shell rc adds (nvm, fnm, volta): take that PATH.
+    rc_path=$("$SHELL" -ic 'printf "\n%s" "$PATH"' </dev/null 2>/dev/null | tail -n1) && [ -n "$rc_path" ] && export PATH="$rc_path"
+  fi
   node_ok=0
   have node && node_ok=$(node -p "const [a, b] = process.versions.node.split('.').map(Number), [x, y] = '$NODE_MIN'.split('.').map(Number); a > x || (a === x && b >= y) ? 1 : 0" 2>/dev/null || echo 0)
   if ! have npm || [ "$node_ok" != 1 ]; then
@@ -121,8 +125,13 @@ if [ "$WEB" = 1 ]; then
    and run ./install.sh again — or pass --no-web to set up run.sh alone."
   fi
   ok "node $(node --version), npm $(npm --version)"
-  (cd "$here/web/ui" && npm ci --no-audit --no-fund && npm run build)
-  ok "built: $here/web/ui/dist"
+  # The app moved from web/ui to web: what git leaves of the old place (ignored, so untracked) goes.
+  if [ -d "$here/web/ui" ]; then
+    rm -rf "$here/web/ui/node_modules" "$here/web/ui/dist"
+    rmdir "$here/web/ui" 2>/dev/null || warn "$here/web/ui is left over from before the web UI moved to web/: remove it."
+  fi
+  (cd "$here/web" && npm ci --no-audit --no-fund && npm run build)
+  ok "built: $here/web/dist"
 
   step "Projects on the dashboard"
   listing="${XDG_CONFIG_HOME:-$HOME/.config}/claude-sandbox/projects"
@@ -143,8 +152,8 @@ if [ "$LAUNCHERS" = 1 ]; then
   ln -sfn "$here/run.sh" "$bin/claude-sandbox"
   ok "claude-sandbox      → $here/run.sh"
   if [ "$WEB" = 1 ]; then
-    ln -sfn "$here/web/serve.sh" "$bin/claude-sandbox-web"
-    ok "claude-sandbox-web  → $here/web/serve.sh"
+    ln -sfn "$here/src/server/serve.sh" "$bin/claude-sandbox-web"
+    ok "claude-sandbox-web  → $here/src/server/serve.sh"
   fi
   case ":$PATH:" in *":$bin:"*) ;; *) warn "$bin is not on your PATH: add it (export PATH=\"\$HOME/.local/bin:\$PATH\") to use them." ;; esac
 fi
@@ -152,10 +161,16 @@ fi
 if [ "$WEB" = 1 ] && have systemctl; then
   step "Service (systemd)"
   service=claude-sandbox-web.service
-  if systemctl cat "$service" >/dev/null 2>&1 || systemctl --user cat "$service" >/dev/null 2>&1; then
+  units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+  start="ExecStart=$here/src/server/serve.sh"
+  if [ -f "$units/$service" ] && ! grep -qxF "$start" "$units/$service"; then
+    # One this script wrote before the server moved out of web/: pointed at where it is now.
+    sed -i "s|^ExecStart=.*|$start|" "$units/$service"
+    systemctl --user daemon-reload
+    ok "$service (now runs $here/src/server/serve.sh)"
+  elif systemctl cat "$service" >/dev/null 2>&1 || systemctl --user cat "$service" >/dev/null 2>&1; then
     ok "$service (already registered)"
   elif systemctl --user show-environment >/dev/null 2>&1; then
-    units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
     mkdir -p "$units"
     # PATH as this shell has it: the server runs docker, uv, git and jq.
     cat >"$units/$service" <<UNIT
@@ -164,7 +179,7 @@ Description=claude-sandbox web UI
 After=network-online.target
 
 [Service]
-ExecStart=$here/web/serve.sh
+$start
 Environment="PATH=$PATH"
 Restart=on-failure
 

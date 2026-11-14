@@ -1,5 +1,5 @@
 // A chat session's events, as /api/sessions/<id>/events sends them: a snapshot of everything so
-// far, then one event at a time (src/services/chat/chat-bridge.mjs speaks them, web/server.py adds a few).
+// far, then one event at a time (src/services/chat/chat-bridge.mjs speaks them, src/server/server.py adds a few).
 import type { Picture, Session, SessionStatus } from './types';
 
 export interface Model {

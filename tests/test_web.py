@@ -1,10 +1,11 @@
-"""web/server.py: chats on pipes and terminals in ptys, streamed to the page; only our own page
+"""src/server/server.py: chats on pipes and terminals in ptys, streamed to the page; only our own page
 may drive it."""
 import base64
 import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -16,14 +17,21 @@ import pytest
 
 from conftest import REPO
 
-sys.path.insert(0, str(REPO / "web"))
+sys.path.insert(0, str(REPO / "src/server"))
 import server as web  # noqa: E402
 
-UI = REPO / "web/ui"  # the pages: a React app, built into UI/dist, which the server serves
+UI = REPO / "web"  # the pages: a React app, built into UI/dist, which the server serves
+
+
+@pytest.fixture(autouse=True)
+def state(tmp_path, monkeypatch):
+    """Where sessions' holders keep their sockets and output: one place per test."""
+    monkeypatch.setattr(web, "STATE", tmp_path / "state")
+    return tmp_path / "state"
 
 
 def build_ui():
-    """Makes sure web/ui/dist is there and no older than what it is built from: `npm run build`
+    """Makes sure web/dist is there and no older than what it is built from: `npm run build`
     (after `npm ci`, without node_modules) when it is not. Without npm, a build that is there is
     used as it is, and with none the test is skipped. Returns dist."""
     dist = UI / "dist"
@@ -35,11 +43,11 @@ def build_ui():
     if not shutil.which("npm"):
         if built:
             return dist  # stale, but all there is
-        pytest.skip("the web UI is not built and there is no npm to build it: `npm ci && npm run build` in web/ui")
+        pytest.skip("the web UI is not built and there is no npm to build it: `npm ci && npm run build` in web")
     steps = ([] if (UI / "node_modules").exists() else [["npm", "ci"]]) + [["npm", "run", "build"]]
     for step in steps:
         done = subprocess.run(step, cwd=UI, capture_output=True, text=True)
-        assert done.returncode == 0, f"{' '.join(step)} in web/ui failed:\n{done.stdout}{done.stderr}"
+        assert done.returncode == 0, f"{' '.join(step)} in web failed:\n{done.stdout}{done.stderr}"
     return dist
 
 
@@ -54,7 +62,7 @@ def ui(tmp_path, ui_dist):
     project.mkdir()
     listing = tmp_path / "projects"
     listing.write_text(f"# comment\n\n{project}\n")
-    proc = subprocess.Popen([REPO / "web/server.py", "--port", "0", "--projects", listing,
+    proc = subprocess.Popen([REPO / "src/server/server.py", "--port", "0", "--projects", listing,
                              ], stdout=subprocess.PIPE, text=True,
                             env={"PATH": f"{tmp_path}/bin:/usr/bin:/bin", "SHELL": "/bin/sh", "HOME": str(tmp_path)})
     base = proc.stdout.readline().split()[1]
@@ -67,6 +75,12 @@ def ui(tmp_path, ui_dist):
             return e
     call.project, call.tmp = str(project), tmp_path
     yield call
+    for s in json.load(call("/api/state"))["sessions"]:  # they would outlive the server
+        call(f"/api/sessions/{s['id']}/delete", b"")
+    for _ in range(100):  # each one's folder goes once it has ended
+        if not any(tmp_path.glob(".local/state/claude-sandbox/sessions/*")):
+            break
+        time.sleep(0.05)
     proc.terminate()
     proc.wait(5)
 
@@ -192,8 +206,8 @@ def test_only_what_the_build_made_for_the_pages_is_served(ui, path):
 
 
 def test_without_a_build_the_pages_say_how_to_make_one(tmp_path):
-    shutil.copytree(REPO / "web", tmp_path / "web", ignore=shutil.ignore_patterns("__pycache__", "ui"))
-    proc = subprocess.Popen([tmp_path / "web/server.py", "--port", "0", "--projects", tmp_path / "projects"],
+    shutil.copytree(REPO / "src/server", tmp_path / "src/server", ignore=shutil.ignore_patterns("__pycache__"))
+    proc = subprocess.Popen([tmp_path / "src/server/server.py", "--port", "0", "--projects", tmp_path / "projects"],
                             stdout=subprocess.PIPE, text=True, env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)})
     try:
         base = proc.stdout.readline().split()[1]
@@ -393,13 +407,13 @@ def test_a_session_outlives_its_tabs_until_stopped_or_deleted(tmp_path, monkeypa
         post(f"/api/sessions/{deleted.id}/delete")  # still running: stopped first
         calls = tmp_path / "docker-calls"
         for _ in range(50):
-            if None not in (stopped.exit, deleted.exit) and len(calls.read_text().splitlines()) == 2:
+            if None not in (stopped.exit, deleted.exit) and len(calls.read_text().splitlines()) == 2 \
+                    and not deleted.dir.exists():
                 break
             time.sleep(0.1)
         assert sorted(calls.read_text().splitlines()) == ["rm -f sandbox-0a1b2c", "rm -f sandbox-3d4e5f"]
         assert list(web.sessions) == [stopped.id]  # the stopped one stays listed, to read and resume
-        with pytest.raises(OSError):
-            os.fstat(deleted.fd)  # its pty closed once it had ended
+        assert not deleted.dir.exists()  # what it held let go of once it had ended
     finally:
         stopped.stop()
         deleted.stop()
@@ -567,10 +581,11 @@ def chat(tmp_path, monkeypatch):
         raise AssertionError(f"still {s.status()}: {s.events[-3:]}")
     start.until, start.tmp = until, tmp_path
     yield start
+    started = [web.sessions.get(s.id, s) for s in started]  # the one a restart took it back as
     for s in started:
         s.stop()
     for s in started:
-        s.proc.wait(5)
+        until(s, lambda s: s.exit is not None)
     web.sessions.clear()
 
 
@@ -653,7 +668,7 @@ def test_a_prompt_takes_the_images_pasted_into_it(chat, monkeypatch):
             web.start(str(chat.tmp), "run", None, "look", "terminal", [picture])
     finally:
         s.stop()
-        s.proc.wait(5)
+        chat.until(s, lambda s: s.exit is not None)
 
 
 def test_a_prompt_takes_files_and_its_events_keep_only_their_names(chat):
@@ -673,7 +688,7 @@ def test_a_prompt_takes_files_and_its_events_keep_only_their_names(chat):
                 s.prompt("look", None, bad)
     finally:
         s.stop()
-        s.proc.wait(5)
+        chat.until(s, lambda s: s.exit is not None)
 
 
 def test_a_chat_streams_its_events_and_takes_answers_and_interrupts(chat, tmp_path):
@@ -728,6 +743,8 @@ def test_a_chat_streams_its_events_and_takes_answers_and_interrupts(chat, tmp_pa
         assert e.code == 400  # nor a terminal's stream
         assert post(f"/api/sessions/{s['id']}/prompt", {"text": "x"}, "http://evil.example") == 403  # nor another site's page
     finally:
+        live.stop()
+        chat.until(live, lambda s: s.exit is not None)
         server.shutdown()
 
 
@@ -770,3 +787,68 @@ def test_sync_pulls_installs_and_restarts_only_under_systemd(monkeypatch):
     monkeypatch.setattr(web.subprocess, "run", lambda step, **_: subprocess.CompletedProcess(step, 1, "", "not a fast-forward"))
     with pytest.raises(ValueError, match="not a fast-forward"):
         web.sync()
+
+
+def restart():
+    """What a restart of the server does to its sessions: this one stops listening (saving what it
+    knew), and a new one takes them back from their holders."""
+    with web.lock:
+        for s in web.sessions.values():
+            s.save()
+            s._data = s._end = s.save = s.close = lambda *_: None  # the old server is gone: it does nothing more
+            if hasattr(s, "sock"):
+                s.sock.shutdown(socket.SHUT_RDWR)
+        web.sessions.clear()
+    web.restore()
+    return {s.id: s for s in web.sessions.values()}
+
+
+def test_a_chat_runs_on_through_a_restart_of_the_server(chat):
+    s = chat(task="change it")
+    chat.until(s, lambda s: s.ready)
+    s.title = "Keep me"
+    back = restart()[s.id]  # perhaps mid-turn: what it said meanwhile is caught up on, once
+    chat.until(back, lambda s: s.status() == "idle" and any(e["type"] == "turn" for e in s.events))
+    assert (back.title, back.ready, back.exit) == ("Keep me", True, None)
+    assert [e["type"] for e in back.events].count("user") == 1 and [e["type"] for e in back.events].count("turn") == 1
+    assert next(e for e in back.events if e.get("id") == "a1")["text"].startswith("Done with “change it”.")
+    back.prompt("ask me")  # and it takes prompts as before
+    chat.until(back, lambda s: s.status() == "question")
+    back.stop()
+    chat.until(back, lambda s: s.exit is not None)
+    again = restart()[s.id]  # an ended one stays listed, to read and resume
+    assert again.exit is not None and again.title == "Keep me" and again.events[-1]["type"] == "exit"
+
+
+def test_a_terminal_runs_on_through_a_restart_and_says_how_it_ended_while_no_server_listened(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHELL", "/bin/sh")
+    s = web.start(str(tmp_path), "shell", None)
+    try:
+        s.write(b"echo be$((40+2))\n")
+        for _ in range(100):
+            if b"be42" in s.buf:
+                break
+            time.sleep(0.05)
+        back = restart()[s.id]
+        for _ in range(100):  # its screen comes back from its holder
+            if b"be42" in back.buf:
+                break
+            time.sleep(0.05)
+        assert b"be42" in back.buf and back.exit is None
+        back.write(b"sleep 0.5; exit 3\n")
+        time.sleep(0.2)
+        with web.lock:
+            back.save()
+            back._data = back._end = back.save = back.close = lambda *_: None
+            back.sock.shutdown(socket.SHUT_RDWR)
+            web.sessions.clear()
+        time.sleep(1)
+        web.restore()
+        last = web.sessions[s.id]
+        for _ in range(100):
+            if last.exit is not None:
+                break
+            time.sleep(0.05)
+        assert last.exit == 3
+    finally:
+        web.sessions.clear()

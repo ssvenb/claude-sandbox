@@ -119,7 +119,7 @@ def test_the_kernel_offers_every_agent():
 
 
 def test_the_example_config_passes_the_declared_types():
-    sys.path.insert(0, str(REPO / "web"))
+    sys.path.insert(0, str(REPO / "src/server"))
     import server
     server.check_config(json.loads((REPO / ".claude-sandbox.example.json").read_text()))
 
@@ -134,7 +134,7 @@ def test_scripts_run_directly_are_executable_in_git():
     listed = subprocess.run(["git", "ls-files", "-s"], cwd=REPO, capture_output=True, text=True,
                             check=True).stdout
     modes = {line.split("\t")[1]: line.split()[0] for line in listed.splitlines()}
-    direct = ["run.sh", "install.sh", "web/serve.sh", "src/boot/agent-setup.sh"] + [
+    direct = ["run.sh", "install.sh", "src/server/serve.sh", "src/server/server.py", "src/server/holder.py", "src/boot/agent-setup.sh"] + [
         path for path in modes if re.match(r"plugins/[^/]+/(host|root|bin)/", path)]
     for path in direct:
         assert modes[path] == "100755", path

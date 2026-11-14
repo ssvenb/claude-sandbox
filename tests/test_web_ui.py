@@ -1,7 +1,7 @@
-"""The web UI (web/ui: the dashboard, a session's chat, the terminal) in a real browser: the
+"""The web UI (web: the dashboard, a session's chat, the terminal) in a real browser: the
 dashboard, a session's chat from its first moment, tabs, closing, favicons, CI marks, day and night.
 
-The server runs from a copy of web/server.py with the built pages (web/ui/dist, built first when
+The server runs from a copy of src/server with the built pages (web/dist, built first when
 it is missing or older than its sources: see test_web.build_ui), next to a stand-in run.sh
 (tests/stubs/chat_run.py):
 `--web` answers with the JSON below (what the plugins would describe, tested on their own in
@@ -16,6 +16,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 import urllib.request
 
 import pytest
@@ -53,9 +54,9 @@ def browser():
 @pytest.fixture
 def board(tmp_path, browser, ui_dist):
     sandbox = tmp_path / "sandbox"
-    (sandbox / "web/ui").mkdir(parents=True)  # the server and the built pages: not the app's sources or node_modules
-    shutil.copy(REPO / "web/server.py", sandbox / "web")
-    shutil.copytree(ui_dist, sandbox / "web/ui/dist")
+    (sandbox / "web").mkdir(parents=True)  # the server and the built pages: not the app's sources or node_modules
+    shutil.copytree(REPO / "src/server", sandbox / "src/server", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(ui_dist, sandbox / "web/dist")
     shutil.copytree(REPO / "plugins", sandbox / "plugins")
     shutil.copytree(REPO / "agents", sandbox / "agents")
     (sandbox / "src/orchestrator").mkdir(parents=True)
@@ -69,7 +70,7 @@ def board(tmp_path, browser, ui_dist):
     checkout = tmp_path / f"mirrors/proj-20261112-{RUN}"
     checkout.mkdir(parents=True)
     (tmp_path / "projects").write_text(f"{project}\n")
-    proc = subprocess.Popen([sandbox / "web/server.py", "--port", "0", "--projects", tmp_path / "projects"],
+    proc = subprocess.Popen([sandbox / "src/server/server.py", "--port", "0", "--projects", tmp_path / "projects"],
                             stdout=subprocess.PIPE, text=True,
                             env={"PATH": f"{tmp_path}/bin:/usr/bin:/bin", "HOME": str(tmp_path),
                                  "SHELL": "/bin/sh", "XDG_DATA_HOME": str(tmp_path / "data"), "STUB_BOOT": "0.02"})
@@ -120,6 +121,12 @@ def board(tmp_path, browser, ui_dist):
     page.project, page.hold, page.commands = project, sandbox / "hold", sandbox / "commands"
     yield page
     context.close()
+    for s in json.load(urllib.request.urlopen(base + "/api/state"))["sessions"]:  # they would outlive the server
+        urllib.request.urlopen(urllib.request.Request(f"{base}/api/sessions/{s['id']}/delete", b""))
+    for _ in range(100):  # each one's folder goes once it has ended
+        if not any(tmp_path.glob(".local/state/claude-sandbox/sessions/*")):
+            break
+        time.sleep(0.05)
     proc.terminate()
     proc.wait(10)
 

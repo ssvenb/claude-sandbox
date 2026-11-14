@@ -29,14 +29,18 @@ AGENT_BRANCH_PREFIX="$BRANCH_PREFIX"
 AGENT_BRANCH="$AGENT_BRANCH_PREFIX/$RUN_DATE-$RUN_ID"
 export RUN_ID AGENT_BRANCH AGENT_BRANCH_PREFIX
 
+# The branch's date segment is the day the run was created, not today, so look it up by its
+# RUN_ID suffix among the branches the clone already fetched. A run stopped before it ever pushed
+# has none: it starts its branch afresh, as a new run would.
+resumed=
 if [ "${RESUME:-0}" = 1 ]; then
-  # The branch's date segment is the day the run was created, not today, so look it up by its
-  # RUN_ID suffix among the branches the clone already fetched; the computed name is the fallback.
   resumed=$(git for-each-ref --format='%(refname:strip=3)' "refs/remotes/origin/*/*-$RUN_ID" |
               head -n 1)
-  [ -n "$resumed" ] && AGENT_BRANCH="$resumed"
+fi
+
+if [ -n "$resumed" ]; then
+  AGENT_BRANCH="$resumed"
   export AGENT_BRANCH
-  git fetch origin "$AGENT_BRANCH" || true
   git checkout "$AGENT_BRANCH"
   echo "✅ Resumed branch $AGENT_BRANCH in isolated /workspace (RUN_ID=$RUN_ID)"
 

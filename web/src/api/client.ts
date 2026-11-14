@@ -1,4 +1,4 @@
-// Talking to web/server.py: JSON in, JSON out, its `error` thrown.
+// Talking to src/server/server.py: JSON in, JSON out, its `error` thrown.
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);

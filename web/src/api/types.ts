@@ -1,4 +1,4 @@
-// What web/server.py says: its sessions, what a project's plugins describe, a project's settings.
+// What src/server/server.py says: its sessions, what a project's plugins describe, a project's settings.
 
 export type SessionStatus = 'starting' | 'working' | 'idle' | 'question';
 export type SessionKind = 'run' | 'resume' | 'shell';

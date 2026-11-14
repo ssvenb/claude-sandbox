@@ -10,7 +10,7 @@ find /workspace -xdev ! -type c $skip -exec chown node:node {} +
 unset skip p
 
 # Published ports: offer each configured port (PORTS) the agent's servers listen on to the host's central proxy, as
-# unix sockets in the directory run.sh mounted (src/lib/host-ports.sh). Its parent goes root-only
+# unix sockets in the directory run.sh mounted (src/host/ports.py). Its parent goes root-only
 # first, so the agent can neither reach the sockets nor plant one of its own for the host to
 # connect to.
 if [ -d /run/ports/sockets ]; then

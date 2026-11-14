@@ -15,7 +15,7 @@ export HOME=/home/node
 AGENT_PROMPT_FILE=$(mktemp)
 export AGENT_PROMPT_FILE
 
-# What becomes of the ports it serves on (src/lib/host-ports.sh): the agent would otherwise assume
+# What becomes of the ports it serves on (src/host/ports.py): the agent would otherwise assume
 # a shared network, or spend a turn wondering how the user reaches its server.
 if [ -d /run/ports ]; then
   {

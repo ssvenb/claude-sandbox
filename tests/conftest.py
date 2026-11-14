@@ -1,9 +1,11 @@
 """Shared harness: run the host-side bash libraries, plugin stages and Python helpers in isolation.
 
-Host stages are sourced into a fresh `bash` with run.sh's libraries loaded and `set -euo
-pipefail`, exactly as run.sh sources them; the `docker run`/`docker build` arguments they
-contribute are read back afterwards. Container stages are sourced into `sh` the same way
-agent-setup.sh does, with the frameworks pointed at this checkout instead of /opt.
+Host stages are sourced into a fresh `bash` with the stage's libraries loaded and `set -euo
+pipefail`, exactly as src/lib/host-stage.sh sources them; the `docker run`/`docker build`
+arguments they contribute are read back afterwards. What src/host resolves before a stage (the
+project's config and settings) is done by that Python, in-process (Sandbox.staged). Container
+stages are sourced into `sh` the same way agent-setup.sh does, with the frameworks pointed at this
+checkout instead of /opt.
 """
 from __future__ import annotations
 
@@ -26,9 +28,12 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src/lib"))
 import peer_owner  # noqa: E402,F401
 
+sys.path.insert(0, str(REPO / "src"))
+import host  # noqa: E402
+from host import config as host_config  # noqa: E402
+
 HOST_LIBS = "\n".join(f". src/lib/{lib}.sh" for lib in (
-    "host-plugins", "host-credentials", "host-agents",
-    "host-project-config", "host-project-env", "host-settings", "host-ports"))
+    "host-plugins", "host-credentials", "host-agents", "host-project-config", "host-project-env"))
 
 
 def load(rel: str):
@@ -140,13 +145,24 @@ cd "{REPO}"
         return Run(done.returncode, done.stdout, done.stderr,
                    _nul_list(Path(f"{dump}.docker")), _nul_list(Path(f"{dump}.build")))
 
+    def staged(self, snippet: str, **env) -> Run:
+        """snippet in a stage's shell: the project's config loaded and its settings applied by
+        src/host first, as run.sh does (a refusal there fails the Run), then its .env scanned."""
+        merged = self._env(env)
+        try:
+            project = host_config.load_project(merged)
+            host_config.apply_settings(merged, project)
+        except host.Die as e:
+            return Run(1, "", f"❌ {e}\n")
+        config = json.dumps(project.config) if project.config is not None else ""
+        return self.bash("project_env_load\n" + snippet, **{**merged, "PROJECT_CONFIG_JSON": config})
+
     def plugin(self, name: str, **env) -> Run:
         """One plugin's host stage, after the project's config and .env were loaded."""
-        return self.bash(f"project_config_load\nproject_env_load\nENABLED_PLUGINS={name}\n"
-                         "plugins_host_stage", **env)
+        return self.staged(f"ENABLED_PLUGINS={name}\nplugins_host_stage", **env)
 
     def agent(self, **env) -> Run:
-        return self.bash("agent_resolve\nagent_host_stage", **env)
+        return self.bash("agent_host_stage", **env)
 
     def sh(self, snippet: str, **env) -> Run:
         """A container stage: sourced by `sh` with the container frameworks, as agent-setup.sh does."""

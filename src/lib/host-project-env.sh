@@ -1,5 +1,7 @@
 # shellcheck shell=bash
-# The worked-on repo's .env. Sourced by run.sh (bash, on YOUR machine).
+# The worked-on repo's .env, as plugins read it. Sourced by src/lib/host-stage.sh (bash, on YOUR
+# machine). src/host/config.py scans the same file with the same rules for the sandbox's own
+# settings; env_scan_into stays here for plugins that scan files of their own (upstream-proxy).
 #
 # Settings that belong to the repo rather than to the sandbox (BRANCH_PREFIX, say) conventionally
 # live in its own .env. That file is the target repo's — full of its own secrets and possibly its

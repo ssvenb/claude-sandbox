@@ -40,7 +40,7 @@ def test_copilot_needs_its_own_token(sb):
     ("copilot", "copilot-home", "COPILOT_HOME_DIR", "/home/node/.copilot"),
 ])
 def test_home_plugins_mount_the_host_config_and_replace_the_token(sb, agent, plugin, var, target):
-    stage = f"ENABLED_PLUGINS={plugin}\nplugins_host_stage\nagent_resolve\nagent_host_stage"
+    stage = f"ENABLED_PLUGINS={plugin}\nplugins_host_stage\nagent_host_stage"
     sb.bash(stage, AGENT=agent).dies("wants to mount")  # nothing at the default path yet
     default = sb.home / f".{agent}"
     default.mkdir()
@@ -511,7 +511,7 @@ def test_upstream_proxy_starts_a_proxy_and_hands_over_only_sockets_and_env(proxy
 def test_upstream_proxy_is_shared_while_another_run_uses_it(proxy_sb):
     proxy_sb.config({"plugins": {"upstream-proxy": {"routes": routes()}}})
     # A second, still-running run.sh of the project: this test process stands in for it.
-    run = proxy_sb.bash(f"project_config_load\nENABLED_PLUGINS=upstream-proxy\nplugins_host_stage\n"
+    run = proxy_sb.staged(f"ENABLED_PLUGINS=upstream-proxy\nplugins_host_stage\n"
                         f': >"$UPSTREAM_PROXY_USERS/{os.getpid()}"').ok()
     [proxy_dir] = proxy_dirs(proxy_sb)
     pid = int(open(f"{proxy_dir}/proxy.pid").read())
@@ -558,9 +558,8 @@ def described(sb):
     """Run the web stage of the given plugins; the JSON they describe the project with."""
     def run(plugins, **env):
         out = sb.tmp / "web.json"
-        sb.bash("project_config_load\nproject_env_load\nproject_settings_apply\n"
-                f"ENABLED_PLUGINS='{plugins}'\nplugins_web_stage\nprintf '%s' \"$WEB_JSON\" >'{out}'",
-                **env).ok()
+        sb.staged(f"ENABLED_PLUGINS='{plugins}'\nplugins_web_stage\nprintf '%s' \"$WEB_JSON\" >'{out}'",
+                  **env).ok()
         return json.loads(out.read_text())
     return run
 

@@ -142,6 +142,4 @@ def test_scripts_run_directly_are_executable_in_git():
 
 def test_example_project_config_is_accepted(sb):
     """.claude-sandbox.example.json is documentation, so it must at least load and validate."""
-    run = sb.bash("project_config_load\nproject_env_load\nproject_settings_apply",
-                  PROJECT_CONFIG_FILE=REPO / ".claude-sandbox.example.json")
-    run.ok()
+    sb.staged("", PROJECT_CONFIG_FILE=REPO / ".claude-sandbox.example.json").ok()

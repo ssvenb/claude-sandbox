@@ -6,7 +6,7 @@
 # proxy breaks), and a failure fails the build loudly rather than leaving an image with no binary.
 set -eu
 
-# $AGENT_VERSION is resolved on the host (see agent_version_resolve); empty means latest.
+# $AGENT_VERSION is resolved on the host (see resolve_version in src/host/agents.py); empty means latest.
 npm install -g "@github/copilot${AGENT_VERSION:+@$AGENT_VERSION}"
 
 # The GitHub Copilot SDK, which chat.mjs drives the CLI above with for web chats. It lives outside

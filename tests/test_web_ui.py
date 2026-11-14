@@ -194,11 +194,11 @@ def test_each_side_of_the_dashboard_scrolls_on_its_own_under_a_chat_bar_that_sta
     board.resume()
     # More on each side than fits: sessions on the left, a long list on the right.
     board.evaluate("""() => {
-        const s = state.sessions[0];
+        const {state, plugins} = dashboard, s = state.sessions[0];
         state.sessions = Array.from({length: 30}, (_, i) => ({...s, id: 'x' + i, run_id: null}));
         const said = plugins[state.projects[0]];
         said.lists[0].items = Array.from({length: 40}, (_, i) => ({ref: '#' + i, title: 'Issue ' + i, url: location.origin + '/i/' + i}));
-        render();
+        dashboard.render();
     }""")
     box = lambda sel: board.locator(sel).bounding_box()
     bar = box(".starter")
@@ -226,8 +226,8 @@ def test_a_list_with_nothing_on_it_is_not_shown(board):
     board.wait_for_selector(".project h4:has-text('Pull requests')")
     assert [" ".join(h.inner_text().split()) for h in board.query_selector_all(".project h4")] == ["Issues 1", "Pull requests 1"]
     # The last issue was closed, and the run's pull request merged.
-    board.evaluate("() => { const said = plugins[state.projects[0]]; said.lists[0].items = [];"
-                   " said.run_items = said.run_items.filter(i => i.ref !== '#3'); render(); }")
+    board.evaluate("() => { const said = dashboard.plugins[dashboard.state.projects[0]]; said.lists[0].items = [];"
+                   " said.run_items = said.run_items.filter(i => i.ref !== '#3'); dashboard.render(); }")
     assert board.query_selector(".project h4") is None and "None" not in board.inner_text(".project")
     assert board.inner_text(".project .head h3").startswith("proj")  # the project stays, with its buttons
 

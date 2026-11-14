@@ -65,14 +65,25 @@ QUIET = 3  # seconds without output after which an agent that reports nothing co
 # of output means it was interrupted before it could say it stopped (Esc fires no Stop hook).
 STALE = 30
 
-# The pages and what they share. Read on every request, so an edit shows on reload.
-PAGES = {"/": ("index.html", "text/html; charset=utf-8"), "/session": ("session.html", "text/html; charset=utf-8"),
-         "/chat": ("chat.html", "text/html; charset=utf-8"), "/ui.css": ("ui.css", "text/css; charset=utf-8"),
-         "/ui.js": ("ui.js", "text/javascript; charset=utf-8")}
+# The pages, and the scripts and styles they load (their Preact components, the vendored Preact
+# and htm, see web/vendor). Read on every request, so an edit shows on reload; no build step.
+PAGES = {"/": "index.html", "/session": "session.html", "/chat": "chat.html"}
+STATIC = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"}
 
 sessions = {}
 described = {}  # project → what describe() last said about it
 lock = threading.RLock()  # guards `sessions` and every session's buf/listeners/exit
+
+
+def static(path):
+    """The script or style sheet under web/ that a URL path names, or None: only .js and .css files,
+    and nothing outside web/ (no `..`, no symlink out of it)."""
+    if not path.startswith("/") or "\\" in path or "\0" in path:
+        return None
+    file = (HERE / path.lstrip("/")).resolve()
+    if file.suffix not in STATIC or not file.is_relative_to(HERE) or not file.is_file():
+        return None
+    return file
 
 
 def projects(file):
@@ -902,7 +913,9 @@ class Handler(BaseHTTPRequestHandler):
         query = {k: v[0] for k, v in parse_qs(url.query).items()}
         known = projects(self.server.projects_file)
         if url.path in PAGES:
-            self.reply(200, (HERE / PAGES[url.path][0]).read_bytes(), PAGES[url.path][1])
+            self.reply(200, (HERE / PAGES[url.path]).read_bytes(), "text/html; charset=utf-8")
+        elif (asset := static(url.path)) is not None:
+            self.reply(200, asset.read_bytes(), STATIC[asset.suffix])
         elif url.path == "/api/state":
             with lock:
                 live = [s.json() for s in sessions.values()]

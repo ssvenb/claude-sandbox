@@ -9,7 +9,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&family=JetBrains+Mono:wght@400;600&display=swap">
 <link rel="stylesheet" href="/ui.css">
-<script src="/ui.js"></script>
+<script src="/theme.js"></script>
+<script type="importmap">{"imports": {"preact": "/vendor/preact.module.js", "preact/hooks": "/vendor/hooks.module.js", "htm": "/vendor/htm.module.js"}}</script>
 <style>
   /* A terminal: a project's shell on this machine (or an agent's own TUI, for a session started
      with "ui": "terminal"). An agent's session is otherwise a chat: see chat.html. */
@@ -40,7 +41,10 @@
 </div>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
-<script>
+<script type="module">
+import {html, render} from '/lib/preact.js';
+import {$, api, post, name, label, SAYS, ICON, FAVICON, setFavicon, ThemeSwitch} from '/lib/ui.js';
+
 const id = location.hash.slice(1);
 // The terminal wears the page's colours, by day and by night.
 const palette = () => {
@@ -56,6 +60,7 @@ document.addEventListener('themechange', repaint);
 const fit = new FitAddon.FitAddon();
 term.loadAddon(fit);
 term.open($('term'));
+window.term = term;  // to look into from the console
 
 // One POST at a time, batching what was typed meanwhile: parallel requests could arrive reordered.
 let pending = '', sending = false;
@@ -77,7 +82,7 @@ async function copy(text) {
   try {
     await navigator.clipboard.writeText(text);
   } catch {  // no Clipboard API off localhost over plain http: the old way, through a textarea
-    const area = h('textarea', {value: text});
+    const area = Object.assign(document.createElement('textarea'), {value: text});
     document.body.append(area);
     area.select();
     document.execCommand('copy');
@@ -142,29 +147,26 @@ async function remove(s) {
   refresh();  // still here: this tab was not opened by the status page, so it may not close itself
 }
 
-let drawn = '';
+const Bar = ({s}) => !s ? html`<span class="what">No session</span>` : html`
+  <a class="home" href="/" target="sandbox-dashboard" title="Dashboard" aria-label="Dashboard">${ICON.back()}</a>
+  <strong>${name(s.project)}</strong>
+  <span class=${'what' + (s.exit === null ? ' lit' : '') + (s.status === 'question' ? ' ask' : '')}>
+    ${label(s) + (s.exit !== null ? `, exited ${s.exit}` : s.status ? ', ' + SAYS[s.status] : ', running')}</span>
+  ${s.exit === null ? html`<button class="icon stop" onClick=${() => stop(s)} aria-label="Stop session">${ICON.stop()}Stop</button>` : ''}
+  <button class="icon" onClick=${() => remove(s)} aria-label="Delete session">${ICON.trash()}Delete</button>
+  <${ThemeSwitch}/>`;
+
 async function refresh() {
   const s = (await api('/api/state')).sessions.find(s => s.id === id);
   $('empty').hidden = !!s;
   if (!s) {  // removed: nothing left to show
     es.close();
     window.close();
-    return $('bar').replaceChildren(h('span', {className: 'what'}, 'No session'));
+  } else {
+    document.title = `${name(s.project)} ${label(s)}`;
+    setFavicon(FAVICON[s.kind === 'shell' ? 'shell' : s.status || 'unlit']);
   }
-  document.title = `${name(s.project)} ${label(s)}`;
-  $('icon').href = FAVICON[s.kind === 'shell' ? 'shell' : s.status || 'unlit'];
-  const sig = JSON.stringify(s);
-  if (sig === drawn) return;  // a button under the pointer is not swapped out for its twin
-  drawn = sig;
-  $('bar').replaceChildren(
-    h('a', {className: 'home', href: '/', target: 'sandbox-dashboard', title: 'Dashboard', ariaLabel: 'Dashboard'}, ICON.back()),
-    h('strong', {}, name(s.project)),
-    h('span', {className: 'what' + (s.exit === null ? ' lit' : '') + (s.status === 'question' ? ' ask' : '')},
-      label(s) + (s.exit !== null ? `, exited ${s.exit}` : s.status ? ', ' + SAYS[s.status] : ', running')),
-    s.exit === null ? h('button', {className: 'icon stop', onclick: () => stop(s), ariaLabel: 'Stop session'},
-                        ICON.stop(), 'Stop') : '',
-    h('button', {className: 'icon', onclick: () => remove(s), ariaLabel: 'Delete session'}, ICON.trash(), 'Delete'),
-    themeSwitch());
+  render(html`<${Bar} s=${s}/>`, $('bar'));
 }
 refresh();
 setInterval(refresh, 3000);

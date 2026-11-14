@@ -19,7 +19,7 @@ user at all this process cleans up and exits — taking <dir>/lock first, so a r
 right then either sees it gone or is seen by it.
 
 What is published is written to <dir>/ports.json, and as the web UI's session items to
-<dir>/items.json (see `web_live_items` in src/lib/host-plugins.sh).
+<dir>/items.json (see `web_live_items` in src/lib/host-plugins.sh, `items_file` in src/host/ports.py).
 """
 from __future__ import annotations
 

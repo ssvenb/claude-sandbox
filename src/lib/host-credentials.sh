@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # Short-lived credentials, minted on the HOST and refreshed for the life of the run. Sourced by
-# run.sh (bash, on YOUR machine).
+# src/lib/host-stage.sh (bash, on YOUR machine), whose shell lasts as long as the run.
 #
 # Whatever a credential is derived from — an App private key, your own cloud login — stays here:
 # the container only ever sees the minted result, as a file under /run/credentials (a read-only
@@ -80,7 +80,8 @@ credentials_start() {
       next[$name]=$(( now + interval ))
     done
     while sleep 60; do
-      # $$ is run.sh: stop with it, even if it was killed before its exit hooks could run.
+      # $$ is the stage's shell, which lives as long as the run: stop with it, even if it was
+      # killed before its exit hooks could run.
       kill -0 $$ 2>/dev/null || exit 0
       now=$(date +%s)
       for entry in "${CREDENTIALS[@]}"; do

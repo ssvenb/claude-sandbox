@@ -21,7 +21,7 @@ cd ~/code/my-repo
 ./run.sh --resume a1b2c3  # re-attach to an existing run: its branch and its conversation
 ```
 
-`jq` is required on the host. `run.sh` builds the image itself (tagged `claude-agent:$AGENT`), so
+`python3` (3.9 or later) and `jq` are required on the host. `run.sh` builds the image itself (tagged `claude-agent:$AGENT`), so
 a manual `docker build -t claude-agent:claude --build-arg AGENT=claude .` is only needed if you
 want to build without running.
 
@@ -124,17 +124,22 @@ mounts it from the host (both on by default); without them a resumed run starts 
 on the old branch.
 
 Needs only `python3` on the host (and `gh` for the PR list); the pages load their fonts, and the
-terminal page xterm.js, from a CDN.
+terminal page xterm.js, from a CDN. The pages are [Preact](https://preactjs.com) components written
+with [htm](https://github.com/developit/htm) tagged templates, plain ES modules the server hands out
+as they are: no build step and no Node on the host. Preact and htm are vendored in
+[web/vendor](web/vendor), which says how to update them.
 It listens on loopback only and has no login — use an SSH tunnel to reach it from elsewhere.
 Sessions belong to the server process: stopping it stops them.
 
 ## How a run boots
 
 ```
-run.sh (host)
+run.sh (host: src/host, Python)
   ├─ loads the worked-on repo's config, resolves AGENT and the ENABLE_<PLUGIN> flags, validates config + capabilities
-  ├─ each enabled plugin's host.sh, then the agent's host.sh, contribute `docker run` args
-  ├─ mints the credentials plugins registered, mounts them at /run/credentials (ro), refreshes them in the background
+  ├─ src/lib/host-stage.sh (one bash, alive until the container is gone; its exit hooks run then)
+  │    ├─ each enabled plugin's host.sh, then the agent's host.sh, contribute `docker run` args
+  │    └─ mints the credentials plugins registered, mounts them at /run/credentials (ro), refreshes them in the background
+  ├─ joins the central port proxy (src/portd.py) when PORTS lists any
   ├─ docker build --build-arg AGENT=... --build-arg ENABLED_PLUGINS=...
   └─ docker run → entrypoint.sh (root)
        ├─ chown /workspace to node
@@ -351,8 +356,12 @@ can't perturb each other.
 
 ### `host.sh` — host stage (your user)
 
-Sourced by `run.sh` in bash with your full environment, including the worked-on repo's settings. This is
-where long-lived credentials are read; they must never be handed to the container verbatim.
+Sourced in bash (`src/lib/host-stage.sh`, which `run.sh` starts once it has resolved the run) with
+your full environment, including the worked-on repo's settings. Every enabled plugin's `host.sh`
+and then the agent's are sourced into that one shell, so a variable one sets is seen by the next,
+and what one exports reaches `docker` too. The shell lives until the container is gone, which is
+when the `on_exit` hooks run. This is where long-lived credentials are read; they must never be
+handed to the container verbatim.
 
 Available context:
 
@@ -557,7 +566,7 @@ opens no ports at all, and no proxy is started for it. Inside the container a ro
 (`src/publish-ports.py`, started by `entrypoint.sh`) notices when a non-root process listens on one
 of those ports — on any address, `127.0.0.1` included — and offers it as a unix socket in a
 directory mounted from the host, under a root-only `/run/ports` the agent cannot reach. One central
-proxy on your machine (`src/portd.py`, managed by `src/lib/host-ports.sh`), shared by every sandbox
+proxy on your machine (`src/portd.py`, managed by `src/host/ports.py`), shared by every sandbox
 of every project, gives each such port a port of its own on `$PORTS_BIND` (default `127.0.0.1`):
 the same number while it is free, otherwise any free one, and the same one again when that
 session's server restarts. The first `run.sh` starts the proxy; it exits once no `run.sh` using it
@@ -727,17 +736,21 @@ Volume mounts are contributed by plugins via `pass_mount`; the core `docker run`
 
 | Path | Purpose |
 |------|---------|
-| [run.sh](run.sh) | host entry point: config, agent + plugin resolution, build, `docker run` |
-| [web/](web) | web UI over `run.sh`: `server.py` (sessions in ptys, PRs and issues, a tunnel to `code serve-web`), the status page `index.html` and the per-session terminal `session.html` |
+| [run.sh](run.sh) | host entry point; runs [src/host](src/host) |
+| [src/host/](src/host) | the host side in Python: project config and settings (`config.py`), agent (`agents.py`) and plugin (`plugins.py`) resolution, the port proxy (`ports.py`), the plugins' stages (`stage.py`), build and `docker run` (`main.py`) |
+| [src/lib/host-stage.sh](src/lib/host-stage.sh) | the bash that sources the plugins' and the agent's `host.sh` / `web.sh` |
+| [web/](web) | web UI over `run.sh`: `server.py` (sessions, PRs and issues, a tunnel to `code serve-web`) and the pages it serves — the dashboard (`index.html`, `dashboard/`), a session's chat (`chat.html`, `chat/`), a terminal (`session.html`); `lib/` is what they share, `vendor/` Preact and htm |
 | [Dockerfile](Dockerfile) | image: base tools, agent install stage, plugin install stage, permissions |
 | [settings-base.json](settings-base.json) | empty policy base plugin fragments merge into |
 | [src/kernel.json](src/kernel.json) | the sandbox's own settings (`AGENT`, ports), declared as plugins declare theirs |
 | [src/entrypoint.sh](src/entrypoint.sh) | container root stage and privilege handoff |
 | [src/agent-setup.sh](src/agent-setup.sh) | container agent stage and agent launch |
 | [src/merge-settings.py](src/merge-settings.py) | deep-merges settings fragments |
-| [src/lib/host-plugins.sh](src/lib/host-plugins.sh) | host-side plugin framework (discovery, resolution, validation, helpers) |
-| [src/lib/host-agents.sh](src/lib/host-agents.sh) | host-side agent framework (selection, host stage) |
-| [src/lib/host-project-config.sh](src/lib/host-project-config.sh) | per-project plugin configuration (`.claude-sandbox.json`, `plugin_config`) |
+| [src/lib/host-plugins.sh](src/lib/host-plugins.sh) | what a plugin's `host.sh` / `web.sh` is sourced with (`pass_*`, `on_exit`, `web_*`) |
+| [src/lib/host-agents.sh](src/lib/host-agents.sh) | the agent's host stage |
+| [src/lib/host-credentials.sh](src/lib/host-credentials.sh) | `register_credential`: minting and refreshing |
+| [src/lib/host-project-config.sh](src/lib/host-project-config.sh) | `plugin_config`, `plugin_config_json`: a plugin's section of `.claude-sandbox.json` |
+| [src/lib/host-project-env.sh](src/lib/host-project-env.sh) | `project_env`, `env_scan_into`: the worked-on repo's `.env`, scanned |
 | [src/lib/plugins.sh](src/lib/plugins.sh) | container-side plugin framework (stage runner, fragment/secret listing) |
 | [src/lib/agents.sh](src/lib/agents.sh) | container-side agent framework (manifest lookup, stage runner) |
 | [agents/](agents) | the agents themselves |

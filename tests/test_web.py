@@ -136,12 +136,19 @@ def test_allow_host_adds_a_name_to_the_allowlist(tmp_path):
         server.server_close()
 
 def test_the_session_page_is_served_next_to_the_status_page(ui):
-    assert b"/api/project" in ui("/").read()
+    assert b'src="/dashboard/main.js"' in ui("/").read() and b"/api/project" in ui("/dashboard/main.js").read()
     assert b"/stream" in ui("/session").read()
-    assert b"/events" in ui("/chat").read()
-    for shared, kind in (("/ui.css", "text/css"), ("/ui.js", "text/javascript")):
+    assert b'src="/chat/main.js"' in ui("/chat").read() and b"/events" in ui("/chat/main.js").read()
+    for shared, kind in (("/ui.css", "text/css"), ("/lib/ui.js", "text/javascript"), ("/vendor/preact.module.js", "text/javascript"),
+                         ("/chat/chat.css", "text/css"), ("/theme.js", "text/javascript")):
         got = ui(shared)
         assert got.status == 200 and got.headers["Content-Type"].startswith(kind)
+
+
+@pytest.mark.parametrize("path", ["/server.py", "/../run.sh", "/lib/../../run.sh", "/vendor/LICENSE-preact", "/nope.js",
+                                  "/%2e%2e/run.sh", "/lib"])
+def test_only_the_pages_scripts_and_styles_are_served(ui, path):
+    assert ui(path).status == 404
 
 
 # Stands in for `code serve-web`: echoes each request's head back as the response body.

@@ -1,5 +1,6 @@
 # shellcheck shell=bash
-# Per-project configuration. Sourced by run.sh (bash, on YOUR machine).
+# Per-project configuration, as plugins read it. Sourced by src/lib/host-stage.sh (bash, on YOUR
+# machine); the file itself is loaded and checked by src/host/config.py.
 #
 # Settings that belong to the repo the agent works on — which upstreams to proxy, which bucket to
 # hand over — live in one JSON file next to that checkout, so .env stays about the sandbox itself:
@@ -17,25 +18,12 @@
 # decides what, if anything, crosses over.
 
 PROJECT_CONFIG_FILE="${PROJECT_CONFIG_FILE:-${HOST_CWD:-$PWD}/.claude-sandbox.json}"
-# Whole file, compact, or empty when there is none.
-PROJECT_CONFIG_JSON=""
-
-project_config_load() {
-  [ -f "$PROJECT_CONFIG_FILE" ] || return 0
-  jq -e 'type == "object"' "$PROJECT_CONFIG_FILE" >/dev/null 2>&1 \
-    || die "Project config '$PROJECT_CONFIG_FILE' must be a JSON object."
-  jq -e '(.plugins // {}) | type == "object"' "$PROJECT_CONFIG_FILE" >/dev/null 2>&1 \
-    || die "Project config '$PROJECT_CONFIG_FILE': .plugins must be an object keyed by plugin name."
-  jq -e '(.env // {}) | type == "object" and (all(.[]; type != "object" and type != "array"))' \
-    "$PROJECT_CONFIG_FILE" >/dev/null 2>&1 \
-    || die "Project config '$PROJECT_CONFIG_FILE': .env must be an object of scalar values."
-  PROJECT_CONFIG_JSON=$(jq -c . "$PROJECT_CONFIG_FILE")
-  echo "📄 Project config: $PROJECT_CONFIG_FILE"
-}
+# Whole file, compact, or empty when there is none: loaded and checked by src/host/config.py, which
+# hands it to the stage in the environment.
+PROJECT_CONFIG_JSON="${PROJECT_CONFIG_JSON:-}"
 
 # project_plugin_setting <plugin> <jq-filter> [default] — one scalar from a plugin's section.
-# Names the plugin explicitly, for callers outside a plugin stage: plugins_resolve reads ".enabled"
-# before any host.sh is sourced.
+# Names the plugin explicitly, for callers outside a plugin stage.
 project_plugin_setting() {
   local out
   [ -n "$PROJECT_CONFIG_JSON" ] || { printf '%s' "${3-}"; return 0; }

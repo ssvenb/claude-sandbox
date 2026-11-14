@@ -823,14 +823,10 @@ def drop(s):
 def sync():
     """Pulls main into this checkout and runs install.sh; then, under systemd, restarts this server."""
     root = HERE.parent
-    # install.sh goes through an interactive shell: node from nvm and the like is only on the
-    # PATH the user's shell rc files set up, not on the one this server (a systemd service) got.
-    shell = os.environ.get("SHELL") or "bash"
-    for step in (["git", "-C", str(root), "pull", "--ff-only", "origin", "main"],
-                 [shell, "-ic", 'exec "$0" --yes', str(root / "install.sh")]):
+    for step in (["git", "-C", str(root), "pull", "--ff-only", "origin", "main"], [str(root / "install.sh"), "--yes"]):
         done = subprocess.run(step, capture_output=True, text=True, stdin=subprocess.DEVNULL)
         if done.returncode:
-            raise ValueError(f"{step[-1] if step[0] == shell else ' '.join(step[:4])} failed:\n" + (done.stderr or done.stdout)[-2000:])
+            raise ValueError(f"{' '.join(step[:4])} failed:\n" + (done.stderr or done.stdout)[-2000:])
     if not os.environ.get("INVOCATION_ID"):  # systemd sets it in the services it starts
         return {"restarting": False}
     # Detached and a moment late, so this reply gets out before the restart takes the server down.

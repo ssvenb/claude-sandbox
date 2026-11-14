@@ -111,6 +111,10 @@ ok "environment: $here/.venv"
 
 if [ "$WEB" = 1 ]; then
   step "Web UI (React, built with npm)"
+  if ! have node && [ -n "${SHELL:-}" ]; then
+    # Run from a service or cron, PATH lacks what the user's shell rc adds (nvm, fnm, volta): take that PATH.
+    rc_path=$("$SHELL" -ic 'printf "\n%s" "$PATH"' </dev/null 2>/dev/null | tail -n1) && [ -n "$rc_path" ] && export PATH="$rc_path"
+  fi
   node_ok=0
   have node && node_ok=$(node -p "const [a, b] = process.versions.node.split('.').map(Number), [x, y] = '$NODE_MIN'.split('.').map(Number); a > x || (a === x && b >= y) ? 1 : 0" 2>/dev/null || echo 0)
   if ! have npm || [ "$node_ok" != 1 ]; then

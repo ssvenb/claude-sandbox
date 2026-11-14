@@ -782,6 +782,8 @@ def test_sync_pulls_installs_and_restarts_only_under_systemd(monkeypatch):
     monkeypatch.delenv("INVOCATION_ID", raising=False)
     assert web.sync() == {"restarting": False} and not spawned
     assert ran[0][-4:] == ["pull", "--ff-only", "origin", "main"] and ran[1][0].endswith("install.sh")
+    web.sync("claude-box.netbird.cloud")  # a service bound elsewhere stays bound there
+    assert ran[-1][-2:] == ["--bind", "claude-box.netbird.cloud"] and "--bind" not in ran[1]
     monkeypatch.setenv("INVOCATION_ID", "x")
     assert web.sync() == {"restarting": True} and web.SERVICE in spawned[0][-1]
     monkeypatch.setattr(web.subprocess, "run", lambda step, **_: subprocess.CompletedProcess(step, 1, "", "not a fast-forward"))

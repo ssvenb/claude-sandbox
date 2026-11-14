@@ -27,7 +27,8 @@ The host needs Docker, `git`, `jq` and [uv](https://docs.astral.sh/uv/) (which b
 plus Node 20.19+ to build the web UI. `./install.sh` checks for each, offers to install what your
 package manager has (`--yes`: without asking) and uv itself, and is safe to run again;
 `--no-web` sets up `run.sh` alone, `--dev` adds the test tools, `--project DIR` lists a project on
-the dashboard. `run.sh` builds the image itself (tagged `claude-agent:$AGENT`), so
+the dashboard, `--bind HOST` has the systemd service listen on HOST (a VPN name, say) rather than
+loopback. `run.sh` builds the image itself (tagged `claude-agent:$AGENT`), so
 a manual `docker build -t claude-agent:claude --build-arg AGENT=claude .` is only needed if you
 want to build without running.
 

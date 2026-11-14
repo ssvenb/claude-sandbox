@@ -2,7 +2,7 @@
 # Sets this checkout up to run sandboxes and their web UI: checks what the host needs, creates the
 # Python environment (uv), builds the web UI (npm) and puts two commands on your PATH.
 #
-#   ./install.sh [--yes] [--dev] [--no-web] [--no-launchers] [--project DIR]...
+#   ./install.sh [--yes] [--dev] [--no-web] [--no-launchers] [--project DIR]... [--bind HOST]
 #
 #   --yes           install what is missing (uv; jq, git, curl through the system's package
 #                   manager) without asking
@@ -10,15 +10,17 @@
 #   --no-web        skip the web UI (no Node needed): run.sh alone
 #   --no-launchers  do not link `claude-sandbox` and `claude-sandbox-web` into ~/.local/bin
 #   --project DIR   list DIR on the web UI's dashboard (~/.config/claude-sandbox/projects); repeatable
+#   --bind HOST     the systemd service listens on HOST (a name or address, e.g. a VPN's) instead of
+#                   loopback; later runs without it keep it. There is no login: bind only a private network
 #
 # Safe to run again: it only adds what is missing, and rebuilds the web UI.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-YES=0 DEV=0 WEB=1 LAUNCHERS=1 PROJECTS=()
+YES=0 DEV=0 WEB=1 LAUNCHERS=1 PROJECTS=() BIND=""
 NODE_MIN=20.19  # what the web UI's build (Vite) needs: web/package.json's engines
 
-usage() { sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 while [ $# -gt 0 ]; do
   case "$1" in
     -y|--yes) YES=1 ;;
@@ -27,6 +29,8 @@ while [ $# -gt 0 ]; do
     --no-launchers) LAUNCHERS=0 ;;
     --project) [ $# -ge 2 ] || { echo "--project needs a directory." >&2; usage 1 >&2; }
       PROJECTS+=("$2"); shift ;;
+    --bind) [ $# -ge 2 ] || { echo "--bind needs a host." >&2; usage 1 >&2; }
+      BIND=$2; shift ;;
     -h|--help) usage ;;
     *) echo "Unknown argument: $1" >&2; usage 1 >&2 ;;
   esac
@@ -182,6 +186,7 @@ After=network-online.target
 $start
 Environment="PATH=$PATH"
 Restart=on-failure
+RestartSec=5
 
 [Install]
 WantedBy=default.target
@@ -192,6 +197,18 @@ UNIT
   else
     warn "no systemd user session: $service not registered."
   fi
+  if [ -n "$BIND" ] && [ -f "$units/$service" ]; then
+    # A drop-in, not the unit's ExecStart: the check above rewrites an ExecStart that has arguments.
+    dropin=$(printf '[Service]\nExecStart=\n%s --bind %s' "$start" "$BIND")
+    # Restart only on a change: the dashboard's sync runs this inside the service, and restarts it itself.
+    if [ "$(cat "$units/$service.d/bind.conf" 2>/dev/null)" != "$dropin" ]; then
+      mkdir -p "$units/$service.d"
+      printf '%s\n' "$dropin" >"$units/$service.d/bind.conf"
+      systemctl --user daemon-reload
+      systemctl --user restart "$service"
+    fi
+    ok "$service listens on $BIND ($units/$service.d/bind.conf)"
+  fi
 fi
 
 step "Done"
@@ -201,4 +218,5 @@ say "    claude-sandbox                  # or $here/run.sh"
 if [ "$WEB" = 1 ]; then
   say "  The web UI, for every project listed in ${listing/#$HOME/\~}:"
   say "    claude-sandbox-web              # http://127.0.0.1:8787"
+  [ -z "$BIND" ] || say "  The service: http://$BIND:8787"
 fi

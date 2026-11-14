@@ -969,10 +969,12 @@ def drop(s):
         s.close()
 
 
-def sync():
-    """Pulls main into this checkout and runs install.sh; then, under systemd, restarts this server."""
+def sync(bind="127.0.0.1"):
+    """Pulls main into this checkout and runs install.sh; then, under systemd, restarts this server,
+    listening where this one does (`bind`)."""
     root = ROOT
-    for step in (["git", "-C", str(root), "pull", "--ff-only", "origin", "main"], [str(root / "install.sh"), "--yes"]):
+    install = [str(root / "install.sh"), "--yes"] + ([] if bind in ("127.0.0.1", "localhost") else ["--bind", bind])
+    for step in (["git", "-C", str(root), "pull", "--ff-only", "origin", "main"], install):
         done = subprocess.run(step, capture_output=True, text=True, stdin=subprocess.DEVNULL)
         if done.returncode:
             raise ValueError(f"{' '.join(step[:4])} failed:\n" + (done.stderr or done.stdout)[-2000:])
@@ -1190,7 +1192,7 @@ class Handler(BaseHTTPRequestHandler):
                 vscode()
                 self.reply(200, {"folder": folder})
             elif url.path == "/api/sync":
-                self.reply(200, sync())
+                self.reply(200, sync(self.server.bind))
             elif m := re.fullmatch(r"/api/sessions/(\w+)/(prompt|interrupt|answer|model|effort|task)", url.path):
                 s = self.session(m[1])
                 if s is None:
@@ -1334,6 +1336,7 @@ def serve(port, projects_file, bind="127.0.0.1", allow_hosts=()):
     port = server.server_address[1]
     server.hosts = {f"{name}:{port}" for name in local_names(bind) | set(allow_hosts)}
     server.projects_file = projects_file
+    server.bind = bind
     return server
 
 

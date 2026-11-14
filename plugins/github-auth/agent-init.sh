@@ -34,4 +34,10 @@ branch and open a pull request with `gh pr create` (or update the one already op
 watch its CI (`gh pr checks --watch`) until every check is green. If a check fails, or any other
 problem comes up, read why (`gh run view --log-failed`), fix the cause, push the fix and watch CI
 again. The task is not finished until the pull request's CI is green.
+
+If the sandbox itself gets in your way (a hook blocks something it should not, a tool or
+credential is missing, its instructions are wrong or unclear), file an issue on the sandbox's
+own repository: `gh issue create --repo ssvenb/claude-sandbox`. Say what you ran, what happened
+and what you expected, and tell the user you filed it. Problems with the project you are
+working on go to the user, not there.
 BRIEF

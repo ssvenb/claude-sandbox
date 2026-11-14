@@ -109,6 +109,22 @@ const push = (text, pictures) => {
   wake?.();
 };
 
+// A turn the API failed (overloaded, down, rate-limited) after Claude Code's own retries is tried
+// again every couple of minutes until it answers; the user's next prompt or a stop ends that.
+const RETRYABLE = ['server_error', 'rate_limit', 'unknown'];
+const retryIn = (Number(process.env.API_RETRY_SECONDS) || 120) * 1000;
+let failed = false, retry = null;
+const giveUp = () => { clearTimeout(retry); retry = null; failed = false; };
+function retryLater() {
+  emit({ type: 'notice', level: 'warning', text: `The API is unreachable; trying again in ${Math.round(retryIn / 60000) || 1} minute(s).` });
+  retry = setTimeout(() => {
+    retry = null;
+    emit({ type: 'status', state: 'working' });
+    // In a tag, so a resumed run's replay does not show it as the user's.
+    push('<api-retry>The API was unreachable and your last turn ended early; carry on where you left off.</api-retry>', []);
+  }, retryIn);
+}
+
 const asking = questions();
 const claude = await executable(process.env.CLAUDE_BIN || execFileSync('sh', ['-c', 'command -v claude']).toString().trim());
 const briefing = process.env.AGENT_PROMPT || '';
@@ -171,9 +187,11 @@ let described = describe().catch(e => emit({ type: 'notice', level: 'error', tex
 
 const done = commands(async c => {
   if (c.type === 'prompt' && typeof c.text === 'string') {
+    giveUp();
     emit({ type: 'status', state: 'working' });
     push(c.text, images(c));
   } else if (c.type === 'interrupt') {
+    giveUp();
     asking.drop();
     await q.interrupt();
   } else if (c.type === 'answer') {
@@ -187,7 +205,7 @@ const done = commands(async c => {
     await q.applyFlagSettings({ effortLevel: c.level });
     emit({ type: 'effort', level: c.level });
   }
-}).then(() => { closed = true; wake?.(); });
+}).then(() => { giveUp(); closed = true; wake?.(); });
 
 // Streamed blocks are named after their place in their message, so the whole block that follows
 // (one assistant message per block) lands on the text already on the page.
@@ -230,6 +248,8 @@ async function turnEnded(m) {
     turn.context = { used: usage.totalTokens, max: usage.maxTokens };
   } catch {}
   emit(turn);
+  if (failed && !closed) retryLater();
+  failed = false;
   if (!stateful) emit({ type: 'status', state: 'idle' });  // a Claude Code that does not say so itself
 }
 
@@ -253,6 +273,7 @@ try {
     else if (m.type === 'assistant') {
       fromAssistant(m.message, parent, idsOf(m.message));
       if (m.error) emit({ type: 'notice', level: 'error', text: `Claude could not answer (${String(m.error).replace(/_/g, ' ')}).` });
+      if (m.error && !parent && RETRYABLE.includes(m.error)) failed = true;
     } else if (m.type === 'user') fromUser(m.message, parent, false);
     else if (m.type === 'result') await turnEnded(m);
     else if (m.type === 'tool_progress' && m.elapsed_time_seconds >= 5)

@@ -16,6 +16,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 import urllib.request
 
 import pytest
@@ -55,6 +56,7 @@ def board(tmp_path, browser, ui_dist):
     sandbox = tmp_path / "sandbox"
     (sandbox / "web/ui").mkdir(parents=True)  # the server and the built pages: not the app's sources or node_modules
     shutil.copy(REPO / "web/server.py", sandbox / "web")
+    shutil.copy(REPO / "web/holder.py", sandbox / "web")
     shutil.copytree(ui_dist, sandbox / "web/ui/dist")
     shutil.copytree(REPO / "plugins", sandbox / "plugins")
     shutil.copytree(REPO / "agents", sandbox / "agents")
@@ -120,6 +122,12 @@ def board(tmp_path, browser, ui_dist):
     page.project, page.hold, page.commands = project, sandbox / "hold", sandbox / "commands"
     yield page
     context.close()
+    for s in json.load(urllib.request.urlopen(base + "/api/state"))["sessions"]:  # they would outlive the server
+        urllib.request.urlopen(urllib.request.Request(f"{base}/api/sessions/{s['id']}/delete", b""))
+    for _ in range(100):  # each one's folder goes once it has ended
+        if not any(tmp_path.glob(".local/state/claude-sandbox/sessions/*")):
+            break
+        time.sleep(0.05)
     proc.terminate()
     proc.wait(10)
 

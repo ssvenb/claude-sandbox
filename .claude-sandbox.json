@@ -2,6 +2,21 @@
   "env": {
     "GH_USERNAME": "ssvenb",
     "GH_APP_ID": "5713280",
-    "GH_PRIVATE_KEY_FILE": "/var/lib/agent-sandbox-app/agent-sandbox-app.2026-11-11.private-key.pem"
+    "GH_PRIVATE_KEY_FILE": "/var/lib/agent-sandbox-app/agent-sandbox-app.2026-11-11.private-key.pem",
+    "CLAUDE_EFFORT": "medium",
+    "PORTS": "8790"
+  },
+  "plugins": {
+    "project-deps": {
+      "pip": [
+        "uv"
+      ],
+      "setup": [
+        "./install.sh --yes --dev --no-launchers"
+      ]
+    },
+    "dev-server": {
+      "command": "src/server/serve.sh --port 8790 --allow-host claude-box --allow-host claude-box.local --allow-host claude-box.netbird.cloud --allow-host 192.168.2.109 --allow-host 100.108.236.184"
+    }
   }
 }

@@ -1,17 +1,27 @@
-"""Published ports.
+#!/usr/bin/env python3
+"""The ports plugin on the host: a run's share of the central port proxy.
+
+Usage: lease.py join RUN_ID PID    joins (or starts) the proxy; prints the `docker run` arguments, one a line
+       lease.py leave RUN_ID PID   leaves it; the last run out stops it
+       lease.py items              the proxy's items file, for web_live_items
 
 Every sandbox has a network namespace of its own, so two sessions can both serve on :3000. Which
 ports a sandbox opens is the project's choice: $PORTS lists them, and nothing else is published
-(nor shown on the dashboard). Inside, a root helper (src/services/ports/publish-ports.py, started by
-entrypoint.sh) offers each of those a process of the agent's listens on as a unix socket in a
-directory mounted from here; one central proxy on this machine (src/services/ports/portd.py), shared by every
-sandbox of every project, gives each a port on $PORTS_BIND — the same number while it is free,
+(nor shown on the dashboard). Inside, a root helper (../root/publish-ports.py, started by the
+plugin's root-init.sh) offers each of those a process of the agent's listens on as a unix socket in a
+directory mounted from here; one central proxy on this machine (portd.py), shared by every
+sandbox of every project, gives each a port on its bind address — the same number while it is free,
 another free one otherwise. The first run starts the proxy; it exits by itself once no run using
-it is alive.
+it is alive. PID is the process that stands for the run while it lives (the host stage's shell).
+
+The bind address is $PORTS_BIND, else the address the web UI listens on ($SANDBOX_WEB_BIND, which
+src/server/server.py exports for every run it starts: a port button then works from wherever the
+page was opened), else 127.0.0.1. Only the web UI's address keeps the name it was given
+($SANDBOX_WEB_NAME) for the links.
 
     ${TMPDIR:-/tmp}/sandbox-ports-<uid>-<bind>/
       lock            taken to join or leave, and by the proxy before it exits
-      users/<pid>     one per run.sh using the proxy, holding its RUN_ID
+      users/<pid>     one per run using the proxy, holding its RUN_ID
       runs/<RUN_ID>/  the run's sockets, mounted at /run/ports/sockets
       portd.pid, portd.log, ports.json, items.json (the web UI's session buttons)
 """
@@ -24,17 +34,28 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 
-from orchestrator import SANDBOX, Die, say
+HERE = Path(__file__).resolve().parent
 
-ADD_HOST = "--add-host=host.docker.internal:host-gateway"
+
+class Die(Exception):
+    """A refusal, said as `❌ <message>`: it stops the run."""
+
+
+def say(line: str) -> None:
+    print(line, file=sys.stderr, flush=True)  # stdout carries the docker arguments
+
+
+def bind_of(env: dict) -> str:
+    return env.get("PORTS_BIND") or env.get("SANDBOX_WEB_BIND") or "127.0.0.1"
 
 
 def settings(env: dict) -> tuple[str, list[str]]:
-    """PORTS_BIND and PORTS, checked: an address, and port numbers."""
-    bind = env.get("PORTS_BIND") or "127.0.0.1"
+    """The bind address and PORTS, checked: an address, and port numbers."""
+    bind = bind_of(env)
     if not re.fullmatch(r"[0-9A-Fa-f.:]+", bind):
         raise Die(f"PORTS_BIND must be an IP address (got: {bind})")
     ports = (env.get("PORTS") or "").split()
@@ -45,8 +66,8 @@ def settings(env: dict) -> tuple[str, list[str]]:
 
 
 def ports_dir(env: dict) -> Path:
-    """The central proxy's directory, for this user and $PORTS_BIND."""
-    bind = (env.get("PORTS_BIND") or "127.0.0.1").replace(":", "_")
+    """The central proxy's directory, for this user and bind address."""
+    bind = bind_of(env).replace(":", "_")
     return Path(f"{env.get('TMPDIR') or '/tmp'}/sandbox-ports-{os.getuid()}-{bind}")
 
 
@@ -109,13 +130,12 @@ class Ports:
     def start(self) -> list[str]:
         """Joins (or starts) the central proxy for this run, and hands the container its socket
         directory — only when the project configured ports to publish ($PORTS). Its sockets sit
-        under a root-only directory in the container (entrypoint.sh), so the agent cannot plant
+        under a root-only directory in the container (the plugin's root-init.sh), so the agent cannot plant
         anything there for this machine to connect to. The `docker run` arguments."""
         bind, ports = settings(self.env)
-        args = [ADD_HOST]
         if not ports:
             say('🔌 Ports: none published (list them in PORTS, e.g. PORTS="3000 5173")')
-            return args
+            return []
         self.dir.mkdir(parents=True, exist_ok=True)
         st = os.lstat(self.dir)
         if stat.S_ISLNK(st.st_mode) or st.st_uid != os.getuid():
@@ -136,19 +156,20 @@ class Ports:
                 pid = ""
             if not pid or not _alive(pid):
                 with open(self.dir / "portd.log", "a") as log:
-                    # The name PORTS_BIND was resolved from (the web UI's --bind), for the links; only a host name.
-                    name = self.env.get("PORTS_NAME") or ""
+                    # The name the web UI's address was resolved from (its --bind), for the links; only a host name.
+                    name = self.env.get("SANDBOX_WEB_NAME") or ""
+                    name = name if bind == self.env.get("SANDBOX_WEB_BIND") else ""
                     name = name if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", name) else ""
-                    proxy = subprocess.Popen([str(SANDBOX / "src/services/ports/portd.py"), "--bind", bind,
+                    proxy = subprocess.Popen([str(HERE / "portd.py"), "--bind", bind,
                                               "--name", name, str(self.dir)],
                                              stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT)
                 (self.dir / "portd.pid").write_text(f"{proxy.pid}\n")
         say(f"🔌 Ports: {', '.join(ports)} published on {bind}")
-        return args + ["-v", f"{run}:/run/ports/sockets", "-e", f"PORTS_BIND={bind}", "-e", f"PORTS={' '.join(ports)}"]
+        return ["-v", f"{run}:/run/ports/sockets", "-e", f"PORTS_BIND={bind}", "-e", f"PORTS={' '.join(ports)}"]
 
     def release(self):
         """Leaves the proxy; the last run out stops it rather than wait for it to notice."""
-        if not self.joined:
+        if not self.joined and not (self.dir / "users" / self.pid).exists():
             return
         self.joined = False
         with self._locked():
@@ -163,3 +184,26 @@ class Ports:
                     pass
                 for name in ("portd.pid", "ports.json", "items.json"):
                     (self.dir / name).unlink(missing_ok=True)
+
+
+def main(argv: list[str]) -> int:
+    try:
+        if argv[:1] == ["items"] and len(argv) == 1:
+            print(items_file(os.environ))
+        elif argv[:1] in (["join"], ["leave"]) and len(argv) == 3:
+            lease = Ports(dict(os.environ), argv[1], int(argv[2]))
+            if argv[0] == "leave":
+                lease.release()
+            else:
+                print("\n".join(lease.start()))
+        else:
+            print(__doc__.split("\n\n")[1], file=sys.stderr)
+            return 2
+    except Die as e:
+        print(f"❌ {e}", file=sys.stderr, flush=True)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -18,7 +18,6 @@ from . import SANDBOX, Die, say
 from .agents import resolve_agent, resolve_version
 from .config import apply_settings, load_project
 from .plugins import discover, plugin_root, resolve, validate
-from services.ports.lease import Ports, items_file, settings as port_settings
 from .stage import Stage, StageFailed, environ
 
 USAGE = ("Usage: {} [--resume <RUN_ID> | --run-id <RUN_ID> | --web | --web-action <PLUGIN> <ACTION> <ARG>] "
@@ -122,27 +121,22 @@ def run(opts: dict) -> int:
         # (no App key, say) still has pull requests to show.
         stage = Stage("web", stage_env, stdout=sys.stderr)
         stage.finish()
-        said = stage.report.web
-        said["live"] = said.get("live", []) + [items_file(env)]
-        print(json.dumps({**said, "agent": agent.name, "plugins": names}, separators=(",", ":"),
+        print(json.dumps({**stage.report.web, "agent": agent.name, "plugins": names}, separators=(",", ":"),
                          ensure_ascii=False), flush=True)
         return 0
 
     if opts["chat"] and not (agent.dir / "chat.mjs").is_file():
         raise Die(f"The {agent.name} agent has no chat bridge (agents/{agent.name}/chat.mjs): start it without --chat.")
     validate(enabled, everything, env)
-    port_settings(env)  # refused before any plugin sets anything up
 
     # The agent's host stage comes last, so a plugin bringing credentials of its own
     # (AGENT_AUTH_PROVIDED=1) is already accounted for.
     stage = Stage("host", stage_env)
-    ports = None
     try:
         env = stage.report.env
-        docker_args = list(stage.report.docker)
-        # Whatever the agent serves reaches you through the central port proxy (src/services/ports).
-        ports = Ports(env, env["RUN_ID"])
-        docker_args += ports.start()
+        # The host's own services, at host.docker.internal from inside: the container has a network
+        # of its own, and what it serves reaches you through the ports plugin.
+        docker_args = [*stage.report.docker, "--add-host=host.docker.internal:host-gateway"]
         say(f"🤖 Agent: {agent.name}")
         say(f"🔌 Plugins: {' '.join(names) or '<none>'}")
 
@@ -170,8 +164,6 @@ def run(opts: dict) -> int:
         code = container.wait()
         return code if code >= 0 else 128 - code
     finally:
-        if ports:
-            ports.release()
         stage.finish()
 
 
@@ -188,7 +180,7 @@ def main(argv=None) -> int:
             print(str(e), file=sys.stderr)
         print(USAGE.format(prog), file=sys.stderr)
         return e.code
-    # Cleanup (the stage's exit hooks, leaving the port proxy) on the way out however this ends:
+    # Cleanup (the stage's exit hooks) on the way out however this ends:
     # the web UI stops a session with a SIGHUP to its process group.
     for sig in (signal.SIGHUP, signal.SIGTERM):
         signal.signal(sig, _terminate)

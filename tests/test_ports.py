@@ -1,5 +1,5 @@
-"""Published ports: src/services/ports/publish-ports.py in the container, src/services/ports/portd.py (the central proxy) and
-src/services/ports/lease.py (its lifecycle) on the host."""
+"""The ports plugin: root/publish-ports.py in the container, host/portd.py (the central proxy) and
+host/lease.py (its lifecycle) on the host, and its host stage."""
 import json
 import os
 import socket
@@ -10,11 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from conftest import REPO, orchestrator, load
-from services.ports.lease import Ports, items_file
+from conftest import REPO, load
 
-publish = load("src/services/ports/publish-ports.py")
-portd = load("src/services/ports/portd.py")
+publish = load("plugins/ports/root/publish-ports.py")
+portd = load("plugins/ports/host/portd.py")
+lease_py = load("plugins/ports/host/lease.py")
+Ports, items_file = lease_py.Ports, lease_py.items_file
 
 
 def echo_server(sock: socket.socket, prefix: bytes = b"") -> socket.socket:
@@ -202,9 +203,8 @@ def test_a_run_joins_the_central_proxy_and_the_last_one_out_stops_it(short_tmp, 
     lease = Ports(ports_env(short_tmp, PORTS="3000  5173"), "abc123")
     args = lease.start()
     base = short_tmp / f"sandbox-ports-{os.getuid()}-127.0.0.1"
-    assert args == ["--add-host=host.docker.internal:host-gateway", "-v", f"{base}/runs/abc123:/run/ports/sockets",
-                    "-e", "PORTS_BIND=127.0.0.1", "-e", "PORTS=3000 5173"]
-    assert "🔌 Ports: 3000, 5173 published on 127.0.0.1" in capsys.readouterr().out
+    assert args == ["-v", f"{base}/runs/abc123:/run/ports/sockets", "-e", "PORTS_BIND=127.0.0.1", "-e", "PORTS=3000 5173"]
+    assert "🔌 Ports: 3000, 5173 published on 127.0.0.1" in capsys.readouterr().err
     assert (base / f"users/{os.getpid()}").read_text() == "abc123\n"
     assert os.listdir(base / "runs") == ["abc123"]
     pid = int((base / "portd.pid").read_text())
@@ -229,12 +229,15 @@ def test_a_run_joins_the_central_proxy_and_the_last_one_out_stops_it(short_tmp, 
         raise AssertionError("the proxy outlived its last user")
 
 
-@pytest.mark.parametrize("name, passed", [("box.vpn.example", "box.vpn.example"), ("-x; rm", "")])
-def test_the_proxy_names_its_links_by_ports_name_only_when_it_is_a_host_name(short_tmp, name, passed):
-    lease = Ports(ports_env(short_tmp, PORTS="3000", PORTS_NAME=name), "abc123")
+@pytest.mark.parametrize("name, bind, passed", [("box.vpn.example", None, "box.vpn.example"), ("-x; rm", None, ""),
+                                                ("box.vpn.example", "127.0.0.2", "")])  # PORTS_BIND's own address
+def test_the_proxy_names_its_links_by_the_web_uis_name_only_when_it_is_a_host_name(short_tmp, name, bind, passed):
+    """SANDBOX_WEB_BIND/SANDBOX_WEB_NAME: where the web UI listens, and the name its --bind gave for it."""
+    lease = Ports(ports_env(short_tmp, PORTS="3000", PORTS_BIND=bind, SANDBOX_WEB_BIND="127.0.0.1",
+                            SANDBOX_WEB_NAME=name), "abc123")
     lease.start()
     try:
-        base = short_tmp / f"sandbox-ports-{os.getuid()}-127.0.0.1"
+        base = short_tmp / f"sandbox-ports-{os.getuid()}-{bind or '127.0.0.1'}"
         cmdline = Path(f"/proc/{(base / 'portd.pid').read_text().strip()}/cmdline").read_bytes().split(b"\0")
         assert cmdline[cmdline.index(b"--name") + 1] == passed.encode()
     finally:
@@ -267,14 +270,14 @@ def test_a_second_run_shares_the_proxy_and_keeps_it_when_the_first_leaves(short_
                                           ({"PORTS": "3000,5173"}, "PORTS must list port numbers"),
                                           ({"PORTS": "70000"}, "PORTS must list port numbers")])
 def test_settings_that_are_refused(short_tmp, env, message):
-    with pytest.raises(orchestrator.Die, match=message):
+    with pytest.raises(lease_py.Die, match=message):
         Ports(ports_env(short_tmp, **env), "abc123").start()
 
 
 def test_without_configured_ports_a_run_opens_none(short_tmp, capsys):
     lease = Ports(ports_env(short_tmp), "abc123")
-    assert lease.start() == ["--add-host=host.docker.internal:host-gateway"]  # the host is still reachable
-    assert "none published" in capsys.readouterr().out
+    assert lease.start() == []
+    assert "none published" in capsys.readouterr().err
     lease.release()
     assert not (short_tmp / f"sandbox-ports-{os.getuid()}-127.0.0.1").exists()  # no proxy
 
@@ -282,13 +285,31 @@ def test_without_configured_ports_a_run_opens_none(short_tmp, capsys):
 def test_a_directory_that_is_not_yours_is_refused(short_tmp):
     (short_tmp / "elsewhere").mkdir()
     (short_tmp / f"sandbox-ports-{os.getuid()}-127.0.0.1").symlink_to(short_tmp / "elsewhere")
-    with pytest.raises(orchestrator.Die, match="is not yours"):
+    with pytest.raises(lease_py.Die, match="is not yours"):
         Ports(ports_env(short_tmp, PORTS="3000"), "abc123").start()
 
 
 def test_web_lists_the_proxys_items_as_live(short_tmp):
     assert items_file(ports_env(short_tmp, PORTS_BIND="0.0.0.0")) == \
         f"{short_tmp}/sandbox-ports-{os.getuid()}-0.0.0.0/items.json"
+
+
+def test_the_proxy_listens_where_the_web_ui_does_unless_ports_bind_says_otherwise(short_tmp):
+    assert lease_py.bind_of({}) == "127.0.0.1"  # a run started from a terminal
+    assert lease_py.bind_of({"SANDBOX_WEB_BIND": "100.64.0.1"}) == "100.64.0.1"
+    assert lease_py.bind_of({"SANDBOX_WEB_BIND": "100.64.0.1", "PORTS_BIND": "10.0.0.2"}) == "10.0.0.2"
+
+
+def test_the_host_stage_joins_the_proxy_and_its_exit_hook_leaves(sb, short_tmp):
+    """host.sh, sourced as run.sh sources it: the stage's shell stands for the run."""
+    base = short_tmp / f"sandbox-ports-{os.getuid()}-127.0.0.1"
+    run = sb.plugin("ports", PORTS="3000", TMPDIR=short_tmp).ok()
+    assert run.mounts == [f"{base}/runs/abc123:/run/ports/sockets"]
+    assert run.env == {"PORTS_BIND": "127.0.0.1", "PORTS": "3000"}
+    # The shell is gone, its exit hook with it: so are the run's directory and the proxy.
+    assert not (base / "runs/abc123").exists() and not (base / "portd.pid").exists()
+    assert sb.plugin("ports", TMPDIR=short_tmp).ok().args == []  # nothing listed: nothing opened
+    sb.plugin("ports", PORTS="3000,5173", TMPDIR=short_tmp).dies("PORTS must list port numbers")
 
 
 # --- dev-server -------------------------------------------------------------------------------

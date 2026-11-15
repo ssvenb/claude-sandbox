@@ -292,14 +292,14 @@ def test_processes_outside_the_sandbox_are_refused_on_its_loopback(image):
 
 
 def test_ports_the_agent_listens_on_are_offered_to_the_host_out_of_its_reach(image, tmp_path):
-    """src/services/ports/publish-ports.py: a server of the agent's, on localhost only, shows up as a socket in the
-    directory run.sh mounts, which the agent itself cannot reach."""
+    """The ports plugin's root/publish-ports.py: a server of the agent's, on localhost only, shows up as a socket in
+    the directory its host.sh mounts, which the agent itself cannot reach."""
     sockets = tmp_path / "sockets"
     sockets.mkdir()
     probe = ("python3 -m http.server 8123 --bind 127.0.0.1 >/dev/null 2>&1 &\n"
              "python3 -m http.server 8125 --bind 127.0.0.1 >/dev/null 2>&1 & sleep 3\n"
              "ls /run/ports/sockets >/dev/null 2>&1 && echo reachable")
-    b = boot(image, probe=probe, mounts=[f"{sockets}:/run/ports/sockets"], PORTS="8123 9229")
+    b = boot(image, "ports", probe, mounts=[f"{sockets}:/run/ports/sockets"], PORTS="8123 9229")
     assert b.out == ""
     assert (sockets / "8123.sock").is_socket()
     assert not (sockets / "8125.sock").exists()  # not configured: never published
@@ -308,7 +308,7 @@ def test_ports_the_agent_listens_on_are_offered_to_the_host_out_of_its_reach(ima
 
 
 def test_without_the_ports_mount_nothing_is_published_or_said(image):
-    assert "## Ports" not in boot(image).briefing
+    assert "## Ports" not in boot(image, "ports").briefing
 
 
 def test_dev_server_starts_the_projects_server_at_boot(image):

@@ -166,13 +166,12 @@ def test_a_network_bind_admits_this_machines_own_names_only():
     assert web.local_names("127.0.0.1") == {"127.0.0.1", "localhost"}
 
 
-def test_sessions_publish_their_ports_where_the_page_listens():
-    assert web.ports_bind("0.0.0.0", {}) == "0.0.0.0"
-    assert web.ports_bind("", {}) == "0.0.0.0"
-    assert web.ports_bind("192.168.1.5", {}) == "192.168.1.5"
-    assert web.ports_bind("localhost.", {}) == "127.0.0.1"  # a name: its address
-    assert web.ports_bind("127.0.0.1", {}) is None  # run.sh's own default: loopback
-    assert web.ports_bind("0.0.0.0", {"PORTS_BIND": "10.0.0.2"}) == "10.0.0.2"  # the shell's says otherwise
+def test_runs_learn_where_the_page_listens_as_an_address():
+    assert web.web_bind("0.0.0.0") == "0.0.0.0"
+    assert web.web_bind("") == "0.0.0.0"
+    assert web.web_bind("192.168.1.5") == "192.168.1.5"
+    assert web.web_bind("127.0.0.1") == "127.0.0.1"
+    assert web.web_bind("localhost.") == "127.0.0.1"  # a name: its address
 
 
 def test_allow_host_adds_a_name_to_the_allowlist(tmp_path):

@@ -12,7 +12,7 @@ The rest of the core, beside it under src/:
     contract/   what a plugin's or an agent's scripts are sourced with: host/ on this machine,
                 container/ in the image
     boot/       the container's root stage and agent stage
-    services/   core features, host and container side together: ports/, credentials/, settings/, chat/
+    services/   core features, host and container side together: credentials/, settings/, chat/
     shared/     helpers of more than one of those
 
 Plugins and agents stay shell: their host.sh and web.sh are sourced by one bash process per run.

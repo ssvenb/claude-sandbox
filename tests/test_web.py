@@ -305,7 +305,7 @@ def test_a_projects_settings_are_read_and_saved_to_its_claude_sandbox_json(ui):
                 {"plugins": {"upstream-proxy": {"routes": [{"name": "a", "upstream": "https://x"}]}}},
                 {"plugins": {"upstream-proxy": {"routes": [{"name": "a", "port": 70000, "upstream": "https://x"}]}}},
                 {"plugins": {"upstream-proxy": {"routes": [{"name": "a", "port": 1, "upstream": "https://x",
-                                                            "auth": {"type": "bearer"}}]}}}):
+                                                            "auth": {"type": "bearer", "credential": 7}}]}}}):
         assert ui("/api/config", json.dumps({"project": ui.project, "config": bad}).encode()).status == 400
     assert json.loads(file.read_text()) == config  # none of them touched it
     assert ui("/api/config", json.dumps({"project": "/etc", "config": {}}).encode()).status == 400

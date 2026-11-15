@@ -2,11 +2,12 @@ import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useAutoGrow } from '../../hooks/useAutoGrow';
 import { usePastedImages } from '../../hooks/usePastedImages';
 import { projectName } from '../../lib/session';
+import { Icon } from '../common/Icon';
 import { ImageTray } from '../common/Pictures';
 import { useDashboardActions } from './DashboardContext';
 
 /** Starting a session is writing its first message (pictures pasted into it go along), with the
- *  project it is for beside it: the sandbox boots behind it. */
+ *  project it is for and the button that starts it on the card's bottom line, as in a chat. */
 export function NewSession({ projects }: { projects: string[] }) {
   const { start } = useDashboardActions();
   const text = useRef<HTMLTextAreaElement>(null), pick = useRef<HTMLSelectElement>(null);
@@ -36,17 +37,19 @@ export function NewSession({ projects }: { projects: string[] }) {
 
   return (
     <form className="starter" onSubmit={submit}>
-      <div className="field">
-        <ImageTray pictures={pictures} onRemoved={() => text.current?.focus()} />
-        <textarea ref={text} rows={1} name="task" placeholder="What should an agent work on?" aria-label="First message of a new session"
-          onChange={grow} onPaste={pictures.onPaste} onKeyDown={onKeyDown} />
+      <ImageTray pictures={pictures} onRemoved={() => text.current?.focus()} />
+      <textarea ref={text} rows={1} name="task" placeholder="What should an agent work on?" aria-label="First message of a new session"
+        onChange={grow} onPaste={pictures.onPaste} onKeyDown={onKeyDown} />
+      <div className="bar">
+        {projects.length > 1 ? (
+          <select ref={pick} name="project" aria-label="Project">
+            {projects.map(p => <option key={p} value={p}>{projectName(p)}</option>)}
+          </select>
+        ) : <span className="project">{projectName(projects[0]!)}</span>}
+        <button type="submit" className={'glyph primary' + (busy ? ' busy' : '')} disabled={busy} title="Start session" aria-label="Start session">
+          <Icon name="send" />
+        </button>
       </div>
-      {projects.length > 1 && (
-        <select ref={pick} name="project" aria-label="Project">
-          {projects.map(p => <option key={p} value={p}>{projectName(p)}</option>)}
-        </select>
-      )}
-      <button type="submit" className={'primary' + (busy ? ' busy' : '')} disabled={busy}>Start session</button>
     </form>
   );
 }

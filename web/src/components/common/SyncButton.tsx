@@ -23,8 +23,8 @@ async function sync() {
 /** Brings this checkout up to date with main and restarts the web UI with it. */
 export function SyncButton() {
   return (
-    <BusyButton className="sync" title={TITLE} aria-label={TITLE} onClick={sync}>
-      <Icon name="sync" />
+    <BusyButton className="sync" title={TITLE} onClick={sync}>
+      <Icon name="sync" /><span>Update and restart</span>
     </BusyButton>
   );
 }

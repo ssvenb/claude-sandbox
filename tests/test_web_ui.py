@@ -338,13 +338,21 @@ def test_what_runs_in_the_background_has_a_panel_of_its_own_where_each_task_can_
     assert sent[1:] == [{"type": "task", "id": "bg1a"}, {"type": "task", "id": "bg1b"}]
 
 
-def test_the_project_and_the_start_button_stay_put_while_the_first_message_grows(board):
-    button = lambda: board.locator(".starter button[type=submit]").bounding_box()  # noqa: E731
-    before, field = button(), board.locator(".starter .field").bounding_box()
+def test_the_first_message_is_a_card_with_its_project_and_start_button_under_the_text(board):
+    card, field = (board.locator(sel).bounding_box() for sel in (".starter", ".starter textarea"))
+    button = lambda: board.locator(".starter .bar button[type=submit]").bounding_box()  # noqa: E731
+    assert board.inner_text(".starter .bar .project") == "proj"  # one project: named, nothing to pick
+    before = button()
+    assert before["y"] >= field["y"] + field["height"] and before["y"] + before["height"] <= card["y"] + card["height"]
     board.fill(".starter textarea", "one\ntwo\nthree\nfour")
-    assert board.locator(".starter .field").bounding_box()["height"] > field["height"] + 40
-    assert button() == before
-    assert board.query_selector(".starter .field button") is None  # beside the field, not in it
+    assert board.locator(".starter").bounding_box()["height"] > card["height"] + 40
+    assert button()["y"] > before["y"] + 40  # it stays on the card's bottom line
+    # The rest is behind the menu beside it: closed until asked, and Esc closes it again.
+    assert not board.is_visible("#board-menu")
+    board.click("button[aria-label='Menu']")
+    assert board.is_visible("#board-menu .theme") and board.is_visible("#board-menu .sync")
+    board.keyboard.press("Escape")
+    assert not board.is_visible("#board-menu")
 
 
 def test_a_running_session_is_a_window_with_its_stop_button_top_right(board):
@@ -560,6 +568,7 @@ def test_the_pages_follow_the_browsers_day_or_night_unless_one_is_pinned(board):
     board.emulate_media(color_scheme="dark")
     night = paper(board)
     assert day == "rgb(233, 234, 244)" and night == "rgb(27, 29, 54)"
+    board.click("button[aria-label='Menu']")
     board.click(".theme button[aria-label='Day']")  # pinned: the browser's setting no longer decides
     assert paper(board) == day and board.get_attribute(".theme button[aria-label='Day']", "aria-pressed") == "true"
     tab = opens_tab(board, lambda: board.click("button[aria-label='New session']"))

@@ -874,24 +874,32 @@ def test_the_files_a_runs_checkout_changed_are_beside_its_chat_or_behind_a_heade
     (board.checkout / "app.py").write_text("a\nc\nd\n")
     (board.checkout / "web/src").mkdir(parents=True)
     (board.checkout / "web/src/New.tsx").write_text("x\n")
+    (board.checkout / "web/lib").mkdir(parents=True)
+    (board.checkout / "web/lib/util.ts").write_text("1\n2\n")
+    (board.checkout / "docs/guide").mkdir(parents=True)
+    (board.checkout / "docs/guide/intro.md").write_text("hi\n")
     s = board.resume()
     tab = board.context.new_page()
     tab.set_viewport_size({"width": 1400, "height": 800})
     tab.goto(f"{board.base}/chat#{s['id']}")
     # On a desk: a column of its own beside the chat, the button not needed.
-    tab.wait_for_selector("#changes li")
-    assert [" ".join(t.split()) for t in tab.locator("#changes li").all_inner_texts()] == ["M app.py +2 −1", "A New.tsx web/src +1"]
-    assert " ".join(tab.inner_text("#changes .head").split()) == "Changed files +3 −1"
+    tab.wait_for_selector("#changes .file")
+    # A tree of folders, each with the lines changed below it; a folder holding only a folder is one line with it.
+    rows = lambda: [" ".join(t.split()) for t in tab.locator("#changes .file, #changes summary").all_inner_texts()]  # noqa: E731
+    assert rows() == ["docs/guide +1", "A intro.md +1", "web +3", "lib +2", "A util.ts +2", "src +1", "A New.tsx +1", "M app.py +2 −1"]
+    assert " ".join(tab.inner_text("#changes .head").split()) == "Changed files +6 −1"
+    tab.click("#changes summary:has-text('web')")  # closed: its folders and files go, its own line stays
+    assert tab.is_hidden("#changes .file:has-text('util.ts')") and tab.is_visible("#changes summary:has-text('web')")
     assert tab.eval_on_selector("#changes", "e => e.getBoundingClientRect().left") > tab.eval_on_selector("#scroll", "e => e.getBoundingClientRect().right") - 1
     assert tab.is_hidden("header .files")
     # Narrower: a button in the header, its count on it, that opens the list over the chat.
     tab.set_viewport_size({"width": 400, "height": 800})
     assert tab.is_hidden("#changes")
-    assert tab.inner_text("header .files") == "2"
+    assert tab.inner_text("header .files") == "4"
     tab.click("header .files")
-    tab.wait_for_selector("#changes li:has-text('New.tsx')")
+    tab.wait_for_selector("#changes .file:has-text('app.py')")
     tab.keyboard.press("Escape")
     tab.wait_for_selector("#changes", state="hidden")
     # The list follows the checkout.
     (board.checkout / "web/src/New.tsx").unlink()
-    tab.wait_for_function("document.querySelector('header .files')?.innerText === '1'")
+    tab.wait_for_function("document.querySelector('header .files')?.innerText === '3'")

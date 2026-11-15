@@ -6,21 +6,39 @@
   main { height: 100%; padding: 24px 32px 0; display: flex; flex-direction: column; }
   .top { flex: none; }
 
-  /* Starting a session is writing its first message: the sandbox boots behind it. The project and
-     the button stand beside the field, on its first line, so they stay put while it grows. */
-  .top { display: flex; align-items: flex-start; gap: 12px; }
-  .starter { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 8px; }
-  .starter .field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 9px 14px; background: var(--panel);
-                    border: 1.5px solid var(--rule); border-radius: 14px; box-shadow: var(--shadow); }
-  .starter .field:focus-within { border-color: var(--lamp); }
-  .starter textarea { flex: none; width: 100%; min-width: 0; height: 24px; max-height: 30vh; resize: none; border: 0; outline: 0 !important;
-                      background: transparent; padding: 0; font-size: 16px; line-height: 24px; }
-  .starter select { background: var(--panel); max-width: 220px; font-weight: 550; height: 45px; border-radius: 14px;
-                    padding: 0 10px; cursor: pointer; }
-  .starter > button { height: 45px; padding: 0 18px; white-space: nowrap; border-radius: 14px; }
-  .top .theme { margin-top: 7px; }
-  .top .sync { margin: 7px -6px 0 0; flex: none; border-radius: 999px; padding: 6px 8px; color: var(--muted); display: grid; place-items: center; }
-  .top .sync svg { width: 15px; height: 15px; display: block; }
+  /* Starting a session is writing its first message: the sandbox boots behind it. One card, as in
+     a chat: the field on top, the project and the button that starts it on the line under it. */
+  .top { display: flex; align-items: flex-start; justify-content: flex-end; gap: 10px; }
+  .starter { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--panel);
+             border: 1.5px solid var(--rule); border-radius: 18px; box-shadow: var(--shadow); }
+  .starter:focus-within { border-color: var(--lamp); }
+  .starter .shots { padding: 12px 16px 0; }
+  .starter textarea { flex: none; width: 100%; min-width: 0; height: 41px; max-height: 30vh; resize: none; border: 0; outline: 0 !important;
+                      background: transparent; padding: 13px 16px 4px; font-size: 16px; line-height: 24px; }
+  .starter .bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px 8px 10px; }
+  /* The project reads as a quiet pill: its name, and a chevron when there is a choice. */
+  .starter select, .starter .project { min-width: 0; max-width: 260px; height: 32px; padding: 0 28px 0 12px; border: 1px solid var(--rule);
+                    border-radius: 999px; background: var(--sunk); font-size: 13.5px; font-weight: 550; color: var(--ink);
+                    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .starter select { appearance: none; cursor: pointer;
+                    background: var(--sunk) no-repeat right 10px center / 12px
+                      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M4.5 7.5 10 13l5.5-5.5' fill='none' stroke='%23888' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+  .starter select:hover { border-color: var(--muted); }
+  .starter .project { display: inline-flex; align-items: center; padding-right: 12px; color: var(--muted); }
+
+  /* The rest, about this web UI as a whole, waits behind one button beside the card. */
+  .top .menu { margin-top: 8px; color: var(--muted); anchor-name: --board-menu; }
+  .top .menu:hover { color: var(--ink); }
+  #board-menu { position-anchor: --board-menu; inset: auto; top: anchor(bottom); right: anchor(right); margin: 6px 0 0;
+                display: none; flex-direction: column; gap: 4px; min-width: 230px; padding: 6px; color: var(--ink);
+                border: 1px solid var(--rule); border-radius: 14px; background: var(--panel); box-shadow: var(--shadow); }
+  #board-menu:popover-open { display: flex; animation: drop .15s ease-out; }
+  @media (prefers-reduced-motion: reduce) { #board-menu:popover-open { animation: none; } }
+  @supports not (anchor-name: --a) { #board-menu { position: fixed; top: 64px; right: 14px; margin: 0; } }
+  #board-menu .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 4px 4px 10px; font-size: 14px; }
+  #board-menu .sync { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0; border-radius: 9px; padding: 8px 10px; }
+  #board-menu .sync:hover { background: var(--sunk); }
+  #board-menu .sync svg { width: 16px; height: 16px; color: var(--muted); }
 
   .board { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
            grid-template-rows: minmax(0, 1fr); gap: 12px 24px; margin-top: 20px; }
@@ -92,11 +110,6 @@
   .empty b { display: block; color: var(--ink); font-size: 19px; margin-bottom: 4px; }
 
   @media (max-width: 900px) {
-    .top { flex-wrap: wrap; }
-    .starter { flex-wrap: wrap; flex-basis: 100%; }
-    .starter .field { flex-basis: 100%; }
-    .starter select { flex: 1; max-width: none; }
-    .top .theme { margin: 0 0 0 auto; }
     /* One column: the page scrolls again, under the bar that stays at its top. */
     body { height: auto; overflow: visible; padding: 0 14px 48px; }
     main { display: block; height: auto; padding: 0; }

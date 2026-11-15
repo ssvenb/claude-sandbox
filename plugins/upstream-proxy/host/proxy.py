@@ -4,7 +4,7 @@
 Runs on the HOST, where the long-lived secrets live. The container gets only the sockets, so the
 agent can *use* an upstream API without ever holding the key that authenticates to it.
 
-Usage: proxy.py [--env-file FILE]... <routes.json> <socket-dir>
+Usage: proxy.py [--env-file FILE]... [--auth-file FILE] <routes.json> <socket-dir>
 
 One proxy serves every sandbox of a project at once: run.sh starts it for the first and stops it
 after the last, and it outlives the terminal of the run that started it.
@@ -12,6 +12,11 @@ after the last, and it outlives the terminal of the run that started it.
 --env-file loads KEY=VALUE pairs into THIS process only, so a route's secrets never enter run.sh's
 environment where a later plugin's pass_env could forward them into the container. Values already
 set in the environment win over the file.
+
+--auth-file is the named authentications (~/.config/claude-sandbox/auth.json): a route's
+`auth.credential` names an `api-key` entry of it, {"type": "api-key", "key": "sk-…"}, in place of
+`auth.valueEnv`. It is read by this process alone, again on every request (a new key takes
+effect at once), and refused unless only its owner can read it.
 
 Each route in routes.json:
   name           socket basename (<socket-dir>/<name>.sock)
@@ -110,6 +115,26 @@ def load_env_file(path: str) -> int:
     return count
 
 
+AUTH_FILE = None  # --auth-file
+
+
+def credential(name: str) -> str:
+    """The key of the `api-key` authentication called `name` in AUTH_FILE."""
+    if not AUTH_FILE:
+        raise ValueError(f"auth.credential '{name}' needs the authentications file (--auth-file)")
+    try:
+        if os.stat(AUTH_FILE).st_mode & 0o077:
+            raise ValueError(f"{AUTH_FILE} holds API keys: make it readable by you alone (chmod 600 {AUTH_FILE})")
+        with open(AUTH_FILE, encoding="utf-8") as fh:
+            entries = json.load(fh)
+    except (OSError, ValueError) as e:
+        raise ValueError(f"auth.credential '{name}': {e}") from None
+    entry = entries.get(name) if isinstance(entries, dict) else None
+    if not isinstance(entry, dict) or entry.get("type") != "api-key" or not entry.get("key"):
+        raise ValueError(f"auth.credential '{name}': {AUTH_FILE} has no api-key authentication of that name with a key")
+    return str(entry["key"])
+
+
 class _Injector:
     """Turns a route's `auth` block into the headers that authenticate to the upstream."""
 
@@ -129,13 +154,21 @@ class _Injector:
             raise ValueError(f"${name} is unset on the host")
         return value
 
+    def _secret(self) -> str:
+        """A header's value: a named credential, else the variable valueEnv names."""
+        if self.spec.get("credential"):
+            return credential(str(self.spec["credential"]))
+        if not self.spec.get("valueEnv"):
+            raise ValueError(f"auth.credential or auth.valueEnv is required for type '{self.kind}'")
+        return self._env("valueEnv")
+
     def headers(self) -> dict:
         if self.kind == "none":
             return {}
         if self.kind == "header":
-            return {self.spec.get("header", "Authorization"): self._env("valueEnv")}
+            return {self.spec.get("header", "Authorization"): self._secret()}
         if self.kind == "bearer":
-            return {"Authorization": f"Bearer {self._env('valueEnv')}"}
+            return {"Authorization": f"Bearer {self._secret()}"}
         if self.kind == "oauth2_client_credentials":
             return {"Authorization": f"Bearer {self._oauth_token()}"}
         if self.kind == "gcp":
@@ -235,7 +268,7 @@ class _Route:
         self.injector = _Injector(cfg.get("auth", {}))
         # Fail at startup, not on the agent's first request: a bad login or a missing
         # tokenCreator grant should stop run.sh while the user is still watching.
-        if self.injector.kind == "gcp":
+        if self.injector.kind == "gcp" or self.injector.spec.get("credential"):
             self.injector.headers()
 
         # The address the sandbox knows this upstream by. It is a dummy — a loopback port on the
@@ -374,10 +407,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env-file", action="append", default=[], metavar="FILE",
                         help="load secrets from a .env-style file into this process only")
+    parser.add_argument("--auth-file", metavar="FILE",
+                        help="the named authentications, for routes naming an api-key credential")
     parser.add_argument("routes_file")
     parser.add_argument("sock_dir")
     args = parser.parse_args()
     routes_file, sock_dir = args.routes_file, args.sock_dir
+    global AUTH_FILE
+    AUTH_FILE = args.auth_file
 
     # Every sandbox of the project uses this one process, so it must not die with the terminal of
     # the run that happened to start it (a SIGHUP to that run's process group).

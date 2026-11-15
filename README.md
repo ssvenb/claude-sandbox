@@ -559,6 +559,22 @@ token, usable from anywhere until it expires, but never anything it could mint a
 it can do is decided by the account's IAM roles alone. For per-method/path restrictions on top,
 use the proxy route below instead.
 
+### Model API keys through `upstream-proxy`
+
+A model provider's API key is an `api-key` entry of your [authentications](#authentications--configclaude-sandboxauthjson),
+named by a route's `auth.credential` in place of `valueEnv`; `bearer` sends it as
+`Authorization: Bearer <key>` (OpenAI and most others), `header` under the header you name
+(`x-api-key` for Anthropic, `api-key` for Azure OpenAI):
+
+```json
+{ "name": "azure-openai", "port": 8082, "upstream": "https://my-resource.openai.azure.com",
+  "auth": { "type": "header", "header": "api-key", "credential": "azure-openai" },
+  "containerEnv": { "AZURE_OPENAI_ENDPOINT": "http://127.0.0.1:8082", "AZURE_OPENAI_API_KEY": "proxied-on-the-host" } }
+```
+
+The key stays in the host proxy: the agent's SDK gets a placeholder and the loopback address.
+A name `auth.json` lacks, or a file others can read, fails `run.sh` at startup.
+
 ### Scoped GCP access through `upstream-proxy`
 
 A route with `"auth": {"type": "gcp"}` gives the agent Google Cloud access without a single
@@ -586,8 +602,8 @@ http://127.0.0.1:<port>/storage/v1/b/my-bucket/o` works too. A bad login or a mi
 
 Sandboxes of the same project — launched from the same checkout, with the same routes and env
 file — share one host proxy: the first `run.sh` starts it, later ones reuse it, and the
-last one to exit stops it. It loads its credentials once, at start, so a rotated key in the env
-file takes effect only once no sandbox of the project is running.
+last one to exit stops it. It loads the env file once, at start, so a rotated key there takes
+effect only once no sandbox of the project is running; a named credential is read on every request.
 
 ### Published ports
 
@@ -637,7 +653,8 @@ else), each under a name:
 {
   "coder":    {"type": "github-app", "appId": "123456", "privateKeyFile": "~/keys/coder.pem"},
   "reviewer": {"type": "github-app", "appId": "234567", "privateKeyFile": "~/keys/reviewer.pem"},
-  "data":     {"type": "gcp-service-account", "serviceAccount": "sandbox@my-project.iam.gserviceaccount.com"}
+  "data":     {"type": "gcp-service-account", "serviceAccount": "sandbox@my-project.iam.gserviceaccount.com"},
+  "openai":   {"type": "api-key", "key": "sk-…"}
 }
 ```
 
@@ -645,11 +662,14 @@ else), each under a name:
 |------|----------|--------|
 | `github-app` | `github-auth`, as `GH_AUTH` | `appId`, `privateKeyFile`; optional `host`, `username` |
 | `gcp-service-account` | `gcp-auth`, as `GCP_AUTH` | `serviceAccount`; optional `project`, `credentialFile` |
+| `api-key` | `upstream-proxy`, as a route's `auth.credential` | `key`: a model provider's API key (or any other), sent as the route's `bearer` or `header` value |
 
 A project picks one by name — `{"env": {"GH_AUTH": "coder"}}` — and so can a single run
 (`run.sh --set GH_AUTH=reviewer`, which is how `pr-review` reviews under another App than the
-one that wrote the pull request). The file names keys, it does not hold them, and nothing of it
-reaches the container: tokens are still minted on the host.
+one that wrote the pull request). Nothing of the file reaches the container: tokens are still
+minted on the host, and an `api-key` is read only by the host process of `upstream-proxy`, on
+every request (a rotated key takes effect at once), which refuses the file unless only you can
+read it (`chmod 600`).
 
 The core (`src/orchestrator/auth.py`) knows no provider. A plugin that authenticates declares in
 its manifest which setting names the entry and which of its own settings each field fills, and

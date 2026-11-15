@@ -511,6 +511,20 @@ def test_upstream_proxy_starts_a_proxy_and_hands_over_only_sockets_and_env(proxy
     assert os.listdir(proxy_dir) == ["lock"]
 
 
+def test_upstream_proxy_reads_a_routes_named_credential_itself(proxy_sb):
+    """auth.credential: the proxy is handed the authentications file and checks the entry at
+    startup; the key never reaches run.sh's stage or the container."""
+    file = proxy_sb.tmp / "auth.json"
+    file.write_text(json.dumps({"openai": {"type": "api-key", "key": "sk-hunter2"}}))
+    file.chmod(0o600)
+    proxy_sb.config({"plugins": {"upstream-proxy": {"routes": routes(auth={"type": "bearer", "credential": "openai"})}}})
+    run = proxy_sb.plugin("upstream-proxy", SANDBOX_AUTH_FILE=file).ok()
+    assert run.env == {"UPSTREAM_PROXY_PORTS": "api:18080"}
+    assert not any("hunter2" in a for a in run.args)
+    proxy_sb.config({"plugins": {"upstream-proxy": {"routes": routes(auth={"type": "bearer", "credential": "nobody"})}}})
+    proxy_sb.plugin("upstream-proxy", SANDBOX_AUTH_FILE=file).dies("has no api-key authentication of that name")
+
+
 def test_upstream_proxy_is_shared_while_another_run_uses_it(proxy_sb):
     proxy_sb.config({"plugins": {"upstream-proxy": {"routes": routes()}}})
     # A second, still-running run.sh of the project: this test process stands in for it.

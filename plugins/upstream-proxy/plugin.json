@@ -91,10 +91,20 @@
                 }
               },
               {
+                "key": "credential",
+                "type": "string",
+                "label": "Credential",
+                "placeholder": "openai",
+                "description": "Name of an api-key entry in ~/.config/claude-sandbox/auth.json ({\"type\": \"api-key\", \"key\": \"…\"}): the value sent. Takes the place of the env var.",
+                "when": {
+                  "type": ["header", "bearer"]
+                }
+              },
+              {
                 "key": "valueEnv",
                 "type": "string",
                 "label": "Value from env var",
-                "required": true,
+                "description": "Unless a credential is named: the variable holding the value, from the env file or the host's environment.",
                 "when": {
                   "type": ["header", "bearer"]
                 },

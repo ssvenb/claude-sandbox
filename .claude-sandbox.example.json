@@ -42,7 +42,7 @@
           "auth": {
             "type": "header",
             "header": "api-key",
-            "valueEnv": "AZURE_OPENAI_API_KEY"
+            "credential": "azure-openai"
           },
           "containerEnv": {
             "AZURE_OPENAI_ENDPOINT": "http://127.0.0.1:8082",

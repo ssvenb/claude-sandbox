@@ -16,7 +16,7 @@ import sys
 
 from . import SANDBOX, Die, say
 from .agents import resolve_agent, resolve_version
-from .auth import apply_auth
+from .auth import apply_auth, auth_file
 from .config import STARTED_BY, apply_settings, load_project
 from .plugins import discover, plugin_root, resolve, validate
 from .stage import Stage, StageFailed, environ
@@ -116,6 +116,7 @@ def run(opts: dict) -> int:
     everything = discover(plugin_root(env))
     enabled = resolve(everything, env, project, agent.name)
     names = [p.name for p in enabled]
+    env["SANDBOX_AUTH_FILE"] = str(auth_file(env))  # for a plugin that reads entries itself (upstream-proxy)
     try:
         used = apply_auth(env, enabled)
     except Die:

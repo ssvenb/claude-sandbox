@@ -5,7 +5,8 @@ service account), kept in one file on YOUR machine, outside every project:
     {
       "coder":    {"type": "github-app", "appId": "123456", "privateKeyFile": "~/keys/coder.pem"},
       "reviewer": {"type": "github-app", "appId": "234567", "privateKeyFile": "~/keys/reviewer.pem"},
-      "ci-data":  {"type": "gcp-service-account", "serviceAccount": "sandbox@my-project.iam.gserviceaccount.com"}
+      "ci-data":  {"type": "gcp-service-account", "serviceAccount": "sandbox@my-project.iam.gserviceaccount.com"},
+      "openai":   {"type": "api-key", "key": "sk-…"}
     }
 
 A plugin that authenticates declares, in its manifest, which setting names the entry it uses and
@@ -15,8 +16,13 @@ which of its own settings each field of the entry fills:
              "fields": {"appId": "GH_APP_ID", "privateKeyFile": "GH_PRIVATE_KEY_FILE"}}
 
 With GH_AUTH=reviewer the plugin runs exactly as if those settings had been made one by one, so
-its stages need not know. The file names keys, it does not hold them: what a key is exchanged for
-is still minted on the host (src/services/credentials).
+its stages need not know. What a key file is exchanged for is still minted on the host
+(src/services/credentials).
+
+An `api-key` entry (a model provider's API key) is the one that holds a secret itself, so it is
+never turned into settings: upstream-proxy reads it in its own host process, for a route whose
+auth.credential names it (run.sh hands every stage the file's path as SANDBOX_AUTH_FILE), and
+refuses the file unless only you can read it.
 """
 from __future__ import annotations
 

@@ -8,6 +8,7 @@ import type { AppState, Item, Picture, Upload } from '../api/types';
 import { deleteAfterAsking, stopAfterAsking } from '../lib/sessionActions';
 import { announceDeleted, onSessionDeleted, sessionTab } from '../lib/tabs';
 import { Transcript } from '../lib/transcript';
+import { LEAVE } from '../plugins';
 import { useEventStream } from './useEventStream';
 import { usePolling } from './usePolling';
 
@@ -23,8 +24,6 @@ export interface ChatSession {
   halting: boolean;
   stop: () => Promise<void>;
   remove: () => Promise<void>;
-  /** Opens the session's checkout in VS Code, in a tab that closes with the session. */
-  openCode: () => Promise<void>;
   /** Starts the run again, in this tab. */
   resume: () => Promise<void>;
   interrupt: () => Promise<void>;
@@ -42,10 +41,9 @@ export function useChatSession(id: string): ChatSession {
   const [gone, setGone] = useState(false);
   const [halting, setHalting] = useState(false);
   const described = useRef(false);
-  const vsTab = useRef<Window | null>(null);  // the VS Code tab this page opened: closed with the session
 
   const leave = useCallback(() => {
-    vsTab.current?.close();
+    dispatchEvent(new Event(LEAVE));
     window.close();
   }, []);
 
@@ -107,16 +105,6 @@ export function useChatSession(id: string): ChatSession {
       announceDeleted(session);
       leave();
       await poll();  // still here: this tab was not opened by the dashboard, so it may not close itself
-    },
-    openCode: async () => {
-      const w = (vsTab.current = window.open('', 'code-' + transcript.session?.workspace));
-      try {
-        const { folder } = await server.openVscode(id);
-        w?.location.replace('/vscode/?folder=' + encodeURIComponent(folder));
-      } catch (e) {
-        w?.close();
-        alert(message(e));
-      }
     },
     resume: async () => {
       const session = transcript.session;

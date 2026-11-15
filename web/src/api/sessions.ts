@@ -24,7 +24,9 @@ export const interruptSession = (id: string) => post(session(id) + '/interrupt')
 export const chooseModel = (id: string, model: string) => post(session(id) + '/model', { id: model });
 export const chooseEffort = (id: string, level: string) => post(session(id) + '/effort', { level });
 export const stopTask = (id: string, task: string) => post(session(id) + '/task', { id: task });
-export const openVscode = (id: string) => post<{ folder: string }>('/api/vscode', { session: id });
+/** What a plugin's command (web_command) says about the session's run: null where it has none. */
+export const askPlugin = <T>(id: string, plugin: string, name: string) =>
+  api<{ result: T | null }>(`${session(id)}/plugins/${plugin}/${name}`).then(r => r.result);
 
 // A terminal: keystrokes go as they are, not as JSON.
 export const streamUrl = (id: string) => session(id) + '/stream';

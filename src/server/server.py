@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Web UI to orchestrate sandboxes: a dashboard of the configured projects with their sessions and
 whatever their enabled plugins have to show (`run.sh --web`: open pull requests and issues, say);
-a chat page per session, each in its own tab; a terminal page for a project's shell; and VS Code
-in the browser (`code serve-web`) on a run's checkout.
+a chat page per session, each in its own tab; a terminal page for a project's shell; and what a
+plugin serves itself (web_server: VS Code in the browser, say), on our origin under /plugins/<name>/.
 
 Runs on the HOST, as you, next to run.sh — a session is `run.sh --chat` with the project as its
 cwd: the agent behind its chat bridge (agents/<name>/chat.mjs), whose events (src/services/chat/chat-bridge.mjs)
@@ -318,6 +318,7 @@ class Session:
     def json(self):
         return {**{k: getattr(self, k) for k in ("id", "project", "kind", "run_id", "started", "exit", "ui")},
                 "status": self.status(), "workspace": checkout(self.project, self.run_id),
+                "plugins": described.get(self.project, {}).get("plugins", []),
                 "items": live_items(self.project, self.run_id) if self.exit is None and self.kind != "shell" else []}
 
 
@@ -854,94 +855,56 @@ def checkout(project, run_id):
     return next(iter(sorted(glob.glob(pattern.replace("{run_id}", run_id)))), None)
 
 
-def changes(project, run_id):
-    """The files a run changed, as the project's plugin that lists them says (`web_changes`, run in
-    the run's checkout): None when no plugin does, the run has no checkout here, or the command failed."""
-    command, root = described.get(project, {}).get("changes"), checkout(project, run_id)
+def plugin_command(project, run_id, plugin, name):
+    """What a plugin's page code asks of a run (web_command): the plugin's command run in the run's
+    checkout, and the JSON it prints. None when the project's plugin has no such command, the run
+    has no checkout here, or the command failed."""
+    command = described.get(project, {}).get("commands", {}).get(plugin, {}).get(name)
+    root = checkout(project, run_id)
     if not command or not root:
         return None
     try:
-        found = json.loads(subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=20).stdout)
+        return json.loads(subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=20).stdout)
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return None
-    return found if isinstance(found, list) else None
 
 
-vscode_lock = threading.Lock()
-vscode_server = None  # (process, path of the unix socket it listens on)
+servers_lock = threading.Lock()
+servers = {}  # plugin → (process, path of the unix socket it listens on): its web_server, running
 
 
-def vscode_cli():
-    """The VS Code CLI that can `serve-web`. Not the desktop `code` launcher where there is one:
-    it only passes the command on to the CLI it bundles, and the snap's launcher (which puts
-    `--no-sandbox` first) exits 0 without serving at all, so go to that bundled CLI directly."""
-    code = shutil.which("code")
-    if not code:
-        raise ValueError("VS Code's `code` command is not installed on this machine")
-    for cli in (Path(os.path.realpath(code)).with_name("code-tunnel"),  # .deb/.rpm: /usr/share/code/bin
-                Path(code).parent.parent / "code/current/usr/share/code/bin/code-tunnel"):  # snap
-        if os.access(cli, os.X_OK):
-            return str(cli)
-    return code  # the standalone CLI (code.visualstudio.com/#alt-downloads) is `code` itself
-
-
-# Machine settings every VS Code tab gets. Copilot's chat pane has no place here: the agent works
-# in the sandbox, VS Code is for reading and editing what it did.
-VSCODE_SETTINGS = {"chat.disableAIFeatures": True}
-
-
-def vscode_data():
-    """VS Code's data directory (extensions, machine settings), with VSCODE_SETTINGS applied over
-    what is already there: settings changed in VS Code itself, under "Remote", are kept."""
-    data = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "claude-sandbox/vscode"
-    file = data / "data/Machine/settings.json"
-    file.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        settings = json.loads(file.read_text())
-    except FileNotFoundError:
-        settings = {}
-    except ValueError:  # edited in VS Code, with comments: not ours to rewrite
-        return data
-    if settings | VSCODE_SETTINGS != settings:
-        file.write_text(json.dumps(settings | VSCODE_SETTINGS, indent=2) + "\n")
-    return data
-
-
-def vscode():
-    """The socket of the one `code serve-web` every editor tab talks to, started on first use.
-    It serves any folder (`?folder=`), so one is enough for all projects and runs."""
-    global vscode_server
-    with vscode_lock:
-        if vscode_server is None or vscode_server[0].poll() is not None:
-            if vscode_server:  # it died: its socket and log go with it
-                shutil.rmtree(os.path.dirname(vscode_server[1]), ignore_errors=True)
-                vscode_server = None
-            cli, data = vscode_cli(), vscode_data()
-            # VS Code in a browser is a shell on your account. A socket in a 0700 directory keeps
-            # other local users out, and the only way in for a browser is Handler.tunnel, behind
-            # the same guard as the terminals — so it needs no connection token of its own (one
-            # would not survive anyway: the server refuses its token cookie on any navigation
-            # another origin started, which every link from our page to a second port is).
-            run_dir = tempfile.mkdtemp(prefix="sandbox-vscode-")
+def plugin_server(plugin):
+    """The socket of a plugin's own HTTP server (web_server), started on first use: one for every
+    project, as the first project described with it says to start it."""
+    command = next((d["servers"][plugin] for d in list(described.values())
+                    if isinstance(d.get("servers"), dict) and plugin in d["servers"]), None)
+    if not command:
+        raise ValueError(f"no project here has a server of the plugin {plugin}")
+    with servers_lock:
+        proc, path = servers.get(plugin, (None, None))
+        if proc is None or proc.poll() is not None:
+            if proc:  # it died: its socket and log go with it
+                shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+            # What a plugin serves may be a shell on your account (VS Code is). A socket in a 0700
+            # directory keeps other local users out, and the only way in for a browser is
+            # Handler.tunnel, behind the same guard as the terminals: it needs no login of its own.
+            run_dir = tempfile.mkdtemp(prefix=f"sandbox-{plugin}-")
             path = run_dir + "/socket"
             with open(run_dir + "/log", "wb") as log:
                 proc = subprocess.Popen(
-                    [cli, "serve-web", "--socket-path", path, "--without-connection-token",
-                     "--server-base-path", "/vscode", "--server-data-dir", str(data),
-                     "--accept-server-license-terms"],
+                    command, env={**os.environ, "WEB_SOCKET": path, "WEB_BASE": f"/plugins/{plugin}"},
                     stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                     start_new_session=True)  # a group of its own, to stop its children with it
-            vscode_server = (proc, path)
-        proc, path = vscode_server
-        for _ in range(100):  # the first tab would otherwise load before it listens
+            servers[plugin] = (proc, path)
+        for _ in range(100):  # the first request would otherwise come before it listens
             if proc.poll() is not None:
                 said = Path(os.path.dirname(path), "log").read_text(errors="replace").strip()
-                raise ValueError(f"`{proc.args[0]} serve-web` exited with {proc.returncode}"
+                raise ValueError(f"{plugin}'s server exited with {proc.returncode}"
                                  + (f": {said.splitlines()[-1]}" if said else ""))
             if os.path.exists(path):
                 return path
             time.sleep(0.1)
-        raise ValueError("`code serve-web` did not start listening")
+        raise ValueError(f"{plugin}'s server did not start listening")
 
 
 scoped = []
@@ -1067,18 +1030,16 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(404, {"error": "no such session"})
         return s
 
-    def tunnel(self):
-        """Pass one request under /vscode/ to `code serve-web`, and its answer back, as raw bytes:
-        that carries its WebSockets too, and puts VS Code on our origin and behind our guard."""
+    def tunnel(self, plugin):
+        """Pass one request under /plugins/<plugin>/ to that plugin's server, and its answer back, as
+        raw bytes: that carries its WebSockets too, and puts it on our origin and behind our guard."""
         if not self.guard():
             return
         try:
-            with vscode_lock:
-                path = vscode_server and vscode_server[1]
             up = socket.socket(socket.AF_UNIX)
-            up.connect(path)
-        except (TypeError, OSError):  # never started (a stale tab, a restarted server), or gone
-            return self.reply(502, {"error": "VS Code is not running: open it from the status page"})
+            up.connect(plugin_server(plugin))
+        except (ValueError, OSError) as e:
+            return self.reply(502, {"error": str(e)})
         upgrade = "upgrade" in self.headers.get("Connection", "").lower()
         # One request per connection, or a later one would ride through unguarded.
         self.close_connection = True
@@ -1093,7 +1054,7 @@ class Handler(BaseHTTPRequestHandler):
                 if upgrade:
                     while data := self.rfile.read1(65536):
                         up.sendall(data)
-                    up.shutdown(socket.SHUT_RDWR)  # the browser hung up: so does VS Code's side
+                    up.shutdown(socket.SHUT_RDWR)  # the browser hung up: so does the server's side
                 else:
                     up.sendall(self.rfile.read(int(self.headers.get("Content-Length") or 0)))
             except (OSError, ValueError):
@@ -1114,8 +1075,8 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
     def route(self, mine):
-        tunnel = self.path == "/vscode" or self.path.startswith(("/vscode/", "/vscode?"))
-        (self.tunnel if tunnel else mine)()
+        m = re.match(r"/plugins/([\w-]+)(?:[/?]|$)", self.path)
+        self.tunnel(m[1]) if m else mine()
 
     def do_GET(self):
         self.route(self.get)
@@ -1123,7 +1084,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self.route(self.post)
 
-    def do_PUT(self):  # nothing of ours, but VS Code may use any method
+    def do_PUT(self):  # nothing of ours, but a plugin's server may use any method
         self.route(lambda: self.reply(404, {"error": "not found"}))
 
     do_DELETE = do_HEAD = do_OPTIONS = do_PATCH = do_PUT
@@ -1165,9 +1126,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(200, {"offers": [{k: i.get(k) for k in ("url", "ref", "title")}
                                             | {"ask": str(i["on_delete"].get("ask") or f"Tidy up {i.get('ref') or i.get('title')} too?")}
                                             for i in found]})
-        elif m := re.fullmatch(r"/api/sessions/(\w+)/changes", url.path):
+        elif m := re.fullmatch(r"/api/sessions/(\w+)/plugins/([\w-]+)/([\w-]+)", url.path):
             if s := self.session(m[1]):
-                self.reply(200, {"files": changes(s.project, s.run_id)})
+                self.reply(200, {"result": plugin_command(s.project, s.run_id, m[2], m[3])})
         elif m := re.fullmatch(r"/api/sessions/(\w+)/stream", url.path):
             if s := self.session(m[1]):
                 if s.ui != "terminal":
@@ -1200,15 +1161,6 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("not a configured project")
                 write_config(req["project"], req.get("config"))
                 self.reply(200, read_config(req["project"]))
-            elif url.path == "/api/vscode":
-                # Only a folder this UI already knows: a session's checkout, as its plugins said.
-                with lock:
-                    s = sessions.get(json.loads(body).get("session"))
-                folder = s and checkout(s.project, s.run_id)
-                if not folder:
-                    raise ValueError("no such session, or it has no checkout on this machine")
-                vscode()
-                self.reply(200, {"folder": folder})
             elif url.path == "/api/sync":
                 self.reply(200, sync(self.server.bind))
             elif m := re.fullmatch(r"/api/sessions/(\w+)/(prompt|interrupt|answer|model|effort|task)", url.path):
@@ -1390,9 +1342,9 @@ if __name__ == "__main__":
         with lock:  # they run on: what the next server takes them back from
             for s in list(sessions.values()):
                 s.save()
-        if vscode_server:
-            try:  # the `code` CLI leaves the server it spawned running when it is terminated
-                os.killpg(vscode_server[0].pid, signal.SIGTERM)
+        for proc, path in servers.values():
+            try:  # what it spawned may outlive it (the `code` CLI leaves its server running)
+                os.killpg(proc.pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
-            shutil.rmtree(os.path.dirname(vscode_server[1]), ignore_errors=True)
+            shutil.rmtree(os.path.dirname(path), ignore_errors=True)

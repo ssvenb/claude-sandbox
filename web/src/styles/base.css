@@ -62,7 +62,6 @@ button.icon:hover { color: var(--ink); background: var(--sunk); }
 button.icon svg { width: 16px; height: 16px; display: block; }
 button.icon.stop { color: var(--fail); }
 button.icon.play { color: var(--ok); }
-button.icon.vscode { color: #2f8fd8; }
 
 input, select, textarea { font: inherit; font-size: 14px; color: var(--ink); background: var(--sunk);
                           border: 1px solid var(--rule); border-radius: 8px; padding: 6px 9px; }

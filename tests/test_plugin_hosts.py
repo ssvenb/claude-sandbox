@@ -1,5 +1,6 @@
 """Each plugin's host.sh, and each agent's: what they validate and what they hand `docker run`."""
 import glob
+import importlib.util
 import json
 import os
 import shutil
@@ -672,15 +673,64 @@ def test_git_workspace_lists_the_files_a_run_changed_since_it_left_main(tmp_path
 
 
 def test_git_workspace_tells_the_page_how_to_list_a_runs_changes(sb, described):
-    assert [c.endswith("/plugins/git-workspace/host/changes.py") for c in described("git-workspace")["changes"]] == [True]
+    changes = lambda: described("git-workspace")["commands"]["git-workspace"]["changes"]  # noqa: E731
+    assert [c.endswith("/plugins/git-workspace/host/changes.py") for c in changes()] == [True]
     sb.dotenv("BASE_BRANCH=trunk\n")
-    assert described("git-workspace")["changes"][1:] == ["trunk"]
+    assert changes()[1:] == ["trunk"]
 
 
 def test_agent_workspace_tells_the_page_where_a_runs_checkout_is(sb, described):
     assert described("agent-workspace")["checkout"] == f"{sb.home}/.agent-workspaces/*-{{run_id}}"
     sb.dotenv("AGENT_WORKSPACE_DIR=/srv/mirrors\n")  # the project's own setting, as for a run
     assert described("agent-workspace")["checkout"] == "/srv/mirrors/*-{run_id}"
+    [server] = described("agent-workspace")["servers"]["agent-workspace"]  # VS Code, on its first use
+    assert server.endswith("/plugins/agent-workspace/host/vscode.py")
+
+
+@pytest.fixture
+def vscode():
+    """agent-workspace's host/vscode.py, as a module."""
+    spec = importlib.util.spec_from_file_location("vscode", REPO / "plugins/agent-workspace/host/vscode.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_vscode_skips_the_desktop_launcher_for_the_cli_it_bundles(tmp_path, monkeypatch, vscode):
+
+    def exe(path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/bin/sh\n")
+        path.chmod(0o755)
+        return path
+    monkeypatch.setenv("PATH", str(tmp_path / "bin"))
+    with pytest.raises(SystemExit, match="not installed"):
+        vscode.cli()
+    standalone = exe(tmp_path / "bin/code")
+    assert vscode.cli() == str(standalone)  # the standalone CLI serves itself
+    # .deb/.rpm: /usr/bin/code links to /usr/share/code/bin/code, next to the bundled CLI
+    standalone.unlink()
+    (tmp_path / "bin/code").symlink_to(exe(tmp_path / "share/code/bin/code"))
+    bundled = exe(tmp_path / "share/code/bin/code-tunnel")
+    assert vscode.cli() == str(bundled)
+    # snap: <snap>/bin/code links to /usr/bin/snap; the CLI is in the snap's own tree
+    (tmp_path / "bin/code").unlink()
+    (tmp_path / "bin/code").symlink_to(exe(tmp_path / "usr/bin/snap"))
+    bundled = exe(tmp_path / "code/current/usr/share/code/bin/code-tunnel")
+    assert vscode.cli() == str(bundled)
+
+
+def test_vscode_settings_are_applied_over_the_ones_already_there(tmp_path, monkeypatch, vscode):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    file = tmp_path / "claude-sandbox/vscode/data/Machine/settings.json"
+    assert vscode.data() == tmp_path / "claude-sandbox/vscode"
+    assert json.loads(file.read_text()) == {"chat.disableAIFeatures": True}
+    file.write_text('{"editor.fontSize": 15, "chat.disableAIFeatures": false}')
+    vscode.data()
+    assert json.loads(file.read_text()) == {"editor.fontSize": 15, "chat.disableAIFeatures": True}
+    file.write_text('{\n  // mine\n  "editor.fontSize": 15\n}')
+    vscode.data()  # with comments it is left as it is
+    assert "// mine" in file.read_text()
 
 
 @pytest.mark.parametrize("rollup, status", [

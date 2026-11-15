@@ -1,9 +1,9 @@
 // What a project's plugins list, and which of it belongs to a run's session.
 import type { Item, ItemList, ProjectInfo, Session } from '../api/types';
 
-/** An item's tooltip: its ref, note, title and branch, then what its status mark means. */
+/** An item's tooltip: its ref, note and title, then what its status mark means. */
 export const tip = (i: Item): string =>
-  [(i.ref ? i.ref + ' ' : '') + (i.note ? i.note + ': ' : '') + i.title + (i.branch ? ` (${i.branch})` : ''), i.status_text]
+  [(i.ref ? i.ref + ' ' : '') + (i.note ? i.note + ': ' : '') + i.title, i.status_text]
     .filter(Boolean)
     .join('\n');
 

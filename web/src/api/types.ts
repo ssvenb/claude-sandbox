@@ -25,7 +25,6 @@ export interface Item {
   title: string;
   ref?: string;
   note?: string;
-  branch?: string;
   status?: ItemStatus;
   status_text?: string;
   run_id?: string | null;
@@ -43,20 +42,13 @@ export interface Session {
   ui?: 'chat' | 'terminal';
   status: SessionStatus | null;
   workspace?: string | null;
+  /** Its project's enabled plugins. */
+  plugins?: string[];
   items?: Item[];
   title?: string;
   activity?: string;
   said?: string;
   waiting?: number;
-}
-
-/** A file a session's checkout changed since it left its main branch: added, modified or deleted,
- *  and its lines added and removed (null for a binary file). */
-export interface ChangedFile {
-  path: string;
-  status: string;
-  added: number | null;
-  removed: number | null;
 }
 
 export interface AppState {

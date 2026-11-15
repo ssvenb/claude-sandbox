@@ -124,7 +124,7 @@ the .deb/.rpm or snap install, or the standalone CLI): the first click starts on
 accepting the VS Code Server license terms on your behalf, and it stops with the web UI. Its data
 (extensions, settings) lives in `~/.local/share/claude-sandbox/vscode`, with Copilot's chat
 switched off (`chat.disableAIFeatures`) — the agent works in the sandbox. The first folder a
-browser opens may still show the empty chat pane; close it once and VS Code keeps it closed. It listens on a unix socket only your user can reach and is served under `/vscode/` of the
+browser opens may still show the empty chat pane; close it once and VS Code keeps it closed. It listens on a unix socket only your user can reach and is served under `/plugins/agent-workspace/` of the
 web UI itself, so there is no second port to open or to forward over an SSH tunnel.
 
 Resuming brings back the agent's conversation as well as the branch: each run's conversation is
@@ -283,6 +283,7 @@ executed), so their `export`s survive into the rest of the boot sequence.
 | `install.sh` | root | image build, only if the plugin is enabled |
 | `host.sh` | you | on the host, before `docker run` |
 | `web.sh` | you | on the host, by `run.sh --web`, whenever the web UI draws the project |
+| `web/index.tsx` | your browser | the plugin's own part of the web UI, bundled with it when it is built (see [`web.sh`](#websh--web-stage-your-user)) |
 | `root-init.sh` | root | in the container, while secrets are still present |
 | `agent-init.sh` | `node` | in the container, just before Claude starts |
 | `settings.json` | — | merged into the managed policy at boot |
@@ -474,8 +475,16 @@ request, with its CI). An item is `{title, url}` plus optional `ref` (a short id
 | `web_map_items JQ_FILTER` | rewrites every item listed so far (by plugins of a lower `priority`) |
 | `web_live_items FILE` | items from a JSON array in FILE, each with its `run_id`, on the row of that run's running session; the server re-reads the file on every poll, so it suits what comes and goes within seconds (a port a session's server publishes, see [Published ports](#published-ports)); `{host}` in a `url` stands for the host name the page was opened by |
 | `web_note TEXT` | one line saying why there is nothing to list |
-| `web_checkout GLOB` | where a run's `/workspace` is on this machine, `{run_id}` standing for the run; adds the VS Code button to its session |
-| `web_changes CMD [ARG]…` | the command the server runs in a run's checkout (see `web_checkout`) for the files the run changed, a JSON array on stdout of `{path, status, added, removed}`; lists them beside its chat (git-workspace: changed since the run left its base branch) |
+| `web_checkout GLOB` | where a run's `/workspace` is on this machine, `{run_id}` standing for the run: its session's `workspace` |
+| `web_command NAME CMD [ARG]…` | a command the server runs in a run's checkout (see `web_checkout`) when the plugin's page code asks (`GET /api/sessions/<id>/plugins/<plugin>/<NAME>`); the JSON it prints is the answer |
+| `web_server CMD [ARG]…` | an HTTP server of the plugin's, started on the first request under `/plugins/<plugin>/` and handed every such request (WebSockets too), behind the web UI's own guard; one for all projects, listening on the unix socket `$WEB_SOCKET` under the base path `$WEB_BASE` |
+
+Anything else a plugin draws itself, in `plugins/<name>/web/index.tsx`: React, typechecked and
+bundled with the page, reaching the page's own modules as `@ui/…`. Its default export fills the
+places [`web/src/plugins.ts`](web/src/plugins.ts) offers (on a session's chat page: beside its
+state, with its buttons, and a side panel), and it is drawn only for projects that enable the
+plugin. git-workspace lists a run's changed files that way (`web_command changes`), and
+agent-workspace opens its checkout in VS Code (`web_server`).
 
 ```bash
 # plugins/github-auth/web.sh lists the pull requests, with their CI and `branch`, as a section;
@@ -791,7 +800,7 @@ piece by piece, to keep the code that has to be maintained here small:
 | Hand-written code | Verdict |
 |---|---|
 | Markdown rendering, terminal loading, component plumbing in the web UI | **replaced** by npm packages (React, `react-markdown`, `@xterm/xterm`), bundled by Vite — see [web/package.json](web/package.json) |
-| `src/server/server.py`'s HTTP layer → FastAPI/Starlette | kept: the server tunnels VS Code (`code serve-web`) over raw sockets, upgrade requests included, which ASGI does not expose; sessions are ptys and pipes read by threads. A framework would replace the ~80 lines of routing and leave the rest |
+| `src/server/server.py`'s HTTP layer → FastAPI/Starlette | kept: the server tunnels what plugins serve (VS Code's `code serve-web`) over raw sockets, upgrade requests included, which ASGI does not expose; sessions are ptys and pipes read by threads. A framework would replace the ~80 lines of routing and leave the rest |
 | `.env` scanning (`config.py`) → `python-dotenv` | kept: 30 lines, and its rules must match `env_scan_into`, the bash twin plugins use (a test holds the two together); `python-dotenv` reads quotes and comments differently and has no "commented defaults" mode |
 | GitHub App JWT (`mint-gh-token.py`) → `PyJWT` + `cryptography` | kept: ten lines around `openssl dgst`, against a compiled dependency in every environment |
 | Settings validation (`src/server/server.py`) → `pydantic` / `jsonschema` | kept: the types are declared by plugin manifests at run time, so a schema library would need a translation layer as long as the checks |

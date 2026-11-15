@@ -1,8 +1,7 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { AgentInfo } from '../../api/events';
 import type { Item, Session, SessionStatus } from '../../api/types';
 import { projectName, SHORT, titled } from '../../lib/session';
-import { BusyButton } from '../common/BusyButton';
 import { Chip } from '../common/Chip';
 import { HomeLink } from '../common/HomeLink';
 import { Icon } from '../common/Icon';
@@ -18,16 +17,15 @@ interface Props {
   state: SessionStatus | null;
   /** What its project's plugins tie to its run, and what it publishes: its pull request, its ports. */
   items: Item[];
-  /** How many files its checkout changed: a button opens their list where it is not beside the chat. */
-  changed: number;
+  /** What its project's plugins put beside its state, and with its buttons (see plugins.ts). */
+  bar: ReactNode;
+  actions: ReactNode;
   onStop: () => void;
   onDelete: () => void;
-  /** Opens its checkout in VS Code. */
-  onCode: () => Promise<void>;
 }
 
 /** Which session this is and how it is doing, with the buttons that end it. */
-export function ChatHeader({ session, gone, info, state, items, changed, onStop, onDelete, onCode }: Props) {
+export function ChatHeader({ session, gone, info, state, items, bar, actions, onStop, onDelete }: Props) {
   // On a phone the chips and the buttons (not the theme switch) drop down in a row of their own, on request.
   const [more, setMore] = useState(false);
   if (gone) {
@@ -51,16 +49,10 @@ export function ChatHeader({ session, gone, info, state, items, changed, onStop,
         <span className={'lamp ' + (state ?? '')} />
         {state ? SHORT[state] : 'Ended'}
       </span>
-      {changed > 0 && (
-        <button className="icon files" popoverTarget="changes" aria-label={`${changed} changed files`} title="Changed files">
-          <Icon name="files" /><span>{changed}</span>
-        </button>
-      )}
+      {bar}
       <div className="extra">
         <div className="chips">{items.map((i, k) => <Chip key={k} item={i} />)}</div>
-        {session.workspace && (
-          <BusyButton className="icon vscode" onClick={onCode} aria-label="VS Code" title="VS Code"><Icon name="vscode" /></BusyButton>
-        )}
+        {actions}
         {state && (
           <button className="icon stop" onClick={onStop} aria-label="Stop session" title="Stop"><Icon name="stop" /></button>
         )}

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The files a run's checkout changed since it branched off its base, committed or not, as a JSON
 array on stdout: each {path, status (A, M or D), added, removed}, the lines added and removed being
-null for a binary file. Run by the web server in the checkout (web_changes in ../web.sh).
+null for a binary file. Run by the web server in the checkout (web_command in ../web.sh).
 
     changes.py [BASE_BRANCH]    (default: origin's default branch, else main or master)
 """

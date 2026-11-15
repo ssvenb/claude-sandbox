@@ -13,10 +13,6 @@ const ICONS = {
   trash: { body: stroke('M3.5 5.5h13M8 5.5V3.5h4v2M5.5 5.5l.8 11h7.4l.8-11M8.5 8.5v5M11.5 8.5v5') },
   play: { body: <path d="M6 4.2v11.6a.8.8 0 0 0 1.2.7l9.3-5.8a.8.8 0 0 0 0-1.4L7.2 3.5a.8.8 0 0 0-1.2.7z" fill="currentColor" /> },
   stop: { body: <rect x="4.5" y="4.5" width="11" height="11" rx="2" fill="currentColor" /> },
-  vscode: {
-    viewBox: '0 0 24 24',
-    body: <path fill="currentColor" fillRule="evenodd" d="M17 1.5 22 4v16l-5 2.5-9.4-8.6-4.3 3.3L2 16.5v-9l1.3-.7 4.3 3.3zm0 5.7L10.7 12l6.3 4.8z" />,
-  },
   gear: {
     viewBox: '0 0 24 24',
     body: (
@@ -31,7 +27,6 @@ const ICONS = {
   clip: { body: stroke('M15.5 9.5 9.6 15.4a3.5 3.5 0 0 1-5-5l6.4-6.4a2.3 2.3 0 0 1 3.3 3.3L7.9 13.7a1.2 1.2 0 0 1-1.7-1.7L12 6.2', 1.8) },
   send: { body: stroke('M10 16V4M4.5 9.5 10 4l5.5 5.5', 2.2) },
   back: { body: stroke('M11.5 4.5 6 10l5.5 5.5', 2.2) },
-  files: { body: stroke('M11.5 2.5H6a1.5 1.5 0 0 0-1.5 1.5v12A1.5 1.5 0 0 0 6 17.5h8a1.5 1.5 0 0 0 1.5-1.5V6.5zM11.5 2.5v4h4M10 9v5M7.5 11.5h5', 1.8) },
   down: { body: stroke('M4.5 7.5 10 13l5.5-5.5', 2.2) },
   sun: {
     body: (

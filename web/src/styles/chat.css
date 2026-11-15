@@ -213,42 +213,18 @@
   #gone b { display: block; color: var(--ink); font-size: 22px; font-weight: 650; margin-bottom: 6px; }
   #gone[hidden] { display: none; }
 
-  /* The files its checkout changed: a popover under the header's button; beside the chat on a desk. */
-  header .files { gap: 5px; align-items: center; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  #changes { inset: auto; top: 58px; right: 10px; margin: 0; width: min(420px, calc(100vw - 20px)); max-height: 70dvh;
-             padding: 0; color: var(--ink); font-size: 13.5px; border: 1px solid var(--rule); border-radius: 14px;
-             background: var(--panel); box-shadow: var(--shadow); flex-direction: column; }
-  #changes:popover-open { display: flex; animation: drop .15s ease-out; }
-  #changes .head { display: flex; align-items: baseline; gap: 10px; padding: 11px 14px 7px; }
-  #changes .head b { flex: 1; font-weight: 600; }
-  /* A tree: each folder with the lines changed below it, its content indented along a guide line. */
-  #changes .tree { padding: 0 6px 8px; overflow-y: auto; }
-  #changes ul { list-style: none; margin: 0; padding: 0; }
-  #changes ul ul { margin-left: 15px; padding-left: 4px; border-left: 1px solid var(--rule); }
-  #changes .file, #changes .folder > details > summary { display: flex; align-items: center; gap: 7px; min-height: 28px;
-                                                          padding: 0 8px; border-radius: 7px; min-width: 0; }
-  #changes .file:hover, #changes .folder > details > summary:hover { background: var(--sunk); }
-  #changes .folder > details > summary { cursor: pointer; list-style: none; color: var(--muted); }
-  #changes .folder > details > summary::-webkit-details-marker { display: none; }
-  #changes .folder svg { flex: none; width: 12px; height: 12px; transition: transform .15s; }
-  #changes .folder > details:not([open]) > summary svg { transform: rotate(-90deg); }
-  #changes .st { flex: none; width: 12px; text-align: center; font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--muted); }
-  #changes .st.A { color: var(--ok); }
-  #changes .st.M { color: var(--lamp); }
-  #changes .st.D { color: var(--fail); }
-  #changes .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #changes .file .name { font-weight: 500; }
-  #changes .n { flex: none; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
-  #changes ins { text-decoration: none; color: var(--ok); }
-  #changes del { text-decoration: none; color: var(--fail); }
-  #changes .none { margin: 0; padding: 2px 14px 12px; color: var(--muted); }
+  /* A plugin's side panel (plugins.ts, ChatParts.aside): a popover under the header's button;
+     beside the chat on a desk. shortcut: one column for one panel, a second would sit on the first. */
+  aside.side { inset: auto; top: 58px; right: 10px; margin: 0; width: min(420px, calc(100vw - 20px)); max-height: 70dvh;
+               padding: 0; color: var(--ink); border: 1px solid var(--rule); border-radius: 14px;
+               background: var(--panel); box-shadow: var(--shadow); flex-direction: column; }
+  aside.side:popover-open { display: flex; animation: drop .15s ease-out; }
   @media (min-width: 1200px) {
-    body:has(#changes) { display: grid; grid-template: auto minmax(0, 1fr) auto / minmax(0, 1fr) 320px; }
-    body:has(#changes) header { grid-column: 1 / -1; }
-    #changes { display: flex; position: static; grid-column: 2; grid-row: 2 / 4; width: auto; height: auto; max-height: none; overflow: hidden;
-               border: 0; border-left: 1px solid var(--rule); border-radius: 0; box-shadow: none; background: var(--page); }
-    #changes .head { padding-top: 16px; }
-    header .files { display: none; }
+    body:has(aside.side) { display: grid; grid-template: auto minmax(0, 1fr) auto / minmax(0, 1fr) 320px; }
+    body:has(aside.side) header { grid-column: 1 / -1; }
+    aside.side { display: flex; position: static; grid-column: 2; grid-row: 2 / 4; width: auto; height: auto; max-height: none; overflow: hidden;
+                 border: 0; border-left: 1px solid var(--rule); border-radius: 0; box-shadow: none; background: var(--page); }
+    header .side-toggle { display: none; }
   }
 
   @media (max-width: 720px) {

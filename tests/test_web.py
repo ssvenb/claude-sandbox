@@ -244,34 +244,31 @@ while True:
 """
 
 
-def test_vscode_opens_only_a_sessions_checkout_through_the_guarded_tunnel(ui):
-    ask = lambda sid: ui("/api/vscode", json.dumps({"session": sid}).encode())  # noqa: E731
-    json.load(ui("/api/project?project=" + ui.project))  # agent-workspace: checkouts in ~/.agent-workspaces
+def test_a_plugins_server_starts_on_first_use_behind_the_guarded_tunnel(ui):
+    vscode = "/plugins/agent-workspace/"  # agent-workspace serves VS Code
+    json.load(ui("/api/project?project=" + ui.project))
     mirror = ui.tmp / ".agent-workspaces/proj-20261112-0a1b2c"
     mirror.mkdir(parents=True)
     # run.sh itself fails here (no App key), but the session keeps its run id, as an ended run does.
     s = json.load(ui("/api/sessions", json.dumps({"project": ui.project, "kind": "resume",
                                                   "run_id": "0a1b2c"}).encode()))
-    assert s["workspace"] == str(mirror)
-    assert "not installed" in json.load(ask(s["id"]))["error"]
-    assert ui("/vscode/?folder=/x").status == 502  # nothing started yet
+    assert s["workspace"] == str(mirror) and "agent-workspace" in s["plugins"]
+    failed = ui(vscode + "?folder=/x")
+    assert failed.status == 502 and "not installed" in json.load(failed)["error"]  # what the plugin said
     code = ui.tmp / "bin/code"
     code.parent.mkdir()
     code.write_text(FAKE_CODE)
     code.chmod(0o755)
 
-    assert json.load(ask(s["id"])) == {"folder": str(mirror)}
-    assert json.load(ask(s["id"])) == {"folder": str(mirror)}  # the same server again
-    seen = ui("/vscode/?folder=/x").read()
-    assert seen.startswith(b"GET /vscode/?folder=/x HTTP/1.1\r\n") and b"Connection: close" in seen
-    assert ui("/vscode/", b"body").read().startswith(b"POST /vscode/ ")
-    # VS Code in a browser is a shell on this machine: our own page only.
-    assert ui("/vscode/", Origin="http://evil.example").status == 403
-    assert ui("/vscode/", Host="evil.example").status == 403
-    assert ui("/vscodex").status == 404
-
-    assert ask("nosuchid").status == 400
-    assert ui("/api/vscode", json.dumps({"project": ui.project}).encode()).status == 400  # projects: no
+    seen = ui(vscode + "?folder=/x").read()  # started afresh, the failed one gone
+    assert seen.startswith(b"GET /plugins/agent-workspace/?folder=/x HTTP/1.1\r\n") and b"Connection: close" in seen
+    assert ui(vscode, b"body").read().startswith(b"POST /plugins/agent-workspace/ ")  # the same server again
+    assert ui("/plugins/agent-workspace").read().startswith(b"GET /plugins/agent-workspace ")
+    # What a plugin serves may be a shell on this machine: our own page only.
+    assert ui(vscode, Origin="http://evil.example").status == 403
+    assert ui(vscode, Host="evil.example").status == 403
+    assert ui("/plugins/github-auth/").status == 502  # serves nothing
+    assert ui("/pluginsx").status == 404
 
 
 def test_the_page_gets_what_the_projects_plugins_describe(ui):
@@ -327,17 +324,18 @@ def test_a_runs_checkout_is_found_where_a_plugin_says_it_is(tmp_path, monkeypatc
     assert web.checkout("/other", "0a1b2c") is None  # no plugin of that project keeps one
 
 
-def test_a_runs_changes_are_what_the_plugin_that_lists_them_says_run_in_its_checkout(tmp_path, monkeypatch):
+def test_a_plugins_command_runs_in_the_runs_checkout(tmp_path, monkeypatch):
     run = tmp_path / "proj-20261112-0a1b2c"
     run.mkdir()
-    (run / "said").write_text('[{"path": "a.py", "status": "M", "added": 1, "removed": 0}]')
-    monkeypatch.setitem(web.described, "/proj", {"checkout": f"{tmp_path}/*-{{run_id}}", "changes": ["cat", "said"]})
-    assert web.changes("/proj", "0a1b2c") == [{"path": "a.py", "status": "M", "added": 1, "removed": 0}]
-    assert web.changes("/proj", "ffffff") is None  # no checkout of that run here
+    (run / "said").write_text('[{"path": "a.py"}]')
+    monkeypatch.setitem(web.described, "/proj", {"checkout": f"{tmp_path}/*-{{run_id}}",
+                                                 "commands": {"p": {"list": ["cat", "said"]}}})
+    assert web.plugin_command("/proj", "0a1b2c", "p", "list") == [{"path": "a.py"}]
+    assert web.plugin_command("/proj", "ffffff", "p", "list") is None  # no checkout of that run here
+    assert web.plugin_command("/proj", "0a1b2c", "p", "other") is None  # no such command
+    assert web.plugin_command("/proj", "0a1b2c", "q", "list") is None  # nor plugin
     (run / "said").write_text("not json")
-    assert web.changes("/proj", "0a1b2c") is None
-    monkeypatch.setitem(web.described, "/proj", {"checkout": f"{tmp_path}/*-{{run_id}}"})
-    assert web.changes("/proj", "0a1b2c") is None  # no plugin lists them
+    assert web.plugin_command("/proj", "0a1b2c", "p", "list") is None
 
 
 def test_a_project_run_sh_cannot_describe_says_why(tmp_path):
@@ -346,57 +344,18 @@ def test_a_project_run_sh_cannot_describe_says_why(tmp_path):
     assert ".claude-sandbox.json" in note
 
 
-def test_vscode_skips_the_desktop_launcher_for_the_cli_it_bundles(tmp_path, monkeypatch):
-    def exe(path):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("#!/bin/sh\n")
-        path.chmod(0o755)
-        return path
-    monkeypatch.setenv("PATH", str(tmp_path / "bin"))
-    with pytest.raises(ValueError, match="not installed"):
-        web.vscode_cli()
-    standalone = exe(tmp_path / "bin/code")
-    assert web.vscode_cli() == str(standalone)  # the standalone CLI serves itself
-    # .deb/.rpm: /usr/bin/code links to /usr/share/code/bin/code, next to the bundled CLI
-    standalone.unlink()
-    (tmp_path / "bin/code").symlink_to(exe(tmp_path / "share/code/bin/code"))
-    bundled = exe(tmp_path / "share/code/bin/code-tunnel")
-    assert web.vscode_cli() == str(bundled)
-    # snap: <snap>/bin/code links to /usr/bin/snap; the CLI is in the snap's own tree
-    (tmp_path / "bin/code").unlink()
-    (tmp_path / "bin/code").symlink_to(exe(tmp_path / "usr/bin/snap"))
-    bundled = exe(tmp_path / "code/current/usr/share/code/bin/code-tunnel")
-    assert web.vscode_cli() == str(bundled)
-
-
-def test_vscode_that_will_not_start_says_what_it_printed(tmp_path, monkeypatch):
-    code = tmp_path / "bin/code"
-    code.parent.mkdir()
-    code.write_text("#!/bin/sh\necho starting\necho 'error: no such option --socket-path' >&2\nexit 2\n")
-    code.chmod(0o755)
-    monkeypatch.setenv("PATH", str(code.parent))
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
-    monkeypatch.setattr(web, "vscode_server", None)
-    with pytest.raises(ValueError, match=r"exited with 2: error: no such option --socket-path"):
-        web.vscode()
-    run_dir = os.path.dirname(web.vscode_server[1])
+def test_a_plugins_server_that_will_not_start_says_what_it_printed(tmp_path, monkeypatch):
+    monkeypatch.setitem(web.described, "/proj", {"servers": {"p": [
+        "sh", "-c", "echo starting; echo \"error: no such option, base $WEB_BASE\" >&2; exit 2"]}})
+    monkeypatch.setattr(web, "servers", {})
+    with pytest.raises(ValueError, match=r"p's server exited with 2: error: no such option, base /plugins/p"):
+        web.plugin_server("p")
+    run_dir = os.path.dirname(web.servers["p"][1])
     with pytest.raises(ValueError):  # a second try starts afresh, and clears the failed one away
-        web.vscode()
+        web.plugin_server("p")
     assert not os.path.exists(run_dir)
-    shutil.rmtree(os.path.dirname(web.vscode_server[1]))
-
-
-def test_vscode_settings_are_applied_over_the_ones_already_there(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-    file = tmp_path / "claude-sandbox/vscode/data/Machine/settings.json"
-    assert web.vscode_data() == tmp_path / "claude-sandbox/vscode"
-    assert json.loads(file.read_text()) == {"chat.disableAIFeatures": True}
-    file.write_text('{"editor.fontSize": 15, "chat.disableAIFeatures": false}')
-    web.vscode_data()
-    assert json.loads(file.read_text()) == {"editor.fontSize": 15, "chat.disableAIFeatures": True}
-    file.write_text('{\n  // mine\n  "editor.fontSize": 15\n}')
-    web.vscode_data()  # with comments it is left as it is
-    assert "// mine" in file.read_text()
+    with pytest.raises(ValueError, match="no project here has a server of the plugin q"):
+        web.plugin_server("q")
 
 
 def test_a_session_outlives_its_tabs_until_stopped_or_deleted(tmp_path, monkeypatch):

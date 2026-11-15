@@ -78,7 +78,9 @@ def board(tmp_path, browser, ui_dist):
     # Items on another origin, as GitHub's are: localhost is the same server, another origin.
     elsewhere = base.replace("127.0.0.1", "localhost")
     (sandbox / "web.json").write_text(json.dumps({"notes": [], "agent": "claude", "checkout": f"{tmp_path}/mirrors/*-{{run_id}}",
-        "changes": [str(sandbox / "plugins/git-workspace/host/changes.py")],
+        "plugins": ["agent-workspace", "git-workspace", "github-auth"],
+        "commands": {"git-workspace": {"changes": [str(sandbox / "plugins/git-workspace/host/changes.py")]}},
+        "servers": {"agent-workspace": [str(sandbox / "plugins/agent-workspace/host/vscode.py")]},
         "live": [str(tmp_path / "ports.json")],
         "session_items": [{"run_id": RUN, "ref": "preview", "title": "The run's preview", "url": f"{elsewhere}/preview"}],
         "run_items": [
@@ -661,7 +663,7 @@ def test_deleting_a_session_closes_its_tabs_and_only_its_own(board):
     session = opens_tab(board, lambda: board.click(".window .open"))
     session.on("dialog", lambda d: d.accept())
     code = opens_tab(session, lambda: session.click("button[aria-label='VS Code']"))  # from the session's own page
-    assert "/vscode/?folder=" in code.url
+    assert "/plugins/agent-workspace/?folder=" in code.url
     its_pr = opens_tab(board, lambda: board.click(f"{ROW} a.chip:has-text('#3')"))
     issue = opens_tab(board, lambda: board.click("text=A bug"))
     term = opens_tab(board, lambda: board.click("button[aria-label='Terminal']"))

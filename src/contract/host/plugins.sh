@@ -65,13 +65,13 @@ trap plugins_run_exit_hooks EXIT
 
 # --- helpers available to plugin web.sh scripts --------------------------------------------
 #
-# The web UI knows nothing about GitHub, branches or mirrors: it draws what the enabled plugins of
-# a project describe here. WEB_JSON is that description, printed by `run.sh --web`.
+# The web UI knows nothing about any plugin: it draws what the enabled plugins of a project
+# describe here, and the page code they bring themselves (web_command, web_server). WEB_JSON is that description, printed by `run.sh --web`.
 
-WEB_JSON='{"lists":[],"notes":[],"session_items":[],"run_items":[],"live":[]}'
+WEB_JSON='{"lists":[],"notes":[],"session_items":[],"run_items":[],"live":[],"commands":{},"servers":{}}'
 
 # The page has two places for what a plugin shows: a section of the project's band (web_list),
-# and a session's own row, next to its VS Code button (web_session_item, web_run_items,
+# and a session's own row (web_session_item, web_run_items,
 # web_tie_items). An item is {title, url} plus optional `ref` (a short id shown first, "#12"),
 # `note` ("Draft"), `status` ("ok", "fail" or "pending", e.g. a pull request's CI; "done",
 # e.g. a merged one) with its `status_text`, and anything a later plugin may want to read, such as the `branch` of a pull
@@ -139,13 +139,26 @@ web_tie_items() {
 web_action_done() { WEB_ACTION_DONE=1; }
 
 # web_checkout <glob>: where a run's /workspace is on this machine, `{run_id}` standing for the
-# run. The page offers to open the directory it matches in VS Code.
+# run: a session's `workspace`, where web_command runs.
 web_checkout() { WEB_JSON=$(jq -c --arg glob "$1" '.checkout = $glob' <<<"$WEB_JSON"); }
 
-# web_changes <command> [args…]: what the web server runs in a run's checkout (web_checkout) for the
-# files the run changed, listed beside its chat: a JSON array on stdout, each
-# {path, status ("A", "M" or "D"), added, removed} (the lines, null for a binary file).
-web_changes() { WEB_JSON=$(jq -c '.changes = $ARGS.positional' --args "$@" <<<"$WEB_JSON"); }
+# A plugin draws its own part of the page in plugins/<name>/web/index.tsx (see web/src/plugins.ts),
+# and asks the web server for what it needs through these two.
+
+# web_command <name> <command> [args…]: what the web server runs in a run's checkout (web_checkout)
+# when the plugin's page code asks (GET /api/sessions/<id>/plugins/<plugin>/<name>): the JSON it
+# prints is the answer.
+web_command() {
+  WEB_JSON=$(jq -c --arg plugin "$PLUGIN_NAME" --arg name "$1" '.commands[$plugin][$name] = $ARGS.positional' \
+    --args "${@:2}" <<<"$WEB_JSON")
+}
+
+# web_server <command> [args…]: an HTTP server of the plugin's, which the web server starts on the
+# first request under /plugins/<plugin>/ and passes every such request to, behind its own guard.
+# One for all projects. It listens on the unix socket WEB_SOCKET names, its paths under WEB_BASE.
+web_server() {
+  WEB_JSON=$(jq -c --arg plugin "$PLUGIN_NAME" '.servers[$plugin] = $ARGS.positional' --args "$@" <<<"$WEB_JSON")
+}
 
 # --- framework -----------------------------------------------------------------------------
 

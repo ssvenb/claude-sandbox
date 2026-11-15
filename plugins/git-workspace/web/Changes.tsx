@@ -1,5 +1,13 @@
-import type { ChangedFile } from '../../api/types';
-import { Icon } from '../common/Icon';
+import { Icon } from '@ui/components/common/Icon';
+
+/** A file a session's checkout changed since it left its main branch: added, modified or deleted,
+ *  and its lines added and removed (null for a binary file), as host/changes.py lists it. */
+export interface ChangedFile {
+  path: string;
+  status: string;
+  added: number | null;
+  removed: number | null;
+}
 
 const STATUS: Record<string, string> = { A: 'Added', M: 'Modified', D: 'Deleted' };
 
@@ -86,7 +94,7 @@ function Items({ of }: { of: Folder }) {
 export function Changes({ files }: { files: ChangedFile[] }) {
   const root = tree(files);
   return (
-    <aside id="changes" popover="auto" aria-label="Changed files">
+    <aside id="changes" className="side" popover="auto" aria-label="Changed files">
       <div className="head">
         <b>Changed files</b>
         {files.length > 0 && <Lines added={root.added} removed={root.removed} />}

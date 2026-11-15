@@ -1,10 +1,7 @@
 // A session's conversation: the header says which and how it is doing, the column is what was said
 // and done, the dock at the bottom is where the next message is written. The dock is there from the
 // first moment, while the sandbox still starts.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { api } from '../api/client';
-import type { ChangedFile } from '../api/types';
-import { Changes } from '../components/chat/Changes';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { BackgroundTasks } from '../components/chat/BackgroundTasks';
 import { Boot } from '../components/chat/Boot';
 import { ChatContext, type ChatActions } from '../components/chat/ChatContext';
@@ -14,11 +11,11 @@ import { Entries } from '../components/chat/Entries';
 import { Plan } from '../components/chat/Plan';
 import { Gone } from '../components/common/Gone';
 import { useChatSession } from '../hooks/useChatSession';
-import { usePolling } from '../hooks/usePolling';
 import { useFollowScroll } from '../hooks/useFollowScroll';
 import { useTabIdentity } from '../hooks/useTabIdentity';
 import { here } from '../lib/items';
 import { projectName, sessionIdFromLocation, titled } from '../lib/session';
+import { PLUGINS } from '../plugins';
 
 export default function Chat() {
   const id = useMemo(sessionIdFromLocation, []);
@@ -57,17 +54,13 @@ export default function Chat() {
     return () => removeEventListener('hashchange', reload);
   }, []);
 
-  // What its checkout changed, asked again every few seconds while the tab is in view: null while
-  // no plugin of its project lists that, or its checkout is not on this machine.
-  const [files, setFiles] = useState<ChangedFile[] | null>(null);
-  const workspace = session?.workspace;
-  const askChanges = () => {
-    if (!workspace || document.hidden) return;
-    api<{ files: ChangedFile[] | null }>(`/api/sessions/${id}/changes`)
-      .then(r => setFiles(f => (JSON.stringify(f) === JSON.stringify(r.files) ? f : r.files)), () => {});
-  };
-  usePolling(askChanges, 3000);
-  useEffect(askChanges, [workspace]);  // and at once, as soon as its checkout is known
+  // What the project's plugins add to the page. Every plugin's hook is called on every draw, in
+  // the same order: with the session only where its project enables that plugin.
+  const parts = PLUGINS.map(p => {
+    const enabled = session && !gone && session.plugins?.includes(p.name);
+    return { name: p.name, ...p.useChat?.(enabled ? session : null) };
+  });
+  const slot = (part: 'bar' | 'actions' | 'aside') => parts.map(p => <Fragment key={p.name}>{p[part]}</Fragment>);
 
   const { answer, resume, stopTask } = chat;
   const actions = useMemo<ChatActions>(() => ({ answer, resume, stopTask }), [answer, resume, stopTask]);
@@ -75,8 +68,8 @@ export default function Chat() {
 
   return (
     <ChatContext value={actions}>
-      <ChatHeader session={session} gone={gone} info={info} state={state} items={chips} changed={files?.length ?? 0}
-        onStop={chat.stop} onDelete={chat.remove} onCode={chat.openCode} />
+      <ChatHeader session={session} gone={gone} info={info} state={state} items={chips}
+        bar={slot('bar')} actions={slot('actions')} onStop={chat.stop} onDelete={chat.remove} />
       <Gone id="gone" hidden={!gone} />
       <main id="scroll" hidden={gone} ref={scroller} onScroll={onScroll}>
         <div className="column">
@@ -95,7 +88,7 @@ export default function Chat() {
             onSend={chat.send} onInterrupt={interrupt} onModel={m => chat.choose('model', m)} onEffort={l => chat.choose('effort', l)} />
         </div>
       </footer>
-      {files && !gone && <Changes files={files} />}
+      {slot('aside')}
     </ChatContext>
   );
 }

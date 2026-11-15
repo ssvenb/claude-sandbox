@@ -142,6 +142,11 @@ web_action_done() { WEB_ACTION_DONE=1; }
 # run. The page offers to open the directory it matches in VS Code.
 web_checkout() { WEB_JSON=$(jq -c --arg glob "$1" '.checkout = $glob' <<<"$WEB_JSON"); }
 
+# web_changes <command> [args…]: what the web server runs in a run's checkout (web_checkout) for the
+# files the run changed, listed beside its chat: a JSON array on stdout, each
+# {path, status ("A", "M" or "D"), added, removed} (the lines, null for a binary file).
+web_changes() { WEB_JSON=$(jq -c '.changes = $ARGS.positional' --args "$@" <<<"$WEB_JSON"); }
+
 # --- framework -----------------------------------------------------------------------------
 
 # Source each enabled plugin's host.sh so it can validate its config and contribute docker args.

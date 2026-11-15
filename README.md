@@ -71,7 +71,8 @@ in every session's briefing (`github-auth`), not in the task.
 What a project shows beyond its sessions comes from its enabled plugins, not from the web UI: the
 page draws what `run.sh --web` prints for the project, which is what each enabled plugin's `web.sh`
 described. `github-auth` lists the pull requests and issues, `git-workspace` recognises its per-run
-branches among them, `agent-workspace` says where a run's checkout is — switch one off for a
+branches among them and lists the files a run changed (beside its chat on a wide screen, behind a
+button in its header on a narrow one), `agent-workspace` says where a run's checkout is — switch one off for a
 project and its part of the page goes with it.
 
 A session opens in a browser tab of its own, as a **chat**: your messages, the agent's answers
@@ -474,6 +475,7 @@ request, with its CI). An item is `{title, url}` plus optional `ref` (a short id
 | `web_live_items FILE` | items from a JSON array in FILE, each with its `run_id`, on the row of that run's running session; the server re-reads the file on every poll, so it suits what comes and goes within seconds (a port a session's server publishes, see [Published ports](#published-ports)); `{host}` in a `url` stands for the host name the page was opened by |
 | `web_note TEXT` | one line saying why there is nothing to list |
 | `web_checkout GLOB` | where a run's `/workspace` is on this machine, `{run_id}` standing for the run; adds the VS Code button to its session |
+| `web_changes CMD [ARG]…` | the command the server runs in a run's checkout (see `web_checkout`) for the files the run changed, a JSON array on stdout of `{path, status, added, removed}`; lists them beside its chat (git-workspace: changed since the run left its base branch) |
 
 ```bash
 # plugins/github-auth/web.sh lists the pull requests, with their CI and `branch`, as a section;

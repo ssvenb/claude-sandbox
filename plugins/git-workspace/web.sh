@@ -5,3 +5,7 @@
 # (priority), and ties whatever item carries such a `branch`.
 
 web_tie_items 'if (.branch // "") | test("^.+/[0-9]{8}-[0-9a-f]{6}$") then .branch[-6:] else null end'
+
+# And the files a run changed on its branch, listed beside its chat: what host/changes.py says, run
+# by the web server in the run's checkout (where a mirror plugin keeps one: web_checkout).
+web_changes "$PLUGIN_DIR/host/changes.py" ${BASE_BRANCH:+"$BASE_BRANCH"}

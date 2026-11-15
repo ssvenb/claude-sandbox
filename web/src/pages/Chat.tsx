@@ -57,12 +57,13 @@ export default function Chat() {
     return () => removeEventListener('hashchange', reload);
   }, []);
 
-  // What its checkout changed, asked again every few seconds while the tab is in view.
-  const [files, setFiles] = useState<ChangedFile[]>([]);
+  // What its checkout changed, asked again every few seconds while the tab is in view: null while
+  // no plugin of its project lists that, or its checkout is not on this machine.
+  const [files, setFiles] = useState<ChangedFile[] | null>(null);
   const workspace = session?.workspace;
   const askChanges = () => {
     if (!workspace || document.hidden) return;
-    api<{ files: ChangedFile[] }>(`/api/sessions/${id}/changes`)
+    api<{ files: ChangedFile[] | null }>(`/api/sessions/${id}/changes`)
       .then(r => setFiles(f => (JSON.stringify(f) === JSON.stringify(r.files) ? f : r.files)), () => {});
   };
   usePolling(askChanges, 3000);
@@ -74,7 +75,7 @@ export default function Chat() {
 
   return (
     <ChatContext value={actions}>
-      <ChatHeader session={session} gone={gone} info={info} state={state} items={chips} changed={session?.workspace ? files.length : 0}
+      <ChatHeader session={session} gone={gone} info={info} state={state} items={chips} changed={files?.length ?? 0}
         onStop={chat.stop} onDelete={chat.remove} onCode={chat.openCode} />
       <Gone id="gone" hidden={!gone} />
       <main id="scroll" hidden={gone} ref={scroller} onScroll={onScroll}>
@@ -94,7 +95,7 @@ export default function Chat() {
             onSend={chat.send} onInterrupt={interrupt} onModel={m => chat.choose('model', m)} onEffort={l => chat.choose('effort', l)} />
         </div>
       </footer>
-      {session?.workspace && !gone && <Changes files={files} />}
+      {files && !gone && <Changes files={files} />}
     </ChatContext>
   );
 }

@@ -78,6 +78,7 @@ def board(tmp_path, browser, ui_dist):
     # Items on another origin, as GitHub's are: localhost is the same server, another origin.
     elsewhere = base.replace("127.0.0.1", "localhost")
     (sandbox / "web.json").write_text(json.dumps({"notes": [], "agent": "claude", "checkout": f"{tmp_path}/mirrors/*-{{run_id}}",
+        "changes": [str(sandbox / "plugins/git-workspace/host/changes.py")],
         "live": [str(tmp_path / "ports.json")],
         "session_items": [{"run_id": RUN, "ref": "preview", "title": "The run's preview", "url": f"{elsewhere}/preview"}],
         "run_items": [

@@ -35,7 +35,7 @@
   #board-menu:popover-open { display: flex; animation: drop .15s ease-out; }
   @media (prefers-reduced-motion: reduce) { #board-menu:popover-open { animation: none; } }
   @supports not (anchor-name: --a) { #board-menu { position: fixed; top: 64px; right: 14px; margin: 0; } }
-  #board-menu .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 4px 4px 10px; font-size: 14px; }
+  #board-menu .row { display: flex; justify-content: center; padding: 4px; }
   #board-menu .sync { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0; border-radius: 9px; padding: 8px 10px; }
   #board-menu .sync:hover { background: var(--sunk); }
   #board-menu .sync svg { width: 16px; height: 16px; color: var(--muted); }

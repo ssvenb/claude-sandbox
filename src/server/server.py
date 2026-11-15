@@ -413,7 +413,7 @@ class Chat(Session):
         self.tools = {e.get("id"): e for e in self.events if e["type"] == "tool"}
         self.boot = self.events[-1] if self.events and self.events[-1]["type"] == "boot" else None
         users = {e.get("id"): e for e in self.events if e["type"] == "user"}
-        self.waiting = [users.get(w.get("id"), w) for w in self.waiting]
+        self.waiting = [(users.get(e.get("id"), e), command) for e, command in self.waiting]
 
     def _resume_from(self):
         return self.offset

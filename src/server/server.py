@@ -854,6 +854,31 @@ def checkout(project, run_id):
     return next(iter(sorted(glob.glob(pattern.replace("{run_id}", run_id)))), None)
 
 
+def changes(root):
+    """The files a checkout changed since it branched off its main line, committed or not: each
+    with its status (A, M or D) and its lines added and removed (None for a binary file)."""
+    git = lambda *a: subprocess.run(["git", "-C", root, *a], capture_output=True, text=True).stdout  # noqa: E731
+    main = next((b for b in ("origin/HEAD", "origin/main", "main", "origin/master", "master")
+                 if git("rev-parse", "-q", "--verify", b + "^{commit}")), "HEAD")
+    base = git("merge-base", "HEAD", main).strip() or "HEAD"
+    found = {}
+    status = git("diff", "--no-renames", "--name-status", "-z", base).split("\0")
+    for kind, path in zip(status[::2], status[1::2]):
+        found[path] = {"path": path, "status": kind[:1], "added": None, "removed": None}
+    for line in git("diff", "--no-renames", "--numstat", "-z", base).split("\0"):
+        added, removed, path = (line.split("\t", 2) + ["", ""])[:3]
+        if path in found and added != "-":
+            found[path] |= {"added": int(added), "removed": int(removed)}
+    for path in filter(None, git("ls-files", "-z", "--others", "--exclude-standard").split("\0")):
+        try:
+            data = (Path(root) / path).read_bytes()
+        except OSError:  # gone again, or a directory (a nested repo)
+            continue
+        found[path] = {"path": path, "status": "A", "removed": 0,
+                       "added": None if b"\0" in data else data.count(b"\n") + (not data.endswith(b"\n") and bool(data))}
+    return sorted(found.values(), key=lambda f: f["path"])
+
+
 vscode_lock = threading.Lock()
 vscode_server = None  # (process, path of the unix socket it listens on)
 
@@ -1152,6 +1177,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(200, {"offers": [{k: i.get(k) for k in ("url", "ref", "title")}
                                             | {"ask": str(i["on_delete"].get("ask") or f"Tidy up {i.get('ref') or i.get('title')} too?")}
                                             for i in found]})
+        elif m := re.fullmatch(r"/api/sessions/(\w+)/changes", url.path):
+            if s := self.session(m[1]):
+                root = checkout(s.project, s.run_id)
+                self.reply(200, {"files": changes(root) if root else []})
         elif m := re.fullmatch(r"/api/sessions/(\w+)/stream", url.path):
             if s := self.session(m[1]):
                 if s.ui != "terminal":

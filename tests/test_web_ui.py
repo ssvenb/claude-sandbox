@@ -861,3 +861,36 @@ def test_the_gear_configures_the_projects_plugins_in_its_claude_sandbox_json(boa
     board.click("dialog button[type=submit]")
     board.wait_for_selector("dialog[open]", state="detached")
     assert "docker-cli" not in json.loads(file.read_text())["plugins"]
+
+
+def test_the_files_a_runs_checkout_changed_are_beside_its_chat_or_behind_a_header_button(board):
+    git = lambda *a: subprocess.run(["git", "-C", board.checkout, "-c", "user.name=t", "-c", "user.email=t@t", *a],  # noqa: E731
+                                    check=True, capture_output=True)
+    git("init", "-q", "-b", "main")
+    (board.checkout / "app.py").write_text("a\nb\n")
+    git("add", ".")
+    git("commit", "-qm", "base")
+    (board.checkout / "app.py").write_text("a\nc\nd\n")
+    (board.checkout / "web/src").mkdir(parents=True)
+    (board.checkout / "web/src/New.tsx").write_text("x\n")
+    s = board.resume()
+    tab = board.context.new_page()
+    tab.set_viewport_size({"width": 1400, "height": 800})
+    tab.goto(f"{board.base}/chat#{s['id']}")
+    # On a desk: a column of its own beside the chat, the button not needed.
+    tab.wait_for_selector("#changes li")
+    assert [" ".join(t.split()) for t in tab.locator("#changes li").all_inner_texts()] == ["M app.py +2 −1", "A New.tsx web/src +1"]
+    assert " ".join(tab.inner_text("#changes .head").split()) == "Changed files +3 −1"
+    assert tab.eval_on_selector("#changes", "e => e.getBoundingClientRect().left") > tab.eval_on_selector("#scroll", "e => e.getBoundingClientRect().right") - 1
+    assert tab.is_hidden("header .files")
+    # Narrower: a button in the header, its count on it, that opens the list over the chat.
+    tab.set_viewport_size({"width": 400, "height": 800})
+    assert tab.is_hidden("#changes")
+    assert tab.inner_text("header .files") == "2"
+    tab.click("header .files")
+    tab.wait_for_selector("#changes li:has-text('New.tsx')")
+    tab.keyboard.press("Escape")
+    tab.wait_for_selector("#changes", state="hidden")
+    # The list follows the checkout.
+    (board.checkout / "web/src/New.tsx").unlink()
+    tab.wait_for_function("document.querySelector('header .files')?.innerText === '1'")

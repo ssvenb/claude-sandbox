@@ -1,7 +1,10 @@
 // A session's conversation: the header says which and how it is doing, the column is what was said
 // and done, the dock at the bottom is where the next message is written. The dock is there from the
 // first moment, while the sandbox still starts.
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { api } from '../api/client';
+import type { ChangedFile } from '../api/types';
+import { Changes } from '../components/chat/Changes';
 import { BackgroundTasks } from '../components/chat/BackgroundTasks';
 import { Boot } from '../components/chat/Boot';
 import { ChatContext, type ChatActions } from '../components/chat/ChatContext';
@@ -11,6 +14,7 @@ import { Entries } from '../components/chat/Entries';
 import { Plan } from '../components/chat/Plan';
 import { Gone } from '../components/common/Gone';
 import { useChatSession } from '../hooks/useChatSession';
+import { usePolling } from '../hooks/usePolling';
 import { useFollowScroll } from '../hooks/useFollowScroll';
 import { useTabIdentity } from '../hooks/useTabIdentity';
 import { here } from '../lib/items';
@@ -53,13 +57,24 @@ export default function Chat() {
     return () => removeEventListener('hashchange', reload);
   }, []);
 
+  // What its checkout changed, asked again every few seconds while the tab is in view.
+  const [files, setFiles] = useState<ChangedFile[]>([]);
+  const workspace = session?.workspace;
+  const askChanges = () => {
+    if (!workspace || document.hidden) return;
+    api<{ files: ChangedFile[] }>(`/api/sessions/${id}/changes`)
+      .then(r => setFiles(f => (JSON.stringify(f) === JSON.stringify(r.files) ? f : r.files)), () => {});
+  };
+  usePolling(askChanges, 3000);
+  useEffect(askChanges, [workspace]);  // and at once, as soon as its checkout is known
+
   const { answer, resume, stopTask } = chat;
   const actions = useMemo<ChatActions>(() => ({ answer, resume, stopTask }), [answer, resume, stopTask]);
   const chips = [...chat.items, ...(session?.items ?? []).map(here)];
 
   return (
     <ChatContext value={actions}>
-      <ChatHeader session={session} gone={gone} info={info} state={state} items={chips}
+      <ChatHeader session={session} gone={gone} info={info} state={state} items={chips} changed={session?.workspace ? files.length : 0}
         onStop={chat.stop} onDelete={chat.remove} onCode={chat.openCode} />
       <Gone id="gone" hidden={!gone} />
       <main id="scroll" hidden={gone} ref={scroller} onScroll={onScroll}>
@@ -79,6 +94,7 @@ export default function Chat() {
             onSend={chat.send} onInterrupt={interrupt} onModel={m => chat.choose('model', m)} onEffort={l => chat.choose('effort', l)} />
         </div>
       </footer>
+      {session?.workspace && !gone && <Changes files={files} />}
     </ChatContext>
   );
 }

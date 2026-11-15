@@ -50,6 +50,15 @@ export interface Session {
   waiting?: number;
 }
 
+/** A file a session's checkout changed since it left its main branch: added, modified or deleted,
+ *  and its lines added and removed (null for a binary file). */
+export interface ChangedFile {
+  path: string;
+  status: string;
+  added: number | null;
+  removed: number | null;
+}
+
 export interface AppState {
   projects: string[];
   projects_file?: string;

@@ -854,6 +854,19 @@ def checkout(project, run_id):
     return next(iter(sorted(glob.glob(pattern.replace("{run_id}", run_id)))), None)
 
 
+def changes(project, run_id):
+    """The files a run changed, as the project's plugin that lists them says (`web_changes`, run in
+    the run's checkout): None when no plugin does, the run has no checkout here, or the command failed."""
+    command, root = described.get(project, {}).get("changes"), checkout(project, run_id)
+    if not command or not root:
+        return None
+    try:
+        found = json.loads(subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=20).stdout)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+    return found if isinstance(found, list) else None
+
+
 vscode_lock = threading.Lock()
 vscode_server = None  # (process, path of the unix socket it listens on)
 
@@ -1152,6 +1165,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(200, {"offers": [{k: i.get(k) for k in ("url", "ref", "title")}
                                             | {"ask": str(i["on_delete"].get("ask") or f"Tidy up {i.get('ref') or i.get('title')} too?")}
                                             for i in found]})
+        elif m := re.fullmatch(r"/api/sessions/(\w+)/changes", url.path):
+            if s := self.session(m[1]):
+                self.reply(200, {"files": changes(s.project, s.run_id)})
         elif m := re.fullmatch(r"/api/sessions/(\w+)/stream", url.path):
             if s := self.session(m[1]):
                 if s.ui != "terminal":

@@ -328,6 +328,19 @@ def test_a_runs_checkout_is_found_where_a_plugin_says_it_is(tmp_path, monkeypatc
     assert web.checkout("/other", "0a1b2c") is None  # no plugin of that project keeps one
 
 
+def test_a_runs_changes_are_what_the_plugin_that_lists_them_says_run_in_its_checkout(tmp_path, monkeypatch):
+    run = tmp_path / "proj-20261112-0a1b2c"
+    run.mkdir()
+    (run / "said").write_text('[{"path": "a.py", "status": "M", "added": 1, "removed": 0}]')
+    monkeypatch.setitem(web.described, "/proj", {"checkout": f"{tmp_path}/*-{{run_id}}", "changes": ["cat", "said"]})
+    assert web.changes("/proj", "0a1b2c") == [{"path": "a.py", "status": "M", "added": 1, "removed": 0}]
+    assert web.changes("/proj", "ffffff") is None  # no checkout of that run here
+    (run / "said").write_text("not json")
+    assert web.changes("/proj", "0a1b2c") is None
+    monkeypatch.setitem(web.described, "/proj", {"checkout": f"{tmp_path}/*-{{run_id}}"})
+    assert web.changes("/proj", "0a1b2c") is None  # no plugin lists them
+
+
 def test_a_project_run_sh_cannot_describe_says_why(tmp_path):
     (tmp_path / ".claude-sandbox.json").write_text("{not json")
     [note] = web.describe(str(tmp_path))["notes"]

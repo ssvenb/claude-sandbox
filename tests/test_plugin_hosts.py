@@ -8,6 +8,8 @@ import subprocess
 
 import pytest
 
+from conftest import REPO
+
 
 # --- agents --------------------------------------------------------------------------------
 
@@ -640,6 +642,39 @@ def test_a_web_action_runs_in_its_plugin_alone_and_fails_unless_done(sb):
     act("github-auth", "close-pr", "'3; rm -rf /'").dies("not a pull request number")
     act("github-auth", "close-pr", "3", plugins="git-workspace").dies("not enabled")
     assert len(log.read_text().splitlines()) == 2  # nothing ran gh for the refused ones
+
+
+def test_git_workspace_lists_the_files_a_run_changed_since_it_left_main(tmp_path):
+    git = lambda *a: subprocess.run(["git", "-C", tmp_path, "-c", "user.name=t", "-c", "user.email=t@t", *a],  # noqa: E731
+                                    check=True, capture_output=True)
+    git("init", "-q", "-b", "main")
+    (tmp_path / "keep.txt").write_text("a\nb\n")
+    (tmp_path / "gone.txt").write_text("x\n")
+    git("add", ".")
+    git("commit", "-qm", "base")
+    git("switch", "-qc", "work")
+    (tmp_path / "keep.txt").write_text("a\nc\nd\n")
+    git("commit", "-qam", "edit")  # committed on the branch
+    (tmp_path / "gone.txt").unlink()  # not even staged
+    (tmp_path / "dir").mkdir()
+    (tmp_path / "dir/new.txt").write_text("1\n2")  # untracked, no newline at the end
+    (tmp_path / "pic.bin").write_bytes(b"\0\1")
+    changes = lambda *a: json.loads(subprocess.run([REPO / "plugins/git-workspace/host/changes.py", *a],  # noqa: E731
+                                                   cwd=tmp_path, check=True, capture_output=True).stdout)
+    assert changes() == [
+        {"path": "dir/new.txt", "status": "A", "added": 2, "removed": 0},
+        {"path": "gone.txt", "status": "D", "added": 0, "removed": 1},
+        {"path": "keep.txt", "status": "M", "added": 2, "removed": 1},
+        {"path": "pic.bin", "status": "A", "added": None, "removed": 0},
+    ]
+    assert changes("main") == changes()  # the base named, as BASE_BRANCH does
+
+
+
+def test_git_workspace_tells_the_page_how_to_list_a_runs_changes(sb, described):
+    assert [c.endswith("/plugins/git-workspace/host/changes.py") for c in described("git-workspace")["changes"]] == [True]
+    sb.dotenv("BASE_BRANCH=trunk\n")
+    assert described("git-workspace")["changes"][1:] == ["trunk"]
 
 
 def test_agent_workspace_tells_the_page_where_a_runs_checkout_is(sb, described):

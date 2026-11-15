@@ -18,6 +18,8 @@ interface Props {
   state: SessionStatus | null;
   /** What its project's plugins tie to its run, and what it publishes: its pull request, its ports. */
   items: Item[];
+  /** How many files its checkout changed: a button opens their list where it is not beside the chat. */
+  changed: number;
   onStop: () => void;
   onDelete: () => void;
   /** Opens its checkout in VS Code. */
@@ -25,7 +27,7 @@ interface Props {
 }
 
 /** Which session this is and how it is doing, with the buttons that end it. */
-export function ChatHeader({ session, gone, info, state, items, onStop, onDelete, onCode }: Props) {
+export function ChatHeader({ session, gone, info, state, items, changed, onStop, onDelete, onCode }: Props) {
   // On a phone the chips and the buttons (not the theme switch) drop down in a row of their own, on request.
   const [more, setMore] = useState(false);
   if (gone) {
@@ -49,6 +51,11 @@ export function ChatHeader({ session, gone, info, state, items, onStop, onDelete
         <span className={'lamp ' + (state ?? '')} />
         {state ? SHORT[state] : 'Ended'}
       </span>
+      {changed > 0 && (
+        <button className="icon files" popoverTarget="changes" aria-label={`${changed} changed files`} title="Changed files">
+          <Icon name="files" /><span>{changed}</span>
+        </button>
+      )}
       <div className="extra">
         <div className="chips">{items.map((i, k) => <Chip key={k} item={i} />)}</div>
         {session.workspace && (

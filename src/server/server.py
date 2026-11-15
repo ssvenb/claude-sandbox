@@ -1337,13 +1337,11 @@ def local_names(bind):
     return names | {a for a in out.split() if ":" not in a}  # 0.0.0.0 is IPv4 only
 
 
-def ports_bind(bind, env):
-    """Where the sessions' published ports listen: where the page does, so a port button works from
-    wherever the page was opened — unless PORTS_BIND says otherwise (the shell's, or a project's)."""
-    if env.get("PORTS_BIND") or bind in ("127.0.0.1", "localhost"):
-        return env.get("PORTS_BIND")
+def web_bind(bind):
+    """The address the page listens on, as an address: a plugin publishing what a session serves
+    (ports) publishes it there by default, so its links work from wherever the page was opened."""
     if bind and not re.fullmatch(r"[0-9.]+|.*:.*", bind):
-        bind = socket.gethostbyname(bind)  # a name, e.g. a VPN's: PORTS_BIND takes only an address
+        bind = socket.gethostbyname(bind)  # a name, e.g. a VPN's
     return bind or "0.0.0.0"
 
 
@@ -1371,10 +1369,10 @@ if __name__ == "__main__":
                         default=Path.home() / ".config/claude-sandbox/projects",
                         help="file listing one project directory per line (default: %(default)s)")
     args = parser.parse_args()
-    if (bind := ports_bind(args.bind, os.environ)):
-        if args.bind and bind != args.bind and not os.environ.get("PORTS_BIND"):
-            os.environ["PORTS_NAME"] = args.bind  # a name resolved to its address: the port links keep the name
-        os.environ["PORTS_BIND"] = bind  # for every run.sh this starts, sessions and --web alike
+    # For every run.sh this starts, sessions and --web alike.
+    os.environ["SANDBOX_WEB_BIND"] = web_bind(args.bind)
+    if args.bind and os.environ["SANDBOX_WEB_BIND"] != args.bind:
+        os.environ["SANDBOX_WEB_NAME"] = args.bind  # a name resolved to its address: links may keep the name
     restore()
     server = serve(args.port, args.projects, args.bind, args.allow_host)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # so `finally` cleans up on a plain kill too
@@ -1384,7 +1382,6 @@ if __name__ == "__main__":
         print("  also on: " + ", ".join(sorted(f"{h}:{server.server_address[1]}" for h in server.hosts
                                                if not h.startswith(("127.", "localhost")))),
               "  (no login: anyone who can reach it can start sandboxes as you)", flush=True)
-        print(f"  sessions publish their ports on {os.environ.get('PORTS_BIND', '127.0.0.1')}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

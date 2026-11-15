@@ -7,7 +7,7 @@ first run.sh starts it, and it exits once no run.sh that uses it is alive.
 Usage: portd.py [--bind ADDR] [--name HOST] <dir>
 
 Each sandbox has a network namespace of its own, so two of them can both serve on :3000. Inside,
-a root helper (src/services/ports/publish-ports.py) watches what the agent listens on and offers each port as a unix
+a root helper (../root/publish-ports.py) watches what the agent listens on and offers each port as a unix
 socket, <dir>/runs/<RUN_ID>/<port>.sock, in a directory bind-mounted from here. This process
 gives each such socket a TCP port on this machine — the same number while it is free, any free
 one otherwise — and relays connections to it. Ports are handed out per session: a run keeps the
@@ -19,7 +19,7 @@ user at all this process cleans up and exits — taking <dir>/lock first, so a r
 right then either sees it gone or is seen by it.
 
 What is published is written to <dir>/ports.json, and as the web UI's session items to
-<dir>/items.json (see `web_live_items` in src/contract/host/plugins.sh, `items_file` in src/services/ports/lease.py).
+<dir>/items.json (see `web_live_items` in src/contract/host/plugins.sh, `items_file` in lease.py).
 """
 from __future__ import annotations
 

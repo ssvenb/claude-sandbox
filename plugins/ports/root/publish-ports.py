@@ -9,9 +9,9 @@ for each such port the project configured (PORTS, the --port arguments) listens 
 <dir>/<port>.sock, relaying every connection to the address the server listens on — 127.0.0.1 for a server on every address, so one bound to localhost only is
 published just the same. A port no longer listened on is withdrawn.
 
-<dir> is bind-mounted from the host, where the central port proxy (src/services/ports/portd.py) gives each
+<dir> is bind-mounted from the host, where the central port proxy (../host/portd.py) gives each
 socket a TCP port on the host. It sits in a root-only directory: the agent cannot reach it to plant
-anything there for the host to connect to (entrypoint.sh). Runs as root, detached; its own sockets are unix ones,
+anything there for the host to connect to (the plugin's root-init.sh). Runs as root, detached; its own sockets are unix ones,
 so it never shows up in what it watches.
 """
 from __future__ import annotations

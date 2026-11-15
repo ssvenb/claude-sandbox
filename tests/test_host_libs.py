@@ -2,6 +2,7 @@
 libraries the plugins' stages are sourced with, src/contract/host/*.sh (helpers, credentials)."""
 import json
 import os
+import re
 import time
 
 import pytest
@@ -50,18 +51,6 @@ def test_both_parsers_agree_on_the_sandboxs_own_example(sb):
     assert scan(sb, text, True) == scan(sb, text, True, "bash")
 
 
-def test_project_env_reads_one_key_from_the_repos_env(sb):
-    sb.dotenv("BRANCH_PREFIX=feature\n")
-    run = sb.bash('project_env_load\necho "[$(project_env BRANCH_PREFIX)] [$(project_env NOPE dflt)]"').ok()
-    assert run.out == "[feature] [dflt]\n"
-
-
-def test_project_env_file_can_be_switched_off(sb):
-    sb.dotenv("BRANCH_PREFIX=feature\n")
-    run = sb.bash('project_env_load\necho "[$(project_env BRANCH_PREFIX)]"', PROJECT_ENV_FILE="/dev/null")
-    assert run.ok().out == "[]\n"
-
-
 # --- .claude-sandbox.json -----------------------------------------------------------------
 
 @pytest.mark.parametrize("content, message", [
@@ -106,20 +95,22 @@ def test_project_config_file_location_can_be_overridden(sb):
 def test_each_layer_overrides_the_one_below(sb):
     show = 'echo "effort=$CLAUDE_EFFORT"'
     assert sb.staged(show, CLAUDE_EFFORT="low").ok().out.endswith("effort=low\n")
-    sb.dotenv("CLAUDE_EFFORT=high\n")
-    assert sb.staged(show, CLAUDE_EFFORT="low").ok().out.endswith("effort=high\n")
     sb.config({"env": {"CLAUDE_EFFORT": "max"}})
     assert sb.staged(show, CLAUDE_EFFORT="low").ok().out.endswith("effort=max\n")
+    env = sb._env({"CLAUDE_EFFORT": "low"})
+    assert config.apply_settings(env, config.load_project(env), {"CLAUDE_EFFORT": "high"}) == ["CLAUDE_EFFORT"]
+    assert env["CLAUDE_EFFORT"] == "high"  # --set: this run alone
 
 
-def test_only_sandbox_owned_names_are_lifted_from_the_repos_env(sb):
-    sb.dotenv("SECRET_API_KEY=hunter2\nENABLE_ANYTHING=0\nGH_APP_ID=99\n")
-    run = sb.staged('echo "secret=${SECRET_API_KEY-unset} flag=$ENABLE_ANYTHING app=$GH_APP_ID"\n'
+def test_the_repos_env_file_sets_nothing(sb):
+    """.claude-sandbox.json is the one place a project's settings are made: its .env is its own."""
+    sb.dotenv("SECRET_API_KEY=hunter2\nENABLE_ANYTHING=0\nGH_APP_ID=99\nCLAUDE_EFFORT=high\n")
+    run = sb.staged('echo "flag=${ENABLE_ANYTHING-unset} app=${GH_APP_ID-unset} effort=${CLAUDE_EFFORT-unset}"\n'
                     'env | grep -c hunter2 || true').ok()
-    assert "secret=unset flag=0 app=99" in run.out
+    assert "flag=unset app=unset effort=unset" in run.out
     assert run.out.endswith("0\n")
     env = sb._env({})
-    assert config.apply_settings(env, config.load_project(env)) == ["ENABLE_ANYTHING", "GH_APP_ID"]
+    assert config.apply_settings(env, config.load_project(env)) == []
 
 
 def test_an_unknown_name_in_the_config_env_block_is_a_typo(sb):
@@ -406,3 +397,38 @@ def test_agent_without_npm_package_skips_version_lookup(sb, registry, capsys):
     assert agents.resolve_version(agent(sb, AGENT="plain", AGENT_ROOT=sb.tmp / "agents"), {}) == ""
     assert registry.asked == [] and capsys.readouterr().out == ""
     assert sb.bash("agent_host_stage", AGENT="plain", AGENT_ROOT=sb.tmp / "agents").ok().out == ""
+
+
+# --- src/orchestrator/auth.py: named authentications ---------------------------------------------
+
+def test_a_named_authentication_fills_the_settings_of_the_plugin_that_takes_it(sb):
+    """auth.json, outside every project: the entry a plugin's setting names (GH_AUTH) becomes the
+    plugin's own settings, over whatever the project set one by one."""
+    from orchestrator import auth
+    found = {p.name: p for p in plugins.discover(REPO / "plugins")}
+    takers = [found["github-auth"], found["gcp-auth"], found["git-workspace"]]
+    file = sb.home / ".config/claude-sandbox/auth.json"
+    file.parent.mkdir(parents=True)
+    file.write_text(json.dumps({
+        "coder": {"type": "github-app", "appId": 123, "privateKeyFile": "~/keys/coder.pem"},
+        "reviewer": {"type": "github-app", "appId": "456", "privateKeyFile": "/k/reviewer.pem", "username": "rev"},
+        "data": {"type": "gcp-service-account", "serviceAccount": "sa@p.iam.gserviceaccount.com"}}))
+    env = {"HOME": str(sb.home), "GH_APP_ID": "999", "GH_HOST": "ghe.example"}
+    assert auth.apply_auth(env, takers) == [] and env["GH_APP_ID"] == "999"  # none named: as before
+    env.update(GH_AUTH="reviewer", GCP_AUTH="data")
+    assert auth.apply_auth(env, takers) == ["reviewer", "data"]
+    assert (env["GH_APP_ID"], env["GH_PRIVATE_KEY_FILE"], env["GH_USERNAME"]) == ("456", "/k/reviewer.pem", "rev")
+    assert env["GH_HOST"] == "ghe.example"  # what the entry leaves out stays the project's
+    assert env["GCP_SERVICE_ACCOUNT"] == "sa@p.iam.gserviceaccount.com"
+    env["GH_AUTH"] = "coder"
+    auth.apply_auth(env, takers)
+    assert (env["GH_APP_ID"], env["GH_PRIVATE_KEY_FILE"]) == ("123", os.path.expanduser("~/keys/coder.pem"))
+    for name, message in (("nobody", "does not have (it has: coder, data, reviewer)"),
+                          ("data", "takes a github-app authentication")):
+        with pytest.raises(orchestrator.Die, match=re.escape(message)):
+            auth.apply_auth({**env, "GH_AUTH": name}, takers)
+    file.write_text("[]")
+    with pytest.raises(orchestrator.Die, match="must be a JSON object"):
+        auth.apply_auth(env, takers)
+    with pytest.raises(orchestrator.Die, match="does not have"):  # no file at all
+        auth.apply_auth({**env, "SANDBOX_AUTH_FILE": str(sb.tmp / "none.json")}, takers)

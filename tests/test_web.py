@@ -136,6 +136,7 @@ def test_sandbox_sessions_run_run_sh_under_an_id_the_ui_knows():
     assert web.command("run", "0a1b2c", "Fix #7") == [str(REPO / "run.sh"), "--run-id", "0a1b2c",
                                                        "--task", "Fix #7"]
     assert web.command("resume", "0a1b2c", None, True) == [str(REPO / "run.sh"), "--resume", "0a1b2c", "--chat"]
+    assert web.command("run", "0a1b2c", None, True, {"GH_AUTH": "reviewer"})[-3:] == ["--chat", "--set", "GH_AUTH=reviewer"]
     with pytest.raises(ValueError, match="ui must be chat or terminal"):
         web.start("/p", "run", None, None, "tui")
     for kind, run_id, task in (("shell", None, "x"), ("resume", "0a1b2c", "x"), ("run", None, 7),
@@ -830,3 +831,58 @@ def test_a_terminal_runs_on_through_a_restart_and_says_how_it_ended_while_no_ser
         assert last.exit == 3
     finally:
         web.sessions.clear()
+
+
+# ---- what plugins watch and start by themselves: web_poll, web_start -----------------------------
+
+def test_the_poller_describes_each_project_as_often_as_its_plugins_asked(tmp_path, monkeypatch):
+    """poller(): a project is described again once the shortest web_poll of its plugins has
+    passed (never under 10 s), and one whose plugins asked for none every IDLE_POLL."""
+    from types import SimpleNamespace as NS
+    watched, quiet = tmp_path / "watched", tmp_path / "quiet"
+    listing = tmp_path / "projects"
+    listing.write_text(f"{watched}\n{quiet}\n")
+    for d in (watched, quiet):
+        d.mkdir()
+    now, seen = [1000.0], []
+
+    def sleep(seconds):
+        now[0] += seconds
+        if now[0] > 1000 + web.IDLE_POLL + 6:
+            raise StopIteration
+
+    monkeypatch.setattr(web, "time", NS(time=lambda: now[0], sleep=sleep))
+    monkeypatch.setattr(web, "describe", lambda project, keep=False: (
+        seen.append((project, now[0] - 1000)), {"poll": 60} if project == str(watched) else {"poll": None})[1])
+    with pytest.raises(StopIteration):
+        web.poller(listing)
+    assert [at for p, at in seen if p == str(watched)] == [0, 60, 120, 180, 240, 300]
+    assert [at for p, at in seen if p == str(quiet)] == [0, 300]
+
+
+def test_a_plugin_starts_a_session_once_per_key_and_it_goes_when_its_agent_has_finished(chat, monkeypatch):
+    """autostart(): what web_start asked for, as a run with its settings (`run.sh --set`) — not
+    while a session of its `after_run` is listed, and never twice. The session is removed once
+    its agent's turn is over; one whose turn failed stays to be read."""
+    from types import SimpleNamespace as NS
+    project = str(chat.tmp)
+    want = lambda key, task: {"starts": [{"plugin": "pr-review", "key": key, "task": task,  # noqa: E731
+                                           "env": {"GH_AUTH": "reviewer"}, "after_run": "0a1b2c"}]}
+    monkeypatch.setitem(web.sessions, "x", NS(id="x", project=project, run_id="0a1b2c", kind="run", exit=0))
+    web.autostart(project, want("#3@c3", "review it"))
+    assert list(web.sessions) == ["x"]  # the run that opened it is still listed: its work is not over
+    del web.sessions["x"]
+    web.autostart(project, want("#3@c3", "review it"))
+    [s] = web.sessions.values()
+    assert s.once and s.title == "review it"
+    assert s.argv(None)[-5:] == ["--chat", "--set", "GH_AUTH=reviewer", "--set", "SANDBOX_STARTED_BY=pr-review"]
+    chat.until(s, lambda s: s.id not in web.sessions and s.exit is not None)  # reviewed: gone, container and all
+    web.autostart(project, want("#3@c3", "review it"))
+    assert not web.sessions  # once per key, however often the project is described
+    web.autostart(project, want("#3@c4", "fail"))  # a new commit is a new key
+    [s] = web.sessions.values()
+    chat.until(s, lambda s: s.state == "idle" and any(e["type"] == "turn" for e in s.events))
+    time.sleep(0.2)
+    assert s.id in web.sessions and s.exit is None  # its turn failed: it stays
+    s.stop()
+    chat.until(s, lambda s: s.exit is not None)

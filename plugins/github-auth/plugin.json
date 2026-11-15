@@ -7,7 +7,19 @@
   "requires": [],
   "requiredEnv": ["GH_APP_ID", "GH_PRIVATE_KEY_FILE"],
   "secrets": [],
+  "auth": {
+    "type": "github-app",
+    "env": "GH_AUTH",
+    "fields": {"appId": "GH_APP_ID", "privateKeyFile": "GH_PRIVATE_KEY_FILE", "host": "GH_HOST", "username": "GH_USERNAME"}
+  },
   "settings": [
+    {
+      "env": "GH_AUTH",
+      "type": "string",
+      "label": "Authentication",
+      "description": "Name of a github-app entry in ~/.config/claude-sandbox/auth.json (appId, privateKeyFile, optional host and username). It fills the settings below, which then need not be made here.",
+      "placeholder": "coder"
+    },
     {
       "env": "GH_APP_ID",
       "type": "string",

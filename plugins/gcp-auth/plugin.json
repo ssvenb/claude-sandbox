@@ -7,7 +7,19 @@
   "requires": [],
   "requiredEnv": ["GCP_SERVICE_ACCOUNT"],
   "secrets": [],
+  "auth": {
+    "type": "gcp-service-account",
+    "env": "GCP_AUTH",
+    "fields": {"serviceAccount": "GCP_SERVICE_ACCOUNT", "project": "GCP_PROJECT", "credentialFile": "GCP_CREDENTIAL_FILE"}
+  },
   "settings": [
+    {
+      "env": "GCP_AUTH",
+      "type": "string",
+      "label": "Authentication",
+      "description": "Name of a gcp-service-account entry in ~/.config/claude-sandbox/auth.json (serviceAccount, optional project and credentialFile). It fills the settings below, which then need not be made here.",
+      "placeholder": "sandbox"
+    },
     {
       "env": "GCP_SERVICE_ACCOUNT",
       "type": "string",

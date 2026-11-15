@@ -68,7 +68,7 @@ trap plugins_run_exit_hooks EXIT
 # The web UI knows nothing about any plugin: it draws what the enabled plugins of a project
 # describe here, and the page code they bring themselves (web_command, web_server). WEB_JSON is that description, printed by `run.sh --web`.
 
-WEB_JSON='{"lists":[],"notes":[],"session_items":[],"run_items":[],"live":[],"commands":{},"servers":{}}'
+WEB_JSON='{"lists":[],"notes":[],"session_items":[],"run_items":[],"live":[],"commands":{},"servers":{},"starts":[]}'
 
 # The page has two places for what a plugin shows: a section of the project's band (web_list),
 # and a session's own row (web_session_item, web_run_items,
@@ -117,6 +117,25 @@ web_session_item() {
 # described again would not do. A `url` may say `{host}` for the name the page was opened by. The
 # file need not exist yet.
 web_live_items() { WEB_JSON=$(jq -c --arg file "$1" '.live += [$file]' <<<"$WEB_JSON"); }
+
+# web_poll <seconds>: has the web server describe the project again at least this often, with or
+# without a page open — for what a plugin watches (a pull request's CI) rather than merely shows.
+# The shortest interval any plugin of the project asked for counts; the server allows no less
+# than 10 seconds.
+web_poll() {
+  [[ $1 =~ ^[0-9]+$ ]] || die "Plugin '${PLUGIN_NAME:-?}': web_poll takes seconds, got '$1'."
+  WEB_JSON=$(jq -c --argjson s "$1" '.poll = ([.poll // $s, $s] | min)' <<<"$WEB_JSON")
+}
+
+# web_start <json>: a session the web server starts by itself, unattended: {key, task} plus
+# optional `env` ({NAME: VALUE}: sandbox settings for that run alone, as `run.sh --set`) and
+# `after_run` (a RUN_ID: not while the page lists a session of that run — its work is not over).
+# `task` is the agent's first message. Started once per `key` of the plugin in the project,
+# however often it is described, and removed again as soon as its agent has finished (one that
+# asks something stays, waiting on the dashboard). In its stages SANDBOX_STARTED_BY names the plugin.
+web_start() {
+  WEB_JSON=$(jq -c --arg plugin "$PLUGIN_NAME" --argjson start "$1" '.starts += [$start + {plugin: $plugin}]' <<<"$WEB_JSON")
+}
 
 # web_note <text>: one line shown with the project, for what kept a plugin from listing anything.
 web_note() { WEB_JSON=$(jq -c --arg note "$1" '.notes += [$note]' <<<"$WEB_JSON"); }

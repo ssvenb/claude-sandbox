@@ -1,6 +1,6 @@
 """run.sh: build and launch a coding-agent sandbox container. Runs on YOUR machine, where the
 long-lived credentials stay; the container only ever receives what the agent and the enabled
-plugins hand it. Configuration is project-specific: it comes from the repo you launch from (.env,
+plugins hand it. Configuration is project-specific: it comes from the repo you launch from (its
 .claude-sandbox.json — see config.py), never from the sandbox's own directory.
 """
 from __future__ import annotations
@@ -16,12 +16,13 @@ import sys
 
 from . import SANDBOX, Die, say
 from .agents import resolve_agent, resolve_version
-from .config import apply_settings, load_project
+from .auth import apply_auth
+from .config import STARTED_BY, apply_settings, load_project
 from .plugins import discover, plugin_root, resolve, validate
 from .stage import Stage, StageFailed, environ
 
 USAGE = ("Usage: {} [--resume <RUN_ID> | --run-id <RUN_ID> | --web | --web-action <PLUGIN> <ACTION> <ARG>] "
-         "[--task TEXT] [--chat]   (RUN_ID is 6 hex chars)")
+         "[--task TEXT] [--chat] [--set NAME=VALUE]…   (RUN_ID is 6 hex chars)")
 
 
 class Usage(Exception):
@@ -31,7 +32,7 @@ class Usage(Exception):
 
 
 def parse(argv: list[str]) -> dict:
-    opts = {"resume": False, "web": None, "action": None, "task": "", "chat": False, "run_id": None}
+    opts = {"resume": False, "web": None, "action": None, "task": "", "chat": False, "run_id": None, "set": {}}
     i = 0
     while i < len(argv):
         arg = argv[i]
@@ -64,6 +65,13 @@ def parse(argv: list[str]) -> dict:
         elif arg == "--chat":
             opts["chat"] = True
             i += 1
+        # A setting for this run alone, over the project's own (config.py, layer 5).
+        elif arg == "--set":
+            name, eq, value = (argv[i + 1] if i + 1 < len(argv) else "").partition("=")
+            if not name or not eq:
+                raise Usage("--set needs NAME=VALUE.")
+            opts["set"][name] = value
+            i += 2
         elif arg in ("-h", "--help"):
             raise Usage(code=0)
         else:
@@ -92,12 +100,13 @@ def run(opts: dict) -> int:
     # --web answers with one JSON document on stdout, so everything else said on the way goes to stderr.
     out = sys.stderr if web else sys.stdout
 
-    # The worked-on repo's own files overlay .env before anything reads it, so even AGENT and the
+    # The worked-on repo's own file is applied before anything reads a setting, so even AGENT and the
     # plugin mix are per-project.
     project = load_project(env)
+    env.pop(STARTED_BY, None)  # only --set says which plugin started this run
     if project.config is not None:
         say(f"📄 Project config: {project.config_file}", file=out)
-    applied = apply_settings(env, project)
+    applied = apply_settings(env, project, opts["set"])
     if applied:
         say(f"⚙️  Project settings: {' '.join(applied)}", file=out)
 
@@ -107,6 +116,14 @@ def run(opts: dict) -> int:
     everything = discover(plugin_root(env))
     enabled = resolve(everything, env, project, agent.name)
     names = [p.name for p in enabled]
+    try:
+        used = apply_auth(env, enabled)
+    except Die:
+        if not web:  # the page still has pull requests to show for a project that cannot start yet
+            raise
+        used = []
+    if used:
+        say(f"🔐 Authentication: {' '.join(used)}", file=out)
     if not shutil.which("jq"):
         raise Die("jq is required on the host: the plugins' stages read their settings with it.")
     stage_env = environ(env, config=project.config, agent_dir=agent.dir, enabled=names,

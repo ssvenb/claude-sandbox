@@ -44,8 +44,8 @@ def calls(done, command):
 
 
 def test_the_host_pipeline_builds_and_runs_the_image(sb, run_sh):
-    sb.dotenv("CLAUDE_CODE_OAUTH_TOKEN=oauth-tok\nCLAUDE_EFFORT=high\nAPI_SECRET=hunter2\n")
-    done = run_sh()
+    sb.dotenv("API_SECRET=hunter2\nCLAUDE_EFFORT=low\n")  # the repo's own: not read
+    done = run_sh(config={**BASE, "env": {**BASE["env"], "CLAUDE_CODE_OAUTH_TOKEN": "oauth-tok", "CLAUDE_EFFORT": "high"}})
     assert done.returncode == 0, done.stderr
     [build], [run] = calls(done, "build"), calls(done, "run")
     plugins = ("herdr ports data-mounts upstream-proxy cwd-workspace package-managers "
@@ -92,6 +92,8 @@ def test_run_id_starts_a_fresh_run_under_the_given_id(sb, run_sh):
     (["--task"], 1, "--task needs the task's text."),
     (["--resume", "0a1b2c", "--task", "Fix it"], 1, "--task starts a fresh run"),
     (["--chat", "--task", "Fix it"], 1, "--chat takes its prompts as commands"),
+    (["--set", "CLAUDE_EFFORT"], 1, "--set needs NAME=VALUE."),
+    (["--set", "API_SECRET=1"], 1, "--set API_SECRET: not a sandbox setting"),
 ])
 def test_command_line(run_sh, args, code, message):
     done = run_sh(*args, timeout=15)
@@ -153,8 +155,8 @@ def test_the_runs_ports_directory_lives_exactly_as_long_as_the_container(sb, run
 
 
 def test_web_describes_the_project_and_starts_nothing(sb, run_sh):
-    sb.dotenv("CLAUDE_EFFORT=high\n")  # announced on a normal run: must not leak into the JSON
-    done = run_sh("--web")
+    # Its settings are announced on a normal run: that must not leak into the JSON.
+    done = run_sh("--web", config={**BASE, "env": {**BASE["env"], "CLAUDE_EFFORT": "high"}})
     assert done.returncode == 0, done.stderr
     said = json.loads(done.stdout)
     assert said["agent"] == "claude" and "cwd-workspace" in said["plugins"]
@@ -169,6 +171,18 @@ def test_a_task_reaches_the_agent_as_agent_task(sb, run_sh):
     assert "AGENT_TASK=Fix #7: it's \"broken\"" in run
     run = calls(run_sh("--run-id", "0a1b2c", CLAUDE_CODE_OAUTH_TOKEN="t"), "run")[-1]  # the log is shared
     assert not any(arg.startswith("AGENT_TASK=") for arg in run)  # no task, no variable
+
+
+def test_set_is_a_setting_of_this_run_alone_over_the_projects_own(sb, run_sh):
+    """--set: what a plugin's web_start starts a run with, and SANDBOX_STARTED_BY only that way."""
+    project = {**BASE, "env": {**BASE["env"], "CLAUDE_EFFORT": "high"}}
+    seen = sb.tmp / "by"
+    sb.stub("docker", f'[ "$1" != run ] || {{ printf "%s\\n" "$@" | grep EFFORT; echo "${{SANDBOX_STARTED_BY-unset}}"; }} >"{seen}"\n')
+    assert run_sh("--set", "CLAUDE_EFFORT=low", "--set", "SANDBOX_STARTED_BY=pr-review", config=project,
+                  CLAUDE_CODE_OAUTH_TOKEN="t").returncode == 0
+    assert seen.read_text() == "CLAUDE_EFFORT=low\npr-review\n"
+    assert run_sh(config=project, CLAUDE_CODE_OAUTH_TOKEN="t", SANDBOX_STARTED_BY="someone").returncode == 0
+    assert seen.read_text() == "CLAUDE_EFFORT=high\nunset\n"  # not from your shell
 
 
 def test_a_chat_runs_without_a_terminal_behind_the_agents_bridge(sb, run_sh):

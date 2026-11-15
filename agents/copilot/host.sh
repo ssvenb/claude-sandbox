@@ -6,6 +6,6 @@
 # installation tokens github-auth mints are NOT accepted, hence its own variable.
 
 [ "${AGENT_AUTH_PROVIDED:-0}" = 1 ] \
-  || : "${COPILOT_GITHUB_TOKEN:?COPILOT_GITHUB_TOKEN must be set in .env when AGENT=copilot (fine-grained PAT with the 'Copilot Requests' permission)}"
+  || : "${COPILOT_GITHUB_TOKEN:?COPILOT_GITHUB_TOKEN must be set when AGENT=copilot: export it in your shell, or put it in the "env" block of .claude-sandbox.json (fine-grained PAT with the 'Copilot Requests' permission)}"
 
 pass_env COPILOT_GITHUB_TOKEN

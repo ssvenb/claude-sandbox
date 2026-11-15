@@ -1,17 +1,11 @@
 # shellcheck shell=bash
-# The worked-on repo's .env, as plugins read it. Sourced by src/contract/host/stage.sh (bash, on YOUR
-# machine). src/orchestrator/config.py scans the same file with the same rules for the sandbox's own
-# settings; env_scan_into stays here for plugins that scan files of their own (upstream-proxy).
+# A .env file, scanned. Sourced by src/contract/host/stage.sh (bash, on YOUR machine).
 #
-# Settings that belong to the repo rather than to the sandbox (BRANCH_PREFIX, say) conventionally
-# live in its own .env. That file is the target repo's — full of its own secrets and possibly its
-# own commands — so it is *scanned*, never sourced. A plugin asks for the one key it wants with
-# `project_env`; nothing here reaches the container except through a plugin's own pass_* calls.
-#
-#   PROJECT_ENV_FILE   override the path (default: $HOST_CWD/.env; /dev/null loads nothing)
-
-PROJECT_ENV_FILE="${PROJECT_ENV_FILE:-${HOST_CWD:-$PWD}/.env}"
-declare -A PROJECT_ENV=()
+# The sandbox takes no setting from a .env: a project's are in its .claude-sandbox.json. What is
+# left is this parser, for a plugin that reads a file of the repo's for values, not settings
+# (upstream-proxy's envFile: the secrets its routes inject). Such a file is the target repo's —
+# full of its own secrets and possibly its own commands — so it is *scanned*, never sourced.
+# src/orchestrator/config.py reads .env.example, the catalogue of the sandbox's names, by the same rules.
 
 # env_scan_into <assoc-array> <file> [commented] — parse KEY=VALUE lines into the named array.
 # With "commented", `#KEY=value` counts too, which is how .env.example documents optional
@@ -45,11 +39,4 @@ env_scan_into() {
     esac
     _env_out["$key"]=$value                                     # last assignment wins
   done <"$file"
-}
-
-project_env_load() { env_scan_into PROJECT_ENV "$PROJECT_ENV_FILE"; }
-
-# project_env <NAME> [default] — the value that file assigns to NAME, else the default.
-project_env() {
-  printf '%s' "${PROJECT_ENV[$1]:-${2-}}"
 }

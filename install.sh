@@ -215,7 +215,7 @@ fi
 
 step "Done"
 say "  In a repo you want an agent to work on:"
-say "    cp $here/.env.example .env      # pick AGENT, fill in its token and any plugin settings"
+say "    \$EDITOR .claude-sandbox.json   # its settings; $here/.env.example lists them (the web UI's gear edits it too)"
 say "    claude-sandbox                  # or $here/run.sh"
 if [ "$WEB" = 1 ]; then
   say "  The web UI, for every project listed in ${listing/#$HOME/\~}:"

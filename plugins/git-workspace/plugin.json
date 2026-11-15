@@ -11,7 +11,7 @@
       "key": "branchPrefix",
       "type": "string",
       "label": "Branch prefix",
-      "description": "Leading segment of each run's branch, <prefix>/<date>-<id>. Default: BRANCH_PREFIX in the repo's .env, else the agent's own prefix.",
+      "description": "Leading segment of each run's branch, <prefix>/<date>-<id>. Default: the agent's own prefix.",
       "placeholder": "claude-code"
     },
     {

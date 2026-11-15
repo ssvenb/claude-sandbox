@@ -1,8 +1,9 @@
 """The orchestrator: what `run.sh` does on YOUR machine, before and around `docker run`.
 
-    config.py   the worked-on repo's .claude-sandbox.json and .env, and the settings they layer
+    config.py   the worked-on repo's .claude-sandbox.json, and the settings it layers
     agents.py   which agent runs, and the version its image installs
     plugins.py  which plugins run: discovery, enablement, validation
+    auth.py     the named authentications (~/.config/claude-sandbox/auth.json) plugins take
     stage.py    the plugins' own host.sh / web.sh, sourced by bash (src/contract/host/stage.sh)
     main.py     the command line, and the run itself
     kernel.json the sandbox's own settings, declared as plugins declare theirs

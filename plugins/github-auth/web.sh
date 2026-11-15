@@ -66,9 +66,13 @@ github_ci='def ci:
     elif $running > 0 then {status: "pending", status_text: "CI: \($running) of \($n) checks running"}
     else {status: "ok", status_text: "CI: \($n) checks passed"} end;'
 
+# The web server describes the project every minute, page or no page: CI turning green is an
+# event other plugins act on (pr-review).
+web_poll 60
+
 # Open pull requests, with their CI, offering to be closed with their run's session…
-if github_items pr number,title,url,headRefName,isDraft,statusCheckRollup \
-  "$github_ci"' {ref: "#\(.number)", title, url, branch: .headRefName, section: "Pull requests",
+if github_items pr number,title,url,headRefName,headRefOid,isDraft,statusCheckRollup \
+  "$github_ci"' {ref: "#\(.number)", title, url, branch: .headRefName, sha: .headRefOid, section: "Pull requests",
     on_delete: {action: "close-pr", arg: "\(.number)",
       ask: "Pull request #\(.number), \"\(.title)\", is still open. Close it on GitHub too? (Cancel leaves it open.)"}}
     + (if .isDraft then {note: "Draft"} else {} end) + ci'; then

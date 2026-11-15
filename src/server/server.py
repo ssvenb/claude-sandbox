@@ -124,11 +124,12 @@ def projects(file):
     return list(dict.fromkeys(found))  # a project listed twice shows once
 
 
-def command(kind, run_id, task=None, chat=False):
+def command(kind, run_id, task=None, chat=False, sets=None):
     if kind == "shell":  # the project's terminal: your own shell, on this machine, in the project
         return [os.environ.get("SHELL", "/bin/sh")]
     return [str(RUN_SH), "--resume" if kind == "resume" else "--run-id", run_id] \
-        + (["--task", task] if task else []) + (["--chat"] if chat else [])
+        + (["--task", task] if task else []) + (["--chat"] if chat else []) \
+        + [arg for name, value in (sets or {}).items() for arg in ("--set", f"{name}={value}")]
 
 
 class Session:
@@ -136,14 +137,17 @@ class Session:
     src/server/holder.py so it outlives this server."""
     ui, mode = "terminal", "pty"
 
-    def __init__(self, project, kind, run_id, task=None):
+    def __init__(self, project, kind, run_id, task=None, sets=None, once=False):
         self.id = secrets.token_hex(4)
         self.project, self.kind, self.run_id = project, kind, run_id
+        # What a plugin started it with (web_start): settings of this run alone, and whether it
+        # goes by itself once its agent has finished.
+        self.sets, self.once = sets or {}, once
         self.started, self.exit = time.time(), None
         self._fresh()
         self.dir = STATE / self.id
         self.dir.mkdir(parents=True)
-        (self.dir / "meta.json").write_text(json.dumps({k: getattr(self, k) for k in META}))
+        (self.dir / "meta.json").write_text(json.dumps({k: getattr(self, k) for k in (*META, "once")}))
         try:
             hold(self.dir, self.mode, self.argv(task), project)
             self._attach(0)
@@ -152,7 +156,7 @@ class Session:
             raise
 
     def argv(self, task):
-        return command(self.kind, self.run_id, task)
+        return command(self.kind, self.run_id, task, False, self.sets)
 
     def _fresh(self):
         """What is not saved: a terminal's screen comes back from its holder."""
@@ -254,6 +258,7 @@ class Session:
         for k in META:
             if k != "ui":
                 setattr(s, k, meta[k])
+        s.sets, s.once = {}, bool(meta.get("once"))
         s.dir = folder
         s._fresh()
         s._load(saved)
@@ -383,13 +388,13 @@ class Chat(Session):
     conversation; streamed text is folded into the block it belongs to on the way in."""
     ui, mode = "chat", "pipe"
 
-    def __init__(self, project, kind, run_id, task=None, images=None):
-        super().__init__(project, kind, run_id)
+    def __init__(self, project, kind, run_id, task=None, images=None, **started):
+        super().__init__(project, kind, run_id, **started)
         if task or images:
             self.prompt(task or "", images)
 
     def argv(self, task):
-        return command(self.kind, self.run_id, None, True)
+        return command(self.kind, self.run_id, None, True, self.sets)
 
     def _fresh(self):
         self.listeners, self.events = [], []
@@ -400,6 +405,7 @@ class Chat(Session):
         self.cost, self.context, self.sent = None, None, 0
         self.blocks, self.tools, self.boot = {}, {}, None  # where streamed text, results and boot lines go
         self.offset, self.partial = 0, b""  # how much of its output `events` has taken in, and the line it is in
+        self.finished = False  # its last turn ended, and well: when a session started `once` goes
 
     def saved(self):
         return {k: getattr(self, k) for k in SAVED}
@@ -498,7 +504,8 @@ class Chat(Session):
                 self.state = e["state"]
                 if self.state != "working":
                     self.activity = ""
-            return self._tell({"type": "status", "state": self.status()})
+            self._tell({"type": "status", "state": self.status()})
+            return self._leave()
         if kind == "ready":
             self.info = {**self.info, **{k: v for k, v in e.items() if k != "type" and v is not None}}
             first, self.ready = not self.ready, True
@@ -521,7 +528,8 @@ class Chat(Session):
             return self._tell(e)
         if kind == "tasks":  # the whole set each time: a page opened later gets the latest
             self.tasks = [t for t in e.get("items") or [] if isinstance(t, dict)] if isinstance(e.get("items"), list) else []
-            return self._tell(e)
+            self._tell(e)
+            return self._leave()
         if kind == "asked":
             for ask in self.events:
                 if ask.get("type") == "ask" and ask.get("id") == e.get("id"):
@@ -532,9 +540,18 @@ class Chat(Session):
                 self.cost = e["cost"]
             if isinstance(e.get("context"), dict):
                 self.context = e["context"]
+            self.finished = not e.get("error")  # one that failed stays, to be read
         if kind in ("hello", "progress"):
             return self._tell(e)
         self._tell(e, keep=True)  # user, ask, turn, notice, and whatever a bridge adds
+        self._leave()
+
+    def _leave(self):
+        """A session a plugin started (`once`) goes when its agent has finished: its turn over,
+        nothing of it running in the background, nothing asked. Caller holds `lock`."""
+        if self.once and self.finished and self.state == "idle" and not self.tasks and self.id in sessions:
+            self.once = False
+            threading.Thread(target=remove, args=(self,), daemon=True).start()  # never under its own pump
 
     def _send(self, command):
         self._ctl({"in": base64.b64encode(json.dumps(command).encode() + b"\n").decode()})
@@ -553,6 +570,7 @@ class Chat(Session):
                      **({"files": [f["name"] for f in files]} if files else {})}
             self.title = self.title or " ".join(text.split())[:140] or ("File" if files and not images else "Image")
             command = {"type": "prompt", "text": text, **({"images": images} if images else {}), **({"files": files} if files else {})}
+            self.finished = False
             if self.ready:
                 self._send(command)
                 self.state = "working"
@@ -617,7 +635,54 @@ def describe(project, keep=False):
             return described[project]
         found = {"lists": [], "notes": [str(e)]}
     described[project] = found
+    autostart(project, found)
     return found
+
+
+IDLE_POLL = 300  # seconds between descriptions of a project none of whose plugins asked for any
+
+
+def poller(projects_file):
+    """Describes each project again whenever the shortest interval its plugins registered
+    (web_poll) has passed, page or no page: what they watch — a pull request's CI turning
+    green — is noticed, and what they want started on it (web_start) starts."""
+    due = {}
+    while True:
+        for project in projects(projects_file):
+            if time.time() >= due.get(project, 0):
+                poll = describe(project, keep=True).get("poll")
+                due[project] = time.time() + (max(10, poll) if isinstance(poll, (int, float)) else IDLE_POLL)
+        time.sleep(5)
+
+
+def autostart(project, found):
+    """Starts the sessions the project's plugins asked for (web_start): each `key` of a plugin
+    once, kept in a file so a restart starts none again, and none while a session of its
+    `after_run` is listed. Such a session is removed when its agent has finished (Chat._leave)."""
+    file = STATE.parent / "started.json"
+    for want in found.get("starts") or []:
+        try:
+            plugin, key, task = str(want["plugin"]), str(want["key"]), want["task"]
+            sets = {str(k): str(v) for k, v in (want.get("env") or {}).items()}
+        except (TypeError, KeyError, AttributeError):
+            continue
+        mark = f"{project}\t{plugin}\t{key}"
+        with lock:
+            if want.get("after_run") and any((s.project, s.run_id) == (project, want["after_run"]) for s in sessions.values()):
+                continue
+            try:
+                seen = json.loads(file.read_text())
+            except (OSError, ValueError):
+                seen = []
+            if mark in seen:
+                continue
+            try:
+                start(project, "run", None, task, sets={**sets, "SANDBOX_STARTED_BY": plugin}, once=True)
+                # shortcut: the file only grows, a line per session ever started; prune it once that matters.
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_text(json.dumps([*seen, mark]))
+            except (ValueError, OSError) as e:
+                print(f"  {plugin} could not start a session in {project}: {e}", file=sys.stderr, flush=True)
 
 
 def _manifest(path):
@@ -945,6 +1010,13 @@ def drop(s):
         s.close()
 
 
+def remove(s):
+    """Stops a session and forgets it: a deleted one, with nothing of its run tidied up."""
+    s.stop()
+    with lock:
+        drop(s)
+
+
 def sync(bind="127.0.0.1"):
     """Pulls main into this checkout and runs install.sh; then, under systemd, restarts this server,
     listening where this one does (`bind`)."""
@@ -962,7 +1034,7 @@ def sync(bind="127.0.0.1"):
     return {"restarting": True}
 
 
-def start(project, kind, run_id, task=None, ui=None, images=None):
+def start(project, kind, run_id, task=None, ui=None, images=None, sets=None, once=False):
     """A new session, or the live one it would double. An agent's session is a chat unless
     `ui` is "terminal" (its own TUI in a pty, as `run.sh` in your terminal); a shell is a terminal."""
     if ui not in (None, "chat", "terminal"):
@@ -991,7 +1063,8 @@ def start(project, kind, run_id, task=None, ui=None, images=None):
                 return s
             title = title or getattr(s, "title", "")
             drop(s)
-        s = (Session if kind == "shell" or ui == "terminal" else Chat)(project, kind, run_id, task, *([images] if images else []))
+        s = (Session if kind == "shell" or ui == "terminal" else Chat)(
+            project, kind, run_id, task, **({"images": images} if images else {}), sets=sets, once=once)
         if isinstance(s, Chat):
             s.title = s.title or title
         sessions[s.id] = s
@@ -1326,6 +1399,7 @@ if __name__ == "__main__":
     if args.bind and os.environ["SANDBOX_WEB_BIND"] != args.bind:
         os.environ["SANDBOX_WEB_NAME"] = args.bind  # a name resolved to its address: links may keep the name
     restore()
+    threading.Thread(target=poller, args=(args.projects,), daemon=True).start()
     server = serve(args.port, args.projects, args.bind, args.allow_host)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # so `finally` cleans up on a plain kill too
     print(f"Sandboxes: http://127.0.0.1:{server.server_address[1]}  (projects: {args.projects})",

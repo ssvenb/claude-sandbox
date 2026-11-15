@@ -1,17 +1,18 @@
-"""Per-project configuration: the worked-on repo's .claude-sandbox.json and .env, and the settings
-they layer over your environment.
+"""Per-project configuration: the worked-on repo's .claude-sandbox.json, and the settings it
+layers over your environment.
 
 Configuration is per-project: a checkout carries the way it wants to be sandboxed, and the
 sandbox's own directory contributes nothing. Lowest to highest precedence:
 
   1. a plugin manifest's defaultEnabled, and each setting's built-in default
   2. anything already exported in your shell
-  3. the worked-on repo's .env               — sandbox-owned keys only
-  4. the worked-on repo's .claude-sandbox.json — "env" block, and per-plugin "enabled"
+  3. the worked-on repo's .claude-sandbox.json — "env" block, and per-plugin "enabled"
+  4. `run.sh --set NAME=VALUE`                — what this one run was started with (by a plugin's
+                                                 web_start: a review under another authentication)
 
-Layer 3 is filtered because that file is the target repo's, full of its own secrets: only names
-the sandbox owns are lifted out of it, so a stray pass_env cannot forward the repo's API keys into
-the container. "Owned" is every key in .env.example plus any ENABLE_<PLUGIN> flag.
+The repo's own .env is not read: it is the target repo's, full of its own secrets. The names the
+sandbox owns — what the "env" block and --set may set — are every key in .env.example, the
+catalogue of them, plus any ENABLE_<PLUGIN> flag.
 
     .claude-sandbox.json
     {
@@ -41,7 +42,8 @@ _BLANK = " \t\n\v\f\r"  # bash's [[:space:]]
 def scan_env(path, commented=False) -> dict[str, str]:
     """KEY=VALUE lines of a .env file, parsed, never executed. With `commented`, `#KEY=value`
     counts too, which is how .env.example documents optional defaults; without it, comments are
-    skipped. The same parser as env_scan_into in src/contract/host/project-env.sh, which plugins use."""
+    skipped. The same parser as env_scan_into in src/contract/host/project-env.sh, which plugins use
+    on files of their own; here it reads .env.example, the catalogue of the sandbox's names."""
     out: dict[str, str] = {}
     try:
         text = Path(path).read_bytes().decode("utf-8", "surrogateescape") if path else None
@@ -94,9 +96,7 @@ class Project:
     """What the worked-on repo says about its sandbox."""
     cwd: str
     config_file: str
-    env_file: str
     config: dict | None = None             # .claude-sandbox.json, when there is one
-    dotenv: dict = field(default_factory=dict)  # its .env, scanned: read by plugins with project_env
 
     def plugin_setting(self, plugin: str, key: str) -> str:
         """One scalar of a plugin's section, "" when unset — as project_plugin_setting reads it."""
@@ -108,11 +108,10 @@ class Project:
 
 
 def load_project(env: dict) -> Project:
-    """The project's .claude-sandbox.json (PROJECT_CONFIG_FILE) and .env (PROJECT_ENV_FILE), next
-    to its checkout ($HOST_CWD) unless those say otherwise."""
+    """The project's .claude-sandbox.json (PROJECT_CONFIG_FILE), next to its checkout ($HOST_CWD)
+    unless that says otherwise."""
     cwd = env.get("HOST_CWD") or "."
-    project = Project(cwd, env.get("PROJECT_CONFIG_FILE") or f"{cwd}/.claude-sandbox.json",
-                      env.get("PROJECT_ENV_FILE") or f"{cwd}/.env")
+    project = Project(cwd, env.get("PROJECT_CONFIG_FILE") or f"{cwd}/.claude-sandbox.json")
     path = Path(project.config_file)
     if path.is_file():
         where = f"Project config '{project.config_file}'"
@@ -128,7 +127,6 @@ def load_project(env: dict) -> Project:
         if not isinstance(block, dict) or any(isinstance(v, (dict, list)) for v in block.values()):
             raise Die(f"{where}: .env must be an object of scalar values.")
         project.config = config
-    project.dotenv = scan_env(project.env_file)
     return project
 
 
@@ -138,7 +136,11 @@ def sandbox_vars(env: dict) -> set[str]:
     return set(scan_env(example, commented=True))
 
 
-def apply_settings(env: dict, project: Project) -> list[str]:
+# Which plugin started the run (web_start), for its own stages to tell: not a setting of a project's.
+STARTED_BY = "SANDBOX_STARTED_BY"
+
+
+def apply_settings(env: dict, project: Project, sets: dict | None = None) -> list[str]:
     """Lays layers 3 and 4 over `env`, in place, before the agent and the plugins are resolved.
     The names applied, sorted."""
     owned = sandbox_vars(env)
@@ -147,15 +149,16 @@ def apply_settings(env: dict, project: Project) -> list[str]:
         return name.startswith("ENABLE_") or name in owned
 
     applied = set()
-    for key, value in project.dotenv.items():
-        if owns(key):
-            env[key] = value
-            applied.add(key)
     for key, value in _or((project.config or {}).get("env"), {}).items():
         # This block is written *for* the sandbox, so an unknown name is a typo, not one of the
         # repo's own variables — say so instead of silently ignoring it.
         if not owns(key):
             raise Die(f"Project config '{project.config_file}': .env.{key} is not a sandbox setting (see .env.example).")
         env[key] = tostring(value)
+        applied.add(key)
+    for key, value in (sets or {}).items():
+        if not owns(key) and key != STARTED_BY:
+            raise Die(f"--set {key}: not a sandbox setting (see .env.example).")
+        env[key] = value
         applied.add(key)
     return sorted(applied)

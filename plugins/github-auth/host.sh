@@ -2,9 +2,10 @@
 # Host stage. The App private key stays on this machine: installation tokens are minted here, and
 # the container only ever sees the current one, as /run/credentials/github-token.
 
-[ -f "$GH_PRIVATE_KEY_FILE" ] || die "GH_PRIVATE_KEY_FILE not found: $GH_PRIVATE_KEY_FILE"
+# GH_APP_ID and GH_PRIVATE_KEY_FILE come from the github-app authentication GH_AUTH names (auth.json).
+[ -f "$GH_PRIVATE_KEY_FILE" ] || die "github-auth: the privateKeyFile of authentication '${GH_AUTH:-}' is not there: $GH_PRIVATE_KEY_FILE"
 # The key is read by your own user (run.sh, and the refresher every 40 min), not by root.
-[ -r "$GH_PRIVATE_KEY_FILE" ] || die "GH_PRIVATE_KEY_FILE is not readable by $(id -un): $GH_PRIVATE_KEY_FILE ($(ls -l "$GH_PRIVATE_KEY_FILE" 2>/dev/null | awk '{print $1, $3":"$4}')); chown it to you, or add yourself to its group."
+[ -r "$GH_PRIVATE_KEY_FILE" ] || die "github-auth: the privateKeyFile of authentication '${GH_AUTH:-}' is not readable by $(id -un): $GH_PRIVATE_KEY_FILE ($(ls -l "$GH_PRIVATE_KEY_FILE" 2>/dev/null | awk '{print $1, $3":"$4}')); chown it to you, or add yourself to its group."
 command -v openssl >/dev/null || die "github-auth: openssl is required on the host to sign the App's JWT."
 
 GITHUB_AUTH_DIR=$PLUGIN_DIR

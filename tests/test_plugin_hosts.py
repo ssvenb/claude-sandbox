@@ -15,7 +15,7 @@ from conftest import REPO
 # --- agents --------------------------------------------------------------------------------
 
 def test_claude_needs_a_token(sb):
-    sb.agent().dies("CLAUDE_CODE_OAUTH_TOKEN must be set")
+    sb.agent().dies("Claude Code needs credentials: set CLAUDE_AUTH")
     assert sb.agent(CLAUDE_CODE_OAUTH_TOKEN="tok").ok().env == {"CLAUDE_CODE_OAUTH_TOKEN": "tok"}
 
 
@@ -33,7 +33,7 @@ def test_claude_effort_is_validated(sb):
 
 
 def test_copilot_needs_its_own_token(sb):
-    sb.agent(AGENT="copilot").dies("COPILOT_GITHUB_TOKEN must be set")
+    sb.agent(AGENT="copilot").dies("Copilot needs credentials: set COPILOT_AUTH")
     assert sb.agent(AGENT="copilot", COPILOT_GITHUB_TOKEN="pat").ok().env == {"COPILOT_GITHUB_TOKEN": "pat"}
     assert sb.agent(AGENT="copilot", AGENT_AUTH_PROVIDED=1).ok().args == []
 
@@ -265,7 +265,7 @@ def test_gcp_auth_unreadable_credential_file_fails(sb):
 
 @pytest.mark.parametrize("account, project, outcome", [
     ("me@gmail.com", None, "must be a service account email"),
-    ("123-compute@developer.gserviceaccount.com", None, "set GCP_PROJECT"),
+    ("123-compute@developer.gserviceaccount.com", None, "a project."),
     ("123-compute@developer.gserviceaccount.com", "explicit", "explicit"),
     (SA, "override", "override"),
 ])
@@ -338,7 +338,7 @@ def test_git_workspace_branch_prefix_precedence(sb):
 # --- github-auth ---------------------------------------------------------------------------
 
 def test_github_auth_needs_the_key_file(sb):
-    sb.plugin("github-auth", GH_APP_ID=1, GH_PRIVATE_KEY_FILE=sb.tmp / "none.pem").dies("GH_PRIVATE_KEY_FILE not found")
+    sb.plugin("github-auth", GH_APP_ID=1, GH_PRIVATE_KEY_FILE=sb.tmp / "none.pem").dies("the privateKeyFile of authentication")
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root reads any file")
@@ -346,7 +346,7 @@ def test_github_auth_needs_a_key_file_its_user_can_read(sb):
     key = sb.tmp / "app.pem"
     key.write_text("k")
     key.chmod(0)
-    sb.plugin("github-auth", GH_APP_ID=1, GH_PRIVATE_KEY_FILE=key).dies("GH_PRIVATE_KEY_FILE is not readable")
+    sb.plugin("github-auth", GH_APP_ID=1, GH_PRIVATE_KEY_FILE=key).dies("is not readable by")
 
 
 def test_github_auth_registers_a_token_and_never_passes_the_key(sb):
@@ -440,7 +440,7 @@ KEY = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaA==\n-----END OPENSSH PRIVA
 
 
 @pytest.mark.parametrize("content, message", [
-    (None, "SSH_PRIVATE_KEY_FILE not found"),
+    (None, "the privateKeyFile of authentication"),
     ("ssh-ed25519 AAAA user@host\n", "does not look like a private key"),
     ("-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\n", "passphrase-protected"),
 ])
@@ -459,7 +459,7 @@ def test_ssh_credentials_passes_the_key_config_and_known_hosts(sb):
     assert run.env == {"SSH_PRIVATE_KEY": KEY.rstrip("\n"), "SSH_HOST_PATTERN": "box-*",
                        "SSH_HOST_USER": "ops", "SSH_KNOWN_HOSTS": "host ssh-ed25519 AAAA"}
     sb.plugin("ssh-credentials", SSH_PRIVATE_KEY_FILE=sb.tmp / "key",
-              SSH_KNOWN_HOSTS_FILE=sb.tmp / "nope").dies("SSH_KNOWN_HOSTS_FILE not found")
+              SSH_KNOWN_HOSTS_FILE=sb.tmp / "nope").dies("the knownHostsFile of authentication")
 
 
 # --- upstream-proxy ------------------------------------------------------------------------
@@ -496,16 +496,17 @@ def test_upstream_proxy_routes_must_be_a_list(proxy_sb):
 
 
 def test_upstream_proxy_starts_a_proxy_and_hands_over_only_sockets_and_env(proxy_sb):
-    proxy_sb.dotenv("DEPLOYMENT=gpt-x\nAPI_SECRET=hunter2\n")
+    file = proxy_sb.tmp / "auth.json"
+    file.write_text(json.dumps({"api": {"type": "api-key", "key": "hunter2"}}))
+    file.chmod(0o600)
     proxy_sb.config({"plugins": {"upstream-proxy": {"routes": routes(
-        auth={"type": "bearer", "valueEnv": "API_SECRET"},
-        containerEnv={"API_URL": "http://127.0.0.1:18080", "DEPLOY": "${DEPLOYMENT}",
-                      "FROM_HOST": "${HOST_ONLY}", "MISSING": "x${NOPE}y"})}}})
-    run = proxy_sb.plugin("upstream-proxy", HOST_ONLY="h").ok()
+        auth={"credential": "api"},
+        containerEnv={"API_URL": "http://127.0.0.1:18080", "FROM_HOST": "${HOST_ONLY}", "MISSING": "x${NOPE}y"})}}})
+    run = proxy_sb.plugin("upstream-proxy", HOST_ONLY="h", SANDBOX_AUTH_FILE=file).ok()
     [proxy_dir] = proxy_dirs(proxy_sb)
     assert run.mounts == [f"{proxy_dir}/sockets:/run/upstream-proxy"]
     assert run.env == {"UPSTREAM_PROXY_PORTS": "api:18080", "API_URL": "http://127.0.0.1:18080",
-                       "DEPLOY": "gpt-x", "FROM_HOST": "h", "MISSING": "xy"}
+                       "FROM_HOST": "h", "MISSING": "xy"}
     assert not any("hunter2" in a for a in run.args)
     # The last run.sh to leave stops the proxy and clears everything but the lock.
     assert os.listdir(proxy_dir) == ["lock"]
@@ -517,12 +518,13 @@ def test_upstream_proxy_reads_a_routes_named_credential_itself(proxy_sb):
     file = proxy_sb.tmp / "auth.json"
     file.write_text(json.dumps({"openai": {"type": "api-key", "key": "sk-hunter2"}}))
     file.chmod(0o600)
-    proxy_sb.config({"plugins": {"upstream-proxy": {"routes": routes(auth={"type": "bearer", "credential": "openai"})}}})
+    proxy_sb.config({"plugins": {"upstream-proxy": {"routes": routes(auth={"credential": "openai"})}}})
     run = proxy_sb.plugin("upstream-proxy", SANDBOX_AUTH_FILE=file).ok()
     assert run.env == {"UPSTREAM_PROXY_PORTS": "api:18080"}
     assert not any("hunter2" in a for a in run.args)
-    proxy_sb.config({"plugins": {"upstream-proxy": {"routes": routes(auth={"type": "bearer", "credential": "nobody"})}}})
-    proxy_sb.plugin("upstream-proxy", SANDBOX_AUTH_FILE=file).dies("has no api-key authentication of that name")
+    proxy_sb.config({"plugins": {"upstream-proxy": {"routes": routes(auth={"credential": "nobody"})}}})
+    died = proxy_sb.plugin("upstream-proxy", SANDBOX_AUTH_FILE=file).dies("route 'api': auth.credential 'nobody'")
+    assert "has no authentication of that name" in died.err and "Traceback" not in died.err
 
 
 def test_upstream_proxy_is_shared_while_another_run_uses_it(proxy_sb):
@@ -820,8 +822,7 @@ fi
 echo "[{\\"number\\": 1, \\"title\\": \\"${GH_TOKEN:-active}\\", \\"url\\": \\"u\\"}]"
 """)
     assert described("github-auth")["lists"][0]["items"][0]["title"] == "active"  # no GH_USERNAME: gh's active account
-    sb.config({"env": {"GH_USERNAME": "alice"}})
-    assert described("github-auth")["lists"][0]["items"][0]["title"] == "tok-alice"
-    sb.config({"env": {"GH_USERNAME": "bob"}})  # not logged in on this host
-    said = described("github-auth")
+    # GH_USERNAME is the username of the github-app the project names (auth.json fills it).
+    assert described("github-auth", GH_USERNAME="alice")["lists"][0]["items"][0]["title"] == "tok-alice"
+    said = described("github-auth", GH_USERNAME="bob")  # not logged in on this host
     assert said["lists"] == [] and said["notes"] == ["gh is not logged in as bob on github.com (gh auth login)"]

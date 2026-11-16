@@ -5,19 +5,19 @@
 
 command -v gcloud >/dev/null || die "gcp-auth: gcloud is required on the host to mint tokens for $GCP_SERVICE_ACCOUNT."
 [[ $GCP_SERVICE_ACCOUNT =~ ^[^@[:space:]]+@[^@[:space:]]+\.gserviceaccount\.com$ ]] \
-  || die "gcp-auth: GCP_SERVICE_ACCOUNT must be a service account email (…@….iam.gserviceaccount.com), got '$GCP_SERVICE_ACCOUNT'."
+  || die "gcp-auth: the serviceAccount of authentication '${GCP_AUTH:-}' must be a service account email (…@….iam.gserviceaccount.com), got '$GCP_SERVICE_ACCOUNT'."
 
-# A user-managed service account's email names its project; anything else needs GCP_PROJECT.
+# A user-managed service account's email names its project; anything else needs the entry's project.
 GCP_AUTH_PROJECT=${GCP_PROJECT:-}
 if [ -z "$GCP_AUTH_PROJECT" ] && [[ $GCP_SERVICE_ACCOUNT =~ @([a-z0-9-]+)\.iam\.gserviceaccount\.com$ ]]; then
   GCP_AUTH_PROJECT=${BASH_REMATCH[1]}
 fi
-[ -n "$GCP_AUTH_PROJECT" ] || die "gcp-auth: cannot tell the project from '$GCP_SERVICE_ACCOUNT'; set GCP_PROJECT."
+[ -n "$GCP_AUTH_PROJECT" ] || die "gcp-auth: cannot tell the project from '$GCP_SERVICE_ACCOUNT'; give authentication '${GCP_AUTH:-}' a project."
 
 # Workload identity federation: the host's own credential (e.g. an X.509 cert) instead of a login.
 GCP_CREDENTIAL_FILE=${GCP_CREDENTIAL_FILE:-}
 [ -z "$GCP_CREDENTIAL_FILE" ] || [ -r "$GCP_CREDENTIAL_FILE" ] \
-  || die "gcp-auth: GCP_CREDENTIAL_FILE '$GCP_CREDENTIAL_FILE' is not readable."
+  || die "gcp-auth: the credentialFile of authentication '${GCP_AUTH:-}' is not readable: $GCP_CREDENTIAL_FILE"
 
 GCP_AUTH_DIR=$PLUGIN_DIR
 gcp_auth_mint() {

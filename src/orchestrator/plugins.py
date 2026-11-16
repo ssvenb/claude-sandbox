@@ -31,7 +31,7 @@ class Plugin:
     required_env: list = field(default_factory=list)
     provides: list = field(default_factory=list)
     requires: list = field(default_factory=list)
-    auth: dict | None = None  # the named authentication it takes, see auth.py
+    settings: list = field(default_factory=list)  # as declared: its "auth" ones name authentications (auth.py)
 
 
 def plugin_root(env: dict) -> Path:
@@ -60,7 +60,7 @@ def discover(root: Path) -> list[Plugin]:
             found.append(Plugin(path.parent.name, float(50 if priority is None else priority),
                                 tostring(m.get("defaultEnabled", False)) == "true", m.get("requiredAgent") or "",
                                 *(list(m.get(k) or []) for k in ("conflicts", "requiredEnv", "provides", "requires")),
-                                m.get("auth") if isinstance(m.get("auth"), dict) else None))
+                                [s for s in m.get("settings") or [] if isinstance(s, dict)]))
         except (TypeError, ValueError):
             raise Die(f"Malformed manifest: {path}") from None
     if not found:

@@ -1,7 +1,8 @@
 # shellcheck shell=bash
 # Host stage. The NetBird PAT — which can enumerate and manage every peer — stays on this machine;
 # the container gets only a setup key, which can do nothing but enrol one peer into the group the
-# key was minted for. Mint it out-of-band and hand it over as NB_SETUP_KEY. Prefer a key that is
+# key was minted for: the netbird-setup-key authentication NB_AUTH names (auth.json), which fills
+# NB_SETUP_KEY and NB_MANAGEMENT_URL. Prefer a key that is
 # *ephemeral* (the peer self-removes with the container) and, if you resume runs, *reusable*.
 
 # WireGuard needs a tun device and the capability to configure interfaces and routes. Bridge

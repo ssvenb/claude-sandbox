@@ -17,11 +17,14 @@
       "default": "medium"
     },
     {
-      "env": "CLAUDE_CODE_OAUTH_TOKEN",
-      "type": "string",
-      "secret": true,
+      "env": "CLAUDE_AUTH",
+      "type": "auth",
+      "auth": "claude-token",
       "label": "OAuth token",
-      "description": "From `claude setup-token`; not needed while claude-home mounts a logged-in ~/.claude. Stored in plain text in this file: prefer the repo's .env."
+      "description": "The claude-token (from `claude setup-token`) Claude Code runs with; not needed while claude-home mounts a logged-in ~/.claude.",
+      "fills": {
+        "token": "CLAUDE_CODE_OAUTH_TOKEN"
+      }
     }
   ]
 }

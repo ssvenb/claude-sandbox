@@ -25,8 +25,6 @@ cd "$(dirname "$0")/../../.."
 . src/contract/host/agents.sh
 # shellcheck source=src/contract/host/project-config.sh
 . src/contract/host/project-config.sh
-# shellcheck source=src/contract/host/project-env.sh
-. src/contract/host/project-env.sh
 
 REPORT_FD=${SANDBOX_STAGE_REPORT_FD:?stage.sh is started by run.sh}
 REPORT=${SANDBOX_STAGE_REPORT:?stage.sh is started by run.sh}

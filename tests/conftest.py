@@ -34,7 +34,7 @@ from orchestrator import config as host_config  # noqa: E402
 
 HOST_LIBS = "\n".join(f". src/{lib}.sh" for lib in (
     "contract/host/plugins", "services/credentials/credentials", "contract/host/agents",
-    "contract/host/project-config", "contract/host/project-env"))
+    "contract/host/project-config"))
 
 
 def load(rel: str):

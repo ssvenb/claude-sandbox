@@ -59,8 +59,8 @@ def board(tmp_path, browser, ui_dist):
     shutil.copytree(ui_dist, sandbox / "web/dist")
     shutil.copytree(REPO / "plugins", sandbox / "plugins")
     shutil.copytree(REPO / "agents", sandbox / "agents")
-    (sandbox / "src/orchestrator").mkdir(parents=True)
-    shutil.copy(REPO / "src/orchestrator/kernel.json", sandbox / "src/orchestrator")
+    # The server reads the settings' authentications with the orchestrator's auth.py.
+    shutil.copytree(REPO / "src/orchestrator", sandbox / "src/orchestrator", ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copy(REPO / ".claude-sandbox.example.json", sandbox)
     tool(sandbox / "run.sh", STUB.read_text())
     tool(tmp_path / "bin/docker", DOCKER)
@@ -785,14 +785,23 @@ def test_ctrl_v_pastes(board, keys):
 
 
 def test_the_gear_configures_the_projects_plugins_in_its_claude_sandbox_json(board):
-    """Every declared setting gets a control of its type; what the form has none for is kept."""
+    """Every declared setting gets a control of its type; what the form has none for is kept. An
+    authentication is picked from those configured of its type, by name."""
+    auth = board.project.parent / ".config/claude-sandbox/auth.json"  # the server's HOME is the test's
+    auth.parent.mkdir(parents=True)
+    auth.write_text(json.dumps({"coder": {"type": "github-app"}, "reviewer": {"type": "github-app"},
+                                "openai": {"type": "api-key", "key": "never-shown"}, "gcs": {"type": "gcp-service-account"}}))
+    auth.chmod(0o600)
     file = board.project / ".claude-sandbox.json"
-    file.write_text(json.dumps({"env": {"CLAUDE_EFFORT": "high", "GH_USERNAME": "me"},
+    file.write_text(json.dumps({"env": {"CLAUDE_EFFORT": "high", "GH_AUTH": "coder"},
                                 "plugins": {"git-workspace": {"branchPrefix": "bot", "extra": 1}, "retired": {"x": 1}}}))
     board.click("button[aria-label='Settings']")
     board.wait_for_selector("dialog[open] b:has-text('docker-cli')")
     assert board.input_value("input[name='plugins.git-workspace.branchPrefix']") == "bot"
-    assert board.get_attribute("input[name='env.GH_HOST']", "placeholder") == "github.com"  # its default
+    options = lambda sel: board.eval_on_selector_all(sel + " option", "os => os.map(o => o.value)")  # noqa: E731
+    assert board.input_value("select[name='env.GH_AUTH']") == "coder"
+    assert options("select[name='env.GH_AUTH']") == ["", "coder", "reviewer"]  # github-apps only
+    assert "never-shown" not in board.content()  # names, never what they hold
     assert board.input_value("select[name='env.CLAUDE_EFFORT']") == "high"
     assert "extra" in board.text_content(".card:has(button[name='enabled-git-workspace']) .kept")
 
@@ -803,7 +812,7 @@ def test_the_gear_configures_the_projects_plugins_in_its_claude_sandbox_json(boa
     board.click("button[name='enabled-kvm']")
     board.fill("textarea[name='plugins.kvm.briefing']", "VMs in /data")
     board.select_option("select[name='env.CLAUDE_EFFORT']", "max")
-    board.fill("input[name='env.GH_USERNAME']", "")  # emptied: unset
+    board.select_option("select[name='env.GH_AUTH']", "")  # unset
 
     # Lists: + Add a row each; one left empty is not saved.
     deps = ".card:has(button[name='enabled-project-deps']) .field:has(label:text-is('apt packages'))"
@@ -817,15 +826,16 @@ def test_the_gear_configures_the_projects_plugins_in_its_claude_sandbox_json(boa
     board.fill("input[name='plugins.upstream-proxy.routes.0.name']", "api")
     board.fill("input[name='plugins.upstream-proxy.routes.0.upstream']", "https://api.example.com")
     board.check("input[name='plugins.upstream-proxy.routes.0.allowMethods.GET']")
-    assert not board.is_visible("input[name='plugins.upstream-proxy.routes.0.auth.valueEnv']")
-    board.select_option("select[name='plugins.upstream-proxy.routes.0.auth.type']", "bearer")
-    board.fill("input[name='plugins.upstream-proxy.routes.0.auth.valueEnv']", "API_KEY")
+    credential = "select[name='plugins.upstream-proxy.routes.0.auth.credential']"
+    assert options(credential) == ["", "gcs", "openai"]  # what a route can authenticate with
+    board.select_option(credential, "openai")
+    board.fill("input[name='plugins.upstream-proxy.routes.0.auth.header']", "x-api-key")
     board.click(routes + " .field:has(> .label label:text-is('Container environment')) > .control button.add")
     board.fill("input[name='plugins.upstream-proxy.routes.0.containerEnv.0.key']", "API_URL")
     board.fill("input[name='plugins.upstream-proxy.routes.0.containerEnv.0.value']", "http://127.0.0.1:8081")
     board.click("dialog button[type=submit]")
     board.wait_for_selector("dialog .error:has-text('routes[0].port is required')")  # the server's check
-    assert json.loads(file.read_text())["env"]["GH_USERNAME"] == "me"  # nothing saved
+    assert json.loads(file.read_text())["env"]["GH_AUTH"] == "coder"  # nothing saved
     board.fill("input[name='plugins.upstream-proxy.routes.0.port']", "8081")
 
     board.click("dialog button[type=submit]")
@@ -836,7 +846,7 @@ def test_the_gear_configures_the_projects_plugins_in_its_claude_sandbox_json(boa
                     "docker-cli": {"enabled": False}, "kvm": {"enabled": True, "briefing": "VMs in /data"},
                     "project-deps": {"apt": ["ripgrep"]},
                     "upstream-proxy": {"routes": [{"name": "api", "upstream": "https://api.example.com",
-                                                   "allowMethods": ["GET"], "auth": {"type": "bearer", "valueEnv": "API_KEY"},
+                                                   "allowMethods": ["GET"], "auth": {"credential": "openai", "header": "x-api-key"},
                                                    "containerEnv": {"API_URL": "http://127.0.0.1:8081"},
                                                    "port": 8081}]}}}
 

@@ -3,7 +3,7 @@
 # that brings its own credentials (claude-home) has already set AGENT_AUTH_PROVIDED.
 
 [ "${AGENT_AUTH_PROVIDED:-0}" = 1 ] \
-  || : "${CLAUDE_CODE_OAUTH_TOKEN:?CLAUDE_CODE_OAUTH_TOKEN must be set: export it in your shell, or put it in the "env" block of .claude-sandbox.json (generate one with 'claude setup-token')}"
+  || : "${CLAUDE_CODE_OAUTH_TOKEN:?Claude Code needs credentials: set CLAUDE_AUTH to a claude-token authentication (from 'claude setup-token'), or enable claude-home}"
 
 pass_env CLAUDE_CODE_OAUTH_TOKEN
 

@@ -4,19 +4,15 @@
 Runs on the HOST, where the long-lived secrets live. The container gets only the sockets, so the
 agent can *use* an upstream API without ever holding the key that authenticates to it.
 
-Usage: proxy.py [--env-file FILE]... [--auth-file FILE] <routes.json> <socket-dir>
+Usage: proxy.py [--auth-file FILE] <routes.json> <socket-dir>
 
 One proxy serves every sandbox of a project at once: run.sh starts it for the first and stops it
 after the last, and it outlives the terminal of the run that started it.
 
---env-file loads KEY=VALUE pairs into THIS process only, so a route's secrets never enter run.sh's
-environment where a later plugin's pass_env could forward them into the container. Values already
-set in the environment win over the file.
-
---auth-file is the named authentications (~/.config/claude-sandbox/auth.json): a route's
-`auth.credential` names an `api-key` entry of it, {"type": "api-key", "key": "sk-…"}, in place of
-`auth.valueEnv`. It is read by this process alone, again on every request (a new key takes
-effect at once), and refused unless only its owner can read it.
+--auth-file is your authentications (~/.config/claude-sandbox/auth.json), where a route's
+`auth.credential` is looked up. It is read by THIS process alone, so a key never enters run.sh's
+environment, where a later plugin's pass_env could forward it into the container; again on every
+request (a new key takes effect at once); and refused unless only its owner can read it.
 
 Each route in routes.json:
   name           socket basename (<socket-dir>/<name>.sock)
@@ -41,7 +37,6 @@ import argparse
 import contextlib
 import json
 import os
-import shlex
 import socketserver
 import subprocess
 import ssl
@@ -85,109 +80,73 @@ def _rewritable(content_type: str) -> bool:
     return bool(ct) and any(marker in ct for marker in REWRITABLE_TYPES)
 
 
-def load_env_file(path: str) -> int:
-    """Merge KEY=VALUE lines from a .env-style file into os.environ. Returns how many were set.
-
-    Deliberately conservative: no ${VAR} interpolation and no command substitution, so a value is
-    always exactly the bytes in the file. Anything already in the environment is left alone, which
-    lets the caller override a file value without editing the file.
-    """
-    count = 0
-    with open(path, encoding="utf-8") as fh:
-        for lineno, raw in enumerate(fh, 1):
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith("export "):
-                line = line[len("export "):].lstrip()
-            key, sep, value = line.partition("=")
-            key = key.strip()
-            if not sep or not key.isidentifier():
-                log(f"{path}:{lineno}: ignoring unparsable line")
-                continue
-            value = value.strip()
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-                # Quoted: let shlex handle escapes rather than blindly trimming the quotes.
-                value = next(iter(shlex.split(value)), "")
-            if key not in os.environ:
-                os.environ[key] = value
-                count += 1
-    return count
-
-
 AUTH_FILE = None  # --auth-file
 
 
-def credential(name: str) -> str:
-    """The key of the `api-key` authentication called `name` in AUTH_FILE."""
+USABLE = ("api-key", "oauth2-client", "gcp-service-account")
+
+
+def credential(name: str) -> dict:
+    """The entry called `name` in AUTH_FILE, of a type a route can use."""
     if not AUTH_FILE:
         raise ValueError(f"auth.credential '{name}' needs the authentications file (--auth-file)")
     try:
         if os.stat(AUTH_FILE).st_mode & 0o077:
-            raise ValueError(f"{AUTH_FILE} holds API keys: make it readable by you alone (chmod 600 {AUTH_FILE})")
+            raise ValueError(f"{AUTH_FILE} holds keys: make it readable by you alone (chmod 600 {AUTH_FILE})")
         with open(AUTH_FILE, encoding="utf-8") as fh:
             entries = json.load(fh)
     except (OSError, ValueError) as e:
         raise ValueError(f"auth.credential '{name}': {e}") from None
     entry = entries.get(name) if isinstance(entries, dict) else None
-    if not isinstance(entry, dict) or entry.get("type") != "api-key" or not entry.get("key"):
-        raise ValueError(f"auth.credential '{name}': {AUTH_FILE} has no api-key authentication of that name with a key")
-    return str(entry["key"])
+    if not isinstance(entry, dict):
+        raise ValueError(f"auth.credential '{name}': {AUTH_FILE} has no authentication of that name")
+    if entry.get("type") not in USABLE:
+        raise ValueError(f"auth.credential '{name}' is a {entry.get('type')}; a route takes an {', '.join(USABLE)}")
+    for key in {"api-key": ["key"], "oauth2-client": ["tokenUrl", "clientId", "clientSecret"]}.get(entry["type"], []):
+        if not entry.get(key):
+            raise ValueError(f"auth.credential '{name}' lacks {key}")
+    return entry
 
 
 class _Injector:
-    """Turns a route's `auth` block into the headers that authenticate to the upstream."""
+    """Turns a route's `auth` block into the headers that authenticate to the upstream: the type of
+    the credential it names says how — an api-key as it is (in `header`, else as a bearer token),
+    an oauth2-client's or a gcp-service-account's minted token as a bearer token."""
 
     def __init__(self, spec: dict):
-        self.kind = spec.get("type", "none")
         self.spec = spec
+        self.name = spec.get("credential")
         self._lock = threading.Lock()
         self._token = None
         self._expires = 0.0
 
-    def _env(self, key: str) -> str:
-        name = self.spec.get(key)
-        if not name:
-            raise ValueError(f"auth.{key} is required for type '{self.kind}'")
-        value = os.environ.get(name)
-        if not value:
-            raise ValueError(f"${name} is unset on the host")
-        return value
-
-    def _secret(self) -> str:
-        """A header's value: a named credential, else the variable valueEnv names."""
-        if self.spec.get("credential"):
-            return credential(str(self.spec["credential"]))
-        if not self.spec.get("valueEnv"):
-            raise ValueError(f"auth.credential or auth.valueEnv is required for type '{self.kind}'")
-        return self._env("valueEnv")
+    def kind(self) -> str:
+        return credential(self.name)["type"] if self.name else "none"
 
     def headers(self) -> dict:
-        if self.kind == "none":
+        if not self.name:
             return {}
-        if self.kind == "header":
-            return {self.spec.get("header", "Authorization"): self._secret()}
-        if self.kind == "bearer":
-            return {"Authorization": f"Bearer {self._secret()}"}
-        if self.kind == "oauth2_client_credentials":
-            return {"Authorization": f"Bearer {self._oauth_token()}"}
-        if self.kind == "gcp":
-            return {"Authorization": f"Bearer {self._gcp_token()}"}
-        raise ValueError(f"unknown auth.type '{self.kind}'")
+        entry = credential(self.name)
+        if entry["type"] == "api-key":
+            header = self.spec.get("header")
+            return {header: str(entry["key"])} if header else {"Authorization": f"Bearer {entry['key']}"}
+        if entry["type"] == "oauth2-client":
+            return {"Authorization": f"Bearer {self._oauth_token(entry)}"}
+        return {"Authorization": f"Bearer {self._gcp_token(entry)}"}
 
-    def _oauth_token(self) -> str:
+    def _oauth_token(self, entry: dict) -> str:
         with self._lock:
             if self._token and time.time() < self._expires:
                 return self._token
             payload = {
                 "grant_type": "client_credentials",
-                "client_id": self._env("clientIdEnv"),
-                "client_secret": self._env("clientSecretEnv"),
+                "client_id": entry["clientId"],
+                "client_secret": entry["clientSecret"],
             }
-            if self.spec.get("audience"):
-                payload["audience"] = self.spec["audience"]
+            if entry.get("audience"):
+                payload["audience"] = entry["audience"]
             req = urllib.request.Request(
-                self.spec["tokenUrl"],
+                entry["tokenUrl"],
                 data=json.dumps(payload).encode(),
                 headers={"Content-Type": "application/json"},
                 method="POST",
@@ -201,8 +160,9 @@ class _Injector:
             return self._token
 
 
-    def _gcp_token(self) -> str:
-        """A Google access token for `serviceAccount`, minted by the host's own gcloud login.
+    def _gcp_token(self, entry: dict) -> str:
+        """A Google access token for the entry's `serviceAccount` (none: the host's own account),
+        minted by the host's own gcloud login.
 
         The host identity needs roles/iam.serviceAccountTokenCreator on the service account, which
         in turn holds only the roles the sandbox should have (e.g. storage.objectViewer on one
@@ -213,7 +173,7 @@ class _Injector:
         with self._lock:
             if self._token and time.time() < self._expires:
                 return self._token
-            account = os.path.expandvars(self.spec.get("serviceAccount", ""))
+            account = entry.get("serviceAccount", "")
             cmd = ["gcloud", "auth", "print-access-token", "--quiet"]
             if account:
                 cmd.append(f"--impersonate-service-account={account}")
@@ -268,7 +228,7 @@ class _Route:
         self.injector = _Injector(cfg.get("auth", {}))
         # Fail at startup, not on the agent's first request: a bad login or a missing
         # tokenCreator grant should stop run.sh while the user is still watching.
-        if self.injector.kind == "gcp" or self.injector.spec.get("credential"):
+        if self.injector.kind() == "gcp-service-account":
             self.injector.headers()
 
         # The address the sandbox knows this upstream by. It is a dummy — a loopback port on the
@@ -405,10 +365,8 @@ class _UnixServer(socketserver.ThreadingUnixStreamServer):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--env-file", action="append", default=[], metavar="FILE",
-                        help="load secrets from a .env-style file into this process only")
     parser.add_argument("--auth-file", metavar="FILE",
-                        help="the named authentications, for routes naming an api-key credential")
+                        help="your authentications, where a route's auth.credential is looked up")
     parser.add_argument("routes_file")
     parser.add_argument("sock_dir")
     args = parser.parse_args()
@@ -421,16 +379,16 @@ def main() -> int:
     with contextlib.suppress(OSError):
         os.setsid()
 
-    # Before the routes: their ${VAR} upstreams and *Env credential lookups both read os.environ.
-    for env_file in args.env_file:
-        log(f"loaded {load_env_file(env_file)} variable(s) from {env_file}")
-
     with open(routes_file, encoding="utf-8") as fh:
         raw = json.load(fh)
 
     servers = []
     for cfg in raw:
-        route = _Route(cfg)
+        try:
+            route = _Route(cfg)
+        except (ValueError, RuntimeError) as e:  # a misconfigured route or no host login: what is wrong, not a traceback
+            log(f"route '{cfg.get('name')}': {e}")
+            return 1
         path = os.path.join(sock_dir, f"{route.name}.sock")
         # AF_UNIX paths are capped around 108 bytes and the kernel's error says nothing useful.
         if len(path.encode()) > 100:

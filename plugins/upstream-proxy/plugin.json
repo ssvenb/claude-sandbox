@@ -9,13 +9,6 @@
   "secrets": [],
   "settings": [
     {
-      "key": "envFile",
-      "type": "path",
-      "label": "Env file",
-      "description": "Where the routes' credentials are read from, relative to the project; /dev/null loads nothing.",
-      "default": ".env"
-    },
-    {
       "key": "routes",
       "type": "list",
       "label": "Routes",
@@ -46,7 +39,7 @@
             "label": "Upstream",
             "required": true,
             "placeholder": "https://api.example.com",
-            "description": "Absolute URL; ${VAR} expands from the host env."
+            "description": "Absolute URL; ${VAR} expands from the environment run.sh runs in."
           },
           {
             "key": "allowMethods",
@@ -75,95 +68,24 @@
             "label": "Authentication",
             "fields": [
               {
-                "key": "type",
-                "type": "enum",
-                "label": "Type",
-                "choices": ["none", "header", "bearer", "oauth2_client_credentials", "gcp"],
-                "default": "none"
+                "key": "credential",
+                "type": "auth",
+                "auth": ["api-key", "oauth2-client", "gcp-service-account"],
+                "label": "Credential",
+                "description": "What the proxy authenticates with, from your authentications; nothing: no authentication. An api-key is sent as is, an oauth2-client's token or a gcp-service-account's (minted with your gcloud login) as Authorization: Bearer."
               },
               {
                 "key": "header",
                 "type": "string",
                 "label": "Header",
-                "default": "Authorization",
-                "when": {
-                  "type": ["header"]
-                }
-              },
-              {
-                "key": "credential",
-                "type": "string",
-                "label": "Credential",
-                "placeholder": "openai",
-                "description": "Name of an api-key entry in ~/.config/claude-sandbox/auth.json ({\"type\": \"api-key\", \"key\": \"…\"}): the value sent. Takes the place of the env var.",
-                "when": {
-                  "type": ["header", "bearer"]
-                }
-              },
-              {
-                "key": "valueEnv",
-                "type": "string",
-                "label": "Value from env var",
-                "description": "Unless a credential is named: the variable holding the value, from the env file or the host's environment.",
-                "when": {
-                  "type": ["header", "bearer"]
-                },
-                "monospace": true
-              },
-              {
-                "key": "tokenUrl",
-                "type": "string",
-                "label": "Token URL",
-                "required": true,
-                "when": {
-                  "type": ["oauth2_client_credentials"]
-                }
-              },
-              {
-                "key": "audience",
-                "type": "string",
-                "label": "Audience",
-                "when": {
-                  "type": ["oauth2_client_credentials"]
-                }
-              },
-              {
-                "key": "clientIdEnv",
-                "type": "string",
-                "label": "Client id from env var",
-                "required": true,
-                "when": {
-                  "type": ["oauth2_client_credentials"]
-                },
-                "monospace": true
-              },
-              {
-                "key": "clientSecretEnv",
-                "type": "string",
-                "label": "Client secret from env var",
-                "required": true,
-                "when": {
-                  "type": ["oauth2_client_credentials"]
-                },
-                "monospace": true
-              },
-              {
-                "key": "serviceAccount",
-                "type": "string",
-                "label": "Service account",
-                "description": "Default: the host's gcloud account.",
-                "when": {
-                  "type": ["gcp"]
-                }
+                "placeholder": "x-api-key",
+                "description": "An api-key only: the header it is sent in, as is. Default: Authorization: Bearer <key>."
               },
               {
                 "key": "accessBoundary",
                 "type": "json",
                 "label": "Access boundary",
-                "description": "A Credential Access Boundary downscoping the token (Cloud Storage only).",
-                "when": {
-                  "type": ["gcp"]
-                }
+                "description": "A gcp-service-account only: a Credential Access Boundary downscoping its token (Cloud Storage only)."
               }
             ]
           },

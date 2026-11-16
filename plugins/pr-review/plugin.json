@@ -10,10 +10,10 @@
   "settings": [
     {
       "key": "auth",
-      "type": "string",
+      "type": "auth",
       "label": "Reviewer authentication",
-      "description": "Name of the github-app entry in ~/.config/claude-sandbox/auth.json the review runs under: another App than the one that opens the pull requests (GitHub lets nobody approve their own), with Contents and Pull requests write access. Nothing is reviewed until this is set.",
-      "placeholder": "reviewer"
+      "description": "The github-app the review runs under: another App than the project's (GitHub lets nobody approve their own pull request), with Contents and Pull requests write access. Nothing is reviewed until this is set.",
+      "auth": "github-app"
     },
     {
       "key": "prompt",

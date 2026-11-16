@@ -5,21 +5,19 @@
   "defaultEnabled": false,
   "provides": ["mesh-network"],
   "requires": [],
-  "requiredEnv": ["NB_SETUP_KEY"],
+  "requiredEnv": ["NB_AUTH"],
   "secrets": ["NB_SETUP_KEY"],
   "settings": [
     {
-      "env": "NB_SETUP_KEY",
-      "type": "string",
-      "secret": true,
+      "env": "NB_AUTH",
+      "type": "auth",
+      "auth": "netbird-setup-key",
       "label": "Setup key",
-      "description": "The key the peer enrols with, preferably ephemeral. Never the NetBird PAT. Stored in plain text in this file: keep the file out of git, or export the key in the shell that starts the sandbox instead."
-    },
-    {
-      "env": "NB_MANAGEMENT_URL",
-      "type": "string",
-      "label": "Management URL",
-      "description": "Self-hosted management server. Empty: NetBird Cloud."
+      "description": "The netbird-setup-key the peer enrols with (preferably ephemeral; never the NetBird PAT), and the management server it belongs to.",
+      "fills": {
+        "key": "NB_SETUP_KEY",
+        "managementUrl": "NB_MANAGEMENT_URL"
+      }
     },
     {
       "env": "NB_HOSTNAME",

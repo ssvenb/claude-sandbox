@@ -40,6 +40,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # src: the orchestrator's auth.py
+from orchestrator import Die, auth  # noqa: E402
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent  # the checkout
 HOLDER = HERE / "holder.py"
@@ -690,7 +693,32 @@ def _manifest(path):
         found = json.loads(path.read_text())
     except (OSError, ValueError):
         return None
-    return found if isinstance(found, dict) else None
+    if not isinstance(found, dict):
+        return None
+    try:
+        entries = auth.load(os.environ)
+        problem = ""
+    except Die as e:
+        entries, problem = {}, str(e)
+    found["settings"] = [offered(s, entries, problem) for s in found.get("settings") or [] if isinstance(s, dict)]
+    return found
+
+
+def offered(spec, entries, problem=""):
+    """A setting as the page draws and the server checks it: one of type "auth" becomes the choice
+    of the configured authentications of its type(s) — names only, never what they hold."""
+    if spec.get("type") == "auth":
+        types = [spec.get("auth")] if isinstance(spec.get("auth"), str) else list(spec.get("auth") or [])
+        choices = sorted(n for n, e in entries.items() if e.get("type") in types)
+        note = problem or ("" if choices else f"None of type {' or '.join(types)} in {auth.auth_file(os.environ)} yet.")
+        return {**{k: v for k, v in spec.items() if k not in ("auth", "fills")}, "type": "enum", "choices": choices,
+                "authTypes": types,
+                "description": " ".join(filter(None, [spec.get("description"), note]))}
+    if isinstance(spec.get("items"), dict):
+        spec = {**spec, "items": offered(spec["items"], entries, problem)}
+    if isinstance(spec.get("fields"), list):
+        spec = {**spec, "fields": [offered(f, entries, problem) for f in spec["fields"]]}
+    return spec
 
 
 def plugin_manifests():
@@ -780,6 +808,9 @@ def check_setting(spec, value, where, in_env=False):
     kind = spec.get("type", "string")
     if value is None:
         raise ValueError(f"{where} must not be null: leave it out instead")
+    if spec.get("authTypes") and value not in spec.get("choices", []):  # an authentication (offered())
+        raise ValueError(f"{where}: no {' or '.join(spec['authTypes'])} called '{value}' in "
+                         f"{auth.auth_file(os.environ)} (there: {', '.join(spec['choices']) or 'none'})")
     if in_env:
         text = str(value).lower() if isinstance(value, bool) else str(value)
         if kind == "boolean" and text not in ("0", "1", "true", "false"):

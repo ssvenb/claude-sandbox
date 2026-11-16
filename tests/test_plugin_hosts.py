@@ -826,3 +826,28 @@ echo "[{\\"number\\": 1, \\"title\\": \\"${GH_TOKEN:-active}\\", \\"url\\": \\"u
     assert described("github-auth", GH_USERNAME="alice")["lists"][0]["items"][0]["title"] == "tok-alice"
     said = described("github-auth", GH_USERNAME="bob")  # not logged in on this host
     assert said["lists"] == [] and said["notes"] == ["gh is not logged in as bob on github.com (gh auth login)"]
+
+
+def test_github_lists_with_the_projects_app_token_minted_once(sb, described):
+    """With a github-app the host needs no gh login: the page asks as the App, with a token kept
+    40 minutes in a directory only this user can read."""
+    subprocess.run(["git", "init", "-q", sb.cwd], check=True)
+    subprocess.run(["git", "-C", sb.cwd, "remote", "add", "origin", "https://github.com/o/r"], check=True)
+    plugins = sb.tmp / "plugins"
+    shutil.copytree(REPO / "plugins/github-auth", plugins / "github-auth")
+    mint = plugins / "github-auth/host/mint-gh-token.py"
+    mints = sb.tmp / "mints"
+    mint.write_text(f'#!/bin/sh\necho "$GH_APP_ID $GH_PRIVATE_KEY_FILE $REPO_URL" >>"{mints}"\necho ghs-app\n')
+    sb.stub("gh", """[ "$1 $2" = "auth token" ] && exit 1
+echo "[{\\"number\\": 1, \\"title\\": \\"${GH_TOKEN:-none}\\", \\"url\\": \\"u\\"}]"
+""")
+    app = {"PLUGIN_ROOT": plugins, "GH_APP_ID": 7, "GH_PRIVATE_KEY_FILE": "/k.pem", "GH_USERNAME": "alice"}
+    for _ in range(2):
+        assert described("github-auth", **app)["lists"][0]["items"][0]["title"] == "ghs-app"
+    assert mints.read_text() == "7 /k.pem https://github.com/o/r\n"  # the second page used the kept one
+    [kept] = (sb.home / ".cache/claude-sandbox/github-auth").iterdir()
+    assert kept.stat().st_mode & 0o077 == 0 and kept.parent.stat().st_mode & 0o077 == 0
+
+    mint.write_text('#!/bin/sh\necho "mint-gh-token: HTTP 401" >&2\nexit 1\n')
+    said = described("github-auth", **{**app, "GH_APP_ID": 8})  # another App: not the kept token
+    assert said["lists"] == [] and said["notes"] == ["mint-gh-token: HTTP 401"]

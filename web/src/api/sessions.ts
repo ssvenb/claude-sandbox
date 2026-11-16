@@ -34,6 +34,6 @@ export const sendInput = (id: string, data: string) => fetch(session(id) + '/inp
 export const resizeTerminal = (id: string, cols: number, rows: number) =>
   fetch(`${session(id)}/resize?cols=${cols}&rows=${rows}`, { method: 'POST' });
 
-// A project's settings, its .claude-sandbox.json.
+// A project's settings, its ~/.config/claude-sandbox/projects/<name>.json.
 export const getConfig = (path: string) => api<ProjectConfig>('/api/config?' + project(path));
 export const saveConfig = (path: string, config: JsonObject) => post<ProjectConfig>('/api/config', { project: path, config });

@@ -1,7 +1,8 @@
 """run.sh: build and launch a coding-agent sandbox container. Runs on YOUR machine, where the
 long-lived credentials stay; the container only ever receives what the agent and the enabled
-plugins hand it. Configuration is project-specific: it comes from the repo you launch from (its
-.claude-sandbox.json — see config.py), never from the sandbox's own directory.
+plugins hand it. Configuration is project-specific: `--project <name>` reads the project's file,
+~/.config/claude-sandbox/projects/<name>.json, which names its repo (see config.py); without it the
+directory you launch from is the repo, unconfigured. Never the sandbox's own directory.
 """
 from __future__ import annotations
 
@@ -17,11 +18,11 @@ import sys
 from . import SANDBOX, Die, say
 from .agents import resolve_agent, resolve_version
 from .auth import apply_auth, auth_file
-from .config import STARTED_BY, apply_settings, load_project
+from .config import STARTED_BY, apply_settings, load_project, repo_dir, project_file
 from .plugins import discover, plugin_root, resolve, validate
 from .stage import Stage, StageFailed, environ
 
-USAGE = ("Usage: {} [--resume <RUN_ID> | --run-id <RUN_ID> | --web | --web-action <PLUGIN> <ACTION> <ARG>] "
+USAGE = ("Usage: {} [--project NAME] [--resume <RUN_ID> | --run-id <RUN_ID> | --web | --web-action <PLUGIN> <ACTION> <ARG>] "
          "[--task TEXT] [--chat] [--set NAME=VALUE]…   (RUN_ID is 6 hex chars)")
 
 
@@ -32,7 +33,7 @@ class Usage(Exception):
 
 
 def parse(argv: list[str]) -> dict:
-    opts = {"resume": False, "web": None, "action": None, "task": "", "chat": False, "run_id": None, "set": {}}
+    opts = {"resume": False, "web": None, "action": None, "task": "", "chat": False, "run_id": None, "set": {}, "project": None}
     i = 0
     while i < len(argv):
         arg = argv[i]
@@ -53,6 +54,12 @@ def parse(argv: list[str]) -> dict:
                 raise Usage("--web-action needs a plugin, an action and its argument.")
             opts["web"], opts["action"] = "action", argv[i + 1:i + 4]
             i += 4
+        # Which project: ~/.config/claude-sandbox/projects/<NAME>.json, its settings and its repo.
+        elif arg == "--project":
+            opts["project"] = argv[i + 1] if i + 1 < len(argv) else ""
+            i += 2
+            if not opts["project"]:
+                raise Usage("--project needs the project's name.")
         # The agent's first message, so it starts working without anyone typing (Resolve).
         elif arg == "--task":
             opts["task"] = argv[i + 1] if i + 1 < len(argv) else ""
@@ -88,9 +95,11 @@ def parse(argv: list[str]) -> dict:
 
 def run(opts: dict) -> int:
     env = dict(os.environ)
-    # The directory you launched from is the repo the agent works on — plugins read it as
-    # $HOST_CWD, never as $PWD.
+    # The repo the agent works on: the project's, or the directory you launched from — plugins read
+    # it as $HOST_CWD, never as $PWD.
     env["HOST_CWD"] = os.getcwd()
+    if opts["project"]:
+        env["PROJECT_CONFIG_FILE"] = str(project_file(env, opts["project"]))
     os.chdir(SANDBOX)
     # One id and date key the run; --resume and --run-id bring their own. 6 lowercase hex chars,
     # DNS-safe. Both are core, so any plugin's host stage can name its per-run artifacts the same way.
@@ -103,6 +112,8 @@ def run(opts: dict) -> int:
     # The worked-on repo's own file is applied before anything reads a setting, so even AGENT and the
     # plugin mix are per-project.
     project = load_project(env)
+    if opts["project"]:
+        env["HOST_CWD"] = project.cwd = repo_dir(env, opts["project"], project.config.get("repo"))
     env.pop(STARTED_BY, None)  # only --set says which plugin started this run
     if project.config is not None:
         say(f"📄 Project config: {project.config_file}", file=out)

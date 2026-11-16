@@ -3,7 +3,7 @@
 # in — the folder open on the host is the repo the agent works on.
 
 git -C "$HOST_CWD" rev-parse --git-dir >/dev/null 2>&1 ||
-  die "git-workspace: $HOST_CWD is not a git repository (run ./run.sh from the repo to work on)"
+  die "git-workspace: $HOST_CWD is not a git repository (set the project's \"repo\" to one)"
 
 REPO_URL=$(git -C "$HOST_CWD" remote get-url origin 2>/dev/null) ||
   die "git-workspace: $HOST_CWD has no 'origin' remote to clone from"
@@ -24,12 +24,12 @@ if [ -z "${BASE_BRANCH:-}" ]; then
 fi
 
 git -C "$HOST_CWD" rev-parse --verify --quiet "refs/remotes/origin/$BASE_BRANCH" >/dev/null ||
-  die "git-workspace: origin has no branch '$BASE_BRANCH' to cut from (set BASE_BRANCH in .claude-sandbox.json, or run 'git fetch origin')"
+  die "git-workspace: origin has no branch '$BASE_BRANCH' to cut from (set BASE_BRANCH in the project's file, or run 'git fetch origin')"
 
 pass_value BASE_BRANCH "$BASE_BRANCH"
 
 # The branch name's leading segment belongs to the repo being worked on, so it is read from there:
-# its .claude-sandbox.json first, then the environment. With neither the agent stage falls back
+# the project's file first, then the environment. With neither the agent stage falls back
 # to the agent manifest's branchPrefix, then the agent's directory name.
 BRANCH_PREFIX=$(plugin_config '.branchPrefix' "${BRANCH_PREFIX:-}")
 if [ -n "$BRANCH_PREFIX" ]; then

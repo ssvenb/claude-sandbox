@@ -2,11 +2,12 @@
 # Per-project configuration, as plugins read it. Sourced by src/contract/host/stage.sh (bash, on YOUR
 # machine); the file itself is loaded and checked by src/orchestrator/config.py.
 #
-# Settings that belong to the repo the agent works on — which upstreams to proxy, which bucket to
-# hand over — live in one JSON file next to that checkout, so .env stays about the sandbox itself:
+# Settings that belong to the project the agent works on — its repo, which upstreams to proxy,
+# which bucket to hand over — live in one JSON file per project (`run.sh --project my-app`):
 #
-#   .claude-sandbox.json
+#   ~/.config/claude-sandbox/projects/my-app.json
 #   {
+#     "repo": "~/code/my-app",
 #     "env": { "AGENT": "copilot", "ENABLE_GIT_WORKSPACE": 0 },
 #     "plugins": {
 #       "upstream-proxy": { "routes": [ ... ] },
@@ -17,7 +18,7 @@
 # The file and every key in it are optional. Nothing here is passed to the container — a plugin
 # decides what, if anything, crosses over.
 
-PROJECT_CONFIG_FILE="${PROJECT_CONFIG_FILE:-${HOST_CWD:-$PWD}/.claude-sandbox.json}"
+PROJECT_CONFIG_FILE="${PROJECT_CONFIG_FILE:-}"
 # Whole file, compact, or empty when there is none: loaded and checked by src/orchestrator/config.py, which
 # hands it to the stage in the environment.
 PROJECT_CONFIG_JSON="${PROJECT_CONFIG_JSON:-}"

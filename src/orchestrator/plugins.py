@@ -99,12 +99,12 @@ def validate(enabled: list[Plugin], everything: list[Plugin], env: dict) -> None
         for other in p.conflicts:
             if other in names:
                 raise Die(f"Plugins '{p.name}' and '{other}' cannot be enabled together. Disable one of them "
-                          "in the project's .claude-sandbox.json.")
+                          "in the project's file.")
     provided = set()
     for p in enabled:
         for var in p.required_env:
             if not env.get(var):
-                raise Die(f"Plugin '{p.name}' requires {var} to be set in the project's .claude-sandbox.json")
+                raise Die(f"Plugin '{p.name}' requires {var} to be set in the project's file")
         provided.update(p.provides)
     for p in enabled:
         for cap in p.requires:

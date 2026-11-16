@@ -16,19 +16,20 @@ token — and each run works on its own
 ```bash
 ./install.sh              # once: checks the host, creates the uv environment, builds the web UI,
                           # links `claude-sandbox` and `claude-sandbox-web` into ~/.local/bin
-# configuration is per-project: the repo you work on carries a .claude-sandbox.json (optional;
-# .env.example lists every setting, the web UI's gear edits the file). No .env is read.
-cd ~/code/my-repo
-echo '{"env": {"GH_AUTH": "coder"}}' > .claude-sandbox.json   # see "Authentications"
-claude-sandbox                  # build + fresh run (generates a RUN_ID); the same as <checkout>/run.sh
-claude-sandbox --resume a1b2c3  # re-attach to an existing run: its branch and its conversation
+# a project is a file: ~/.config/claude-sandbox/projects/<name>.json, its repo (a git URL or a
+# path on this machine) and its settings (.env.example lists them, the web UI's gear edits the
+# file). No .env is read.
+echo '{"repo": "https://github.com/me/my-repo", "env": {"GH_AUTH": "coder"}}' \
+  > ~/.config/claude-sandbox/projects/my-repo.json   # see "Authentications"
+claude-sandbox --project my-repo                   # build + fresh run (generates a RUN_ID); the same as <checkout>/run.sh
+claude-sandbox --project my-repo --resume a1b2c3   # re-attach to an existing run: its branch and its conversation
 ```
 
 The host needs Docker, `git`, `jq` and [uv](https://docs.astral.sh/uv/) (which brings Python),
 plus Node 20.19+ to build the web UI. `./install.sh` checks for each, offers to install what your
 package manager has (`--yes`: without asking) and uv itself, and is safe to run again;
-`--no-web` sets up `run.sh` alone, `--dev` adds the test tools, `--project DIR` lists a project on
-the dashboard, `--bind HOST` has the systemd service listen on HOST (a VPN name, say) rather than
+`--no-web` sets up `run.sh` alone, `--dev` adds the test tools, `--project DIR` configures DIR as a
+project (`<its name>.json`, unless there is one), `--bind HOST` has the systemd service listen on HOST (a VPN name, say) rather than
 loopback. `run.sh` builds the image itself (tagged `claude-agent:$AGENT`), so
 a manual `docker build -t claude-agent:claude --build-arg AGENT=claude .` is only needed if you
 want to build without running.
@@ -36,11 +37,14 @@ want to build without running.
 ## Web UI
 
 ```bash
-./install.sh --project ~/code/my-repo --project ~/code/other-repo   # builds the UI, lists the projects
-claude-sandbox-web        # http://127.0.0.1:8787  (--port N, --projects FILE, --allow-host NAME)
+./install.sh --project ~/code/my-repo --project ~/code/other-repo   # builds the UI, configures the projects
+claude-sandbox-web        # http://127.0.0.1:8787  (--port N, --projects DIR, --allow-host NAME)
 ```
 
-The projects are lines of `~/.config/claude-sandbox/projects`; `claude-sandbox-web` is
+The projects are the `<name>.json` files in `~/.config/claude-sandbox/projects`. (A list of
+directories there, as it used to be, becomes a file per project — each directory as its `repo`,
+with the `.claude-sandbox.json` it held — the first time it is read; the list is kept as
+`projects.old`.) `claude-sandbox-web` is
 `src/server/serve.sh`, the server (`src/server/server.py`) in the uv environment.
 
 The home page is a dashboard of all your sandboxes. On top is a box to start a session by writing
@@ -50,10 +54,10 @@ answer first; each says what it was asked and what it is doing right now, with i
 its ports and, top right, its stop button); with nothing running that side is not there, and the
 projects take the width. On the right is every listed **project** with what its plugins list (its
 issues), its ended sessions at the foot of its panel, a **+** button for a
-new session (`run.sh --chat` in that directory) and a terminal
+new session (`run.sh --project <name> --chat`) and a terminal
 button (**>_**) for a shell on this machine in the project — one per project, its tab brought to
 the front when it is already open. The gear button opens the project's settings, saved to its
-`.claude-sandbox.json`: a form drawn from what the sandbox, each agent and each plugin declare (see
+file (its repo among them): a form drawn from what the sandbox, each agent and each plugin declare (see
 [Declaring settings](#declaring-settings)) — a switch per plugin, and per setting a toggle, text
 field, number field, dropdown, list or name/value editor, with its default shown and a **reset**
 that unsets it again. A filter narrows the form; the **JSON** view edits the whole file. The server
@@ -224,7 +228,7 @@ The email defaults to `<agent>@sandbox.local`. An optional `userEmail` replaces 
 credits a commit to whichever account has registered its email, so never use an address you
 don't control: `claude-code@anthropic.com` showed a stranger's account as the author of every
 commit. The worked-on repo overrides the prefix with `.plugins["git-workspace"].branchPrefix`
-in its `.claude-sandbox.json`.
+in its project file.
 
 An optional `settings` list declares the agent's own variables (`CLAUDE_EFFORT`, its token) for
 the web UI's settings form, as a plugin's do: see [Declaring settings](#declaring-settings).
@@ -240,7 +244,7 @@ pass_env CLAUDE_CODE_OAUTH_TOKEN
 
 ## Plugins
 
-All plugins ship in the image; a project's `.claude-sandbox.json` decides which ones run
+All plugins ship in the image; a project's file decides which ones run
 (`.plugins["<name>"].enabled`, or an `ENABLE_<NAME>` flag in its `env` block). The flag
 name uppercases the directory name and turns `-` into `_` (`github-auth` → `ENABLE_GITHUB_AUTH`);
 an unset flag falls back to the manifest's `defaultEnabled`. Accepted values are
@@ -330,7 +334,7 @@ built, so misconfiguration fails fast and cheaply.
 
 ### Declaring settings
 
-Every setting a project can make in its `.claude-sandbox.json` is declared by its owner — a plugin
+Every setting a project can make in its file is declared by its owner — a plugin
 in its `plugin.json`, an agent in its `agent.json`, the sandbox itself in
 [src/orchestrator/kernel.json](src/orchestrator/kernel.json) — as a `settings` list. The web UI draws its settings form from
 these, and `src/server/server.py` checks values against them before it writes the file.
@@ -395,7 +399,7 @@ Available context:
 | `$PLUGIN_NAME` | this plugin's directory name |
 | `$PLUGIN_DIR` | absolute path to `plugins/<name>` on the host |
 | `$ENABLED_PLUGINS` | space-separated, priority-ordered list of enabled plugins |
-| sandbox-owned settings | exported by `run.sh` from the worked-on repo's `.claude-sandbox.json` (and your shell) |
+| sandbox-owned settings | exported by `run.sh` from the project's file (and your shell) |
 
 Available helpers:
 
@@ -497,19 +501,20 @@ agent-workspace opens its checkout in VS Code (`web_server`).
 web_tie_items 'if (.branch // "") | test("^.+/[0-9]{8}-[0-9a-f]{6}$") then .branch[-6:] else null end'
 ```
 
-### Project configuration — `.claude-sandbox.json`
+### Project configuration — `~/.config/claude-sandbox/projects/<name>.json`
 
 The sandbox's own directory holds no configuration, and no `.env` is read — neither the
-sandbox's nor the worked-on repo's: `.claude-sandbox.json` is the one place a project's settings
-are made (its `env` block for the variables [.env.example](.env.example) lists, a section per
-plugin for the rest), over what your shell exports. Settings that
-belong to the *repo the agent works on* — which
-upstreams to proxy, which hosts a key is for — live in an optional `.claude-sandbox.json` in the
-directory you launched `run.sh` from (`$HOST_CWD`), so a checkout can carry its own sandbox
-configuration. `PROJECT_CONFIG_FILE` points somewhere else.
+sandbox's nor the worked-on repo's: a project's file is the one place its settings are made (its
+`env` block for the variables [.env.example](.env.example) lists, a section per plugin for the
+rest), over what your shell exports. The file's name is the project's (`run.sh --project
+<name>`), and its `repo` the repo the agent works on: a path on this machine, or a git URL, cloned
+into `~/.cache/claude-sandbox/repos/<name>` on the first run and fetched on every one after. Plugins
+see that checkout as `$HOST_CWD`. Without `--project`, `run.sh` works on the directory it was
+started in, with no project file (`PROJECT_CONFIG_FILE` names one).
 
 ```json
 {
+  "repo": "https://github.com/me/my-repo",
   "plugins": {
     "upstream-proxy": {
       "routes": [ { "name": "azure-openai", "port": 8082, "upstream": "${AZURE_OPENAI_ENDPOINT}",
@@ -616,7 +621,7 @@ effect only once no sandbox of the project is running; a named credential is rea
 
 The `ports` plugin (on by default). Each sandbox has a network namespace of its own, so two sessions
 can both run a server on `:3000`. Which ports a sandbox opens is a setting, `PORTS`: a
-space-separated list, usually kept with the project in `.claude-sandbox.json` (the gear on the
+space-separated list, usually kept in the project's file (the gear on the
 dashboard edits its `env` block):
 
 ```json
@@ -825,14 +830,14 @@ Everything else under the plugin directory is 444 with 555 directories.
 ## Environment variables
 
 Every variable must have an entry in `.env.example`, which doubles as the allowlist of
-sandbox-owned names. Configuration is per-project: it lives in the worked-on repo's
-`.claude-sandbox.json` (these variables in its `env` block), never in a `.env` and never in the sandbox's own directory. Only `AGENT` belongs to the core; the rest are owned by an agent or a plugin and
+sandbox-owned names. Configuration is per-project: it lives in the project's
+file (these variables in its `env` block), never in a `.env` and never in the sandbox's own directory. Only `AGENT` belongs to the core; the rest are owned by an agent or a plugin and
 only required while that agent or plugin is in use.
 
 | Variable | Owner | Purpose |
 |----------|-------|---------|
 | `AGENT` | core | Which agent runs: a directory name under `agents/` (default `claude`) |
-| `PROJECT_CONFIG_FILE` | core | Per-project plugin configuration (default `$HOST_CWD/.claude-sandbox.json`; optional) |
+| `PROJECT_CONFIG_FILE` | core | The project's file; `--project <name>` sets it to `~/.config/claude-sandbox/projects/<name>.json` (optional) |
 | `SANDBOX_AUTH_FILE` | core | Your named authentications (default `~/.config/claude-sandbox/auth.json`), see [Authentications](#authentications--configclaude-sandboxauthjson); shell only |
 | `SANDBOX_WEB_BIND` / `SANDBOX_WEB_NAME` | core | Set by the web UI for every `run.sh` it starts: the address it listens on, and the host name its `--bind` gave for it (plugins that publish what a session serves default to it) |
 | `PORTS` | ports | Space-separated ports a sandbox opens: published on the host, and shown on the dashboard, while something in it listens on them (default: none) |
@@ -844,7 +849,7 @@ only required while that agent or plugin is in use.
 | `GH_AUTH` | github-auth | Name of the `github-app` authentication the sandbox authenticates as |
 | `BASE_BRANCH` | git-workspace | Branch to cut from (default: the repo's own default branch, via `origin/HEAD`) |
 | `HOST_WORKSPACE_DIR` | cwd-workspace | Host dir mounted at `/workspace` (default: `run.sh`'s cwd) |
-| `BRANCH_PREFIX` | git-workspace | Leading segment of the per-run branch name; `.plugins["git-workspace"].branchPrefix` in the project's `.claude-sandbox.json` wins over it, and with neither it defaults to the agent manifest's `branchPrefix`, else the agent's directory name |
+| `BRANCH_PREFIX` | git-workspace | Leading segment of the per-run branch name; `.plugins["git-workspace"].branchPrefix` in the project's file wins over it, and with neither it defaults to the agent manifest's `branchPrefix`, else the agent's directory name |
 | `AGENT_WORKSPACE_DIR` | agent-workspace | Host dir holding the per-run mirrors of `/workspace`, created if missing (default: `$HOME/.agent-workspaces`; each run uses `<dir>/<project>-<date>-<RUN_ID>`) |
 | `AGENT_WORKSPACE_CLEANUP` | agent-workspace | Delete the run's mirror directory when the container exits; 0 keeps it for inspection, at one leftover directory per run (default: 1) |
 | `CA_CERTS_DIR` | ca-certs | Host dir holding extra root certificates, PEM or DER (default `/usr/local/share/ca-certificates`) |

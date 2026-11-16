@@ -271,3 +271,42 @@ def test_a_web_action_needs_its_plugin_enabled(run_sh):
     done = run_sh("--web-action", "github-auth", "close-pr", "3")  # github-auth is off in BASE
     assert done.returncode == 1 and done.stdout == ""
     assert "Plugin 'github-auth' is not enabled for this project." in done.stderr
+
+
+def test_project_names_its_file_and_the_repo_it_works_on(sb, run_sh):
+    """`--project NAME`: ~/.config/claude-sandbox/projects/NAME.json is its config, and its repo,
+    not the directory run.sh was started in, is the one the agent works on."""
+    listing = sb.home / ".config/claude-sandbox/projects"
+    listing.mkdir(parents=True)
+    repo = sb.tmp / "repo"
+    repo.mkdir()
+    (listing / "app.json").write_text(json.dumps({"repo": str(repo), **BASE}))
+    done = run_sh("--project", "app", config=None, CLAUDE_CODE_OAUTH_TOKEN="t")
+    assert done.returncode == 0, done.stderr
+    [run] = calls(done, "run")
+    assert f"{repo}:/workspace" in run and f"📄 Project config: {listing / 'app.json'}" in done.stdout
+    for name, message in (("nope", "No project 'nope'"), ("../app", "is not a project name")):
+        done = run_sh("--project", name, config=None)
+        assert done.returncode and message in done.stderr
+    (listing / "app.json").write_text(json.dumps(BASE))
+    done = run_sh("--project", "app", config=None)
+    assert done.returncode and "names no repo" in done.stderr
+
+
+def test_a_projects_repo_may_be_a_git_url_cloned_and_fetched_on_this_machine(sb, run_sh):
+    origin = sb.tmp / "origin"
+    git = lambda *a: subprocess.run(["git", *a], check=True, capture_output=True)  # noqa: E731
+    git("init", "-q", "-b", "main", str(origin))
+    git("-C", str(origin), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "one")
+    listing = sb.home / ".config/claude-sandbox/projects"
+    listing.mkdir(parents=True)
+    (listing / "app.json").write_text(json.dumps({"repo": f"file://{origin}", **BASE}))
+    clone = sb.home / ".cache/claude-sandbox/repos/app"
+    for _ in range(2):  # cloned, then fetched
+        done = run_sh("--project", "app", config=None, CLAUDE_CODE_OAUTH_TOKEN="t")
+        assert done.returncode == 0, done.stderr
+        assert f"{clone}:/workspace" in calls(done, "run")[0]
+    git("-C", str(origin), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "two")
+    run_sh("--project", "app", config=None, CLAUDE_CODE_OAUTH_TOKEN="t")
+    assert subprocess.run(["git", "-C", str(clone), "log", "-1", "--format=%s", "origin/main"],
+                          capture_output=True, text=True).stdout.strip() == "two"

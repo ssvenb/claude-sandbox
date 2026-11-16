@@ -5,7 +5,7 @@
 
 CA_CERTS_DIR="${CA_CERTS_DIR:-/usr/local/share/ca-certificates}"
 [ -d "$CA_CERTS_DIR" ] \
-  || die "CA_CERTS_DIR not found: $CA_CERTS_DIR (set it in the project's .claude-sandbox.json, or disable the plugin there)"
+  || die "CA_CERTS_DIR not found: $CA_CERTS_DIR (set it in the project's file, or disable the plugin there)"
 
 # The build needs them as well (curl/apt/npm/pip during `docker build`), as one PEM bundle;
 # DER files are converted here for the same reason root-init.sh does, and anything else is

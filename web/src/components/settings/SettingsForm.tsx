@@ -1,4 +1,4 @@
-// A project's sandbox settings, its .claude-sandbox.json, as a form (SettingsCards) or as the
+// A project's sandbox settings, its file in ~/.config/claude-sandbox/projects, as a form (SettingsCards) or as the
 // whole file in JSON. A setting left unset falls through to your shell, then its
 // default. run.sh reads the file on the project's next session.
 import { useMemo, useReducer, useRef, useState, type FormEvent } from 'react';

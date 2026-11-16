@@ -1,12 +1,13 @@
-"""Per-project configuration: the worked-on repo's .claude-sandbox.json, and the settings it
-layers over your environment.
+"""Per-project configuration: a project's file, ~/.config/claude-sandbox/projects/<name>.json
+(`run.sh --project <name>`), and the settings it layers over your environment.
 
-Configuration is per-project: a checkout carries the way it wants to be sandboxed, and the
-sandbox's own directory contributes nothing. Lowest to highest precedence:
+Configuration is per-project: the file names the repo the agent works on ("repo": a path on this
+machine, or a git URL, cloned to ~/.cache/claude-sandbox/repos/<name>) and how it wants to be
+sandboxed; the sandbox's own directory contributes nothing. Lowest to highest precedence:
 
   1. a plugin manifest's defaultEnabled, and each setting's built-in default
   2. anything already exported in your shell
-  3. the worked-on repo's .claude-sandbox.json — "env" block, and per-plugin "enabled"
+  3. the project's file                     — "env" block, and per-plugin "enabled"
   4. `run.sh --set NAME=VALUE`                — what this one run was started with (by a plugin's
                                                  web_start: a review under another authentication)
 
@@ -14,8 +15,9 @@ The repo's own .env is not read: it is the target repo's, full of its own secret
 sandbox owns — what the "env" block and --set may set — are every key in .env.example, the
 catalogue of them, plus any ENABLE_<PLUGIN> flag.
 
-    .claude-sandbox.json
+    ~/.config/claude-sandbox/projects/my-app.json
     {
+      "repo": "~/code/my-app",
       "env": { "AGENT": "copilot", "ENABLE_GIT_WORKSPACE": 0 },
       "plugins": {
         "upstream-proxy": { "routes": [ ... ] },
@@ -28,12 +30,16 @@ decides what, if anything, crosses over.
 """
 from __future__ import annotations
 
+import glob
 import json
+import os
 import re
+import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import SANDBOX, Die
+from . import SANDBOX, Die, say
 
 _KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _BLANK = " \t\n\v\f\r"  # bash's [[:space:]]
@@ -95,7 +101,7 @@ class Project:
     """What the worked-on repo says about its sandbox."""
     cwd: str
     config_file: str
-    config: dict | None = None             # .claude-sandbox.json, when there is one
+    config: dict | None = None             # the project's file, when there is one
 
     def plugin_setting(self, plugin: str, key: str) -> str:
         """One scalar of a plugin's section, "" when unset — as project_plugin_setting reads it."""
@@ -107,12 +113,11 @@ class Project:
 
 
 def load_project(env: dict) -> Project:
-    """The project's .claude-sandbox.json (PROJECT_CONFIG_FILE), next to its checkout ($HOST_CWD)
-    unless that says otherwise."""
-    cwd = env.get("HOST_CWD") or "."
-    project = Project(cwd, env.get("PROJECT_CONFIG_FILE") or f"{cwd}/.claude-sandbox.json")
+    """The project's file (PROJECT_CONFIG_FILE, which `--project` sets), if any, for the checkout
+    at $HOST_CWD."""
+    project = Project(env.get("HOST_CWD") or ".", env.get("PROJECT_CONFIG_FILE") or "")
     path = Path(project.config_file)
-    if path.is_file():
+    if project.config_file and path.is_file():
         where = f"Project config '{project.config_file}'"
         try:
             config = json.loads(path.read_text())
@@ -127,6 +132,86 @@ def load_project(env: dict) -> Project:
             raise Die(f"{where}: .env must be an object of scalar values.")
         project.config = config
     return project
+
+
+def projects_dir(env: dict) -> Path:
+    """Where the projects' files are: a <name>.json each. A list of directories there (what it
+    used to be) is turned into those files first."""
+    path = Path(env.get("SANDBOX_PROJECTS_DIR") or Path(env.get("HOME") or Path.home()) / ".config/claude-sandbox/projects")
+    if path.is_file():
+        _migrate(path)
+    return path
+
+
+def project_names(directory) -> list[str]:
+    """The configured projects: every <name>.json in the directory."""
+    return sorted(p.stem for p in Path(directory).glob("*.json") if not p.name.startswith(".") and p.is_file())
+
+
+def project_file(env: dict, name: str) -> Path:
+    if not name or "/" in name or name.startswith("."):
+        raise Die(f"'{name}' is not a project name: one is the name of a file in {projects_dir(env)}, without .json")
+    path = projects_dir(env) / f"{name}.json"
+    if not path.is_file():
+        raise Die(f"No project '{name}': there is no {path}")
+    return path
+
+
+_URL = re.compile(r"[a-z][a-z0-9+.-]*://|[\w.-]+@[\w.-]+:")  # https://…, ssh://…, git@github.com:…
+
+
+def repo_dir(env: dict, name: str, repo) -> str:
+    """The project's repo on this machine: its path, or for a git URL a clone of it kept under
+    ~/.cache/claude-sandbox/repos/<name>, fetched afresh."""
+    if not isinstance(repo, str) or not repo.strip():
+        raise Die(f"Project '{name}' names no repo: set \"repo\" in its file to a path on this machine or a git URL.")
+    if not _URL.match(repo):
+        path = Path(repo).expanduser()
+        if not path.is_absolute():
+            raise Die(f"Project '{name}': repo '{repo}' must be an absolute path (or ~/…) or a git URL.")
+        if not path.is_dir():
+            raise Die(f"Project '{name}': repo {path} is not a directory.")
+        return str(path)
+    cache = Path(env.get("XDG_CACHE_HOME") or Path(env.get("HOME") or Path.home()) / ".cache")
+    path = cache / "claude-sandbox/repos" / name
+    git = {"env": {**os.environ, **env, "GIT_TERMINAL_PROMPT": "0"}, "stdout": sys.stderr, "stdin": subprocess.DEVNULL}
+    if not (path / ".git").exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if subprocess.run(["git", "clone", "--quiet", repo, str(path)], **git).returncode:
+            raise Die(f"Project '{name}': could not clone {repo}")
+    else:  # the URL may have changed since the clone; a failed fetch leaves the last one standing
+        subprocess.run(["git", "-C", str(path), "remote", "set-url", "origin", repo], **git)
+        if subprocess.run(["git", "-C", str(path), "fetch", "--quiet", "--prune", "origin"], **git).returncode:
+            say(f"⚠️  Project '{name}': could not fetch {repo}; working from the last fetch", file=sys.stderr)
+    return str(path)
+
+
+def _migrate(listing: Path) -> None:
+    """The list of project directories (one per line, `~/code/*/.git` globs too) turned into a
+    file per project: the directory as its repo, and the .claude-sandbox.json it held, which stays."""
+    dirs = []
+    for line in listing.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        for match in sorted(glob.glob(os.path.expanduser(line))) if glob.has_magic(line) else [os.path.expanduser(line)]:
+            match = Path(match)
+            match = match.parent if match.name == ".git" else match
+            if match.is_dir() and str(match) not in dirs:
+                dirs.append(str(match))
+    listing.rename(listing.with_name(listing.name + ".old"))
+    listing.mkdir()
+    for d in dirs:
+        name, n = Path(d).name, 2
+        while (listing / f"{name}.json").exists():
+            name, n = f"{Path(d).name}-{n}", n + 1
+        try:
+            config = json.loads((Path(d) / ".claude-sandbox.json").read_text())
+        except (OSError, ValueError):
+            config = {}
+        config = config if isinstance(config, dict) else {}
+        (listing / f"{name}.json").write_text(json.dumps({"repo": d, **config}, indent=2) + "\n")
+    say(f"📁 {listing}: a file per project now, {len(dirs)} made from the list (kept as {listing.name}.old)", file=sys.stderr)
 
 
 def sandbox_vars(env: dict) -> set[str]:

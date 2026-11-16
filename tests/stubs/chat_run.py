@@ -25,6 +25,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 args = sys.argv[1:]
+if args[:1] == ["--project"]:  # which project: all the same to the stub
+    args = args[2:]
 
 
 def emit(**event):

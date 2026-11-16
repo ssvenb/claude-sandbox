@@ -9,7 +9,7 @@
 #   --dev           also what the tests need: pytest, Playwright and its Chromium
 #   --no-web        skip the web UI (no Node needed): run.sh alone
 #   --no-launchers  do not link `claude-sandbox` and `claude-sandbox-web` into ~/.local/bin
-#   --project DIR   list DIR on the web UI's dashboard (~/.config/claude-sandbox/projects); repeatable
+#   --project DIR   configure DIR as a project (~/.config/claude-sandbox/projects/<its name>.json); repeatable
 #   --bind HOST     the systemd service listens on HOST (a name or address, e.g. a VPN's) instead of
 #                   loopback; later runs without it keep it. There is no login: bind only a private network
 #
@@ -139,16 +139,18 @@ if [ "$WEB" = 1 ]; then
   (cd "$here/web" && npm ci --no-audit --no-fund && npm run build)
   ok "built: $here/web/dist"
 
-  step "Projects on the dashboard"
-  listing="${XDG_CONFIG_HOME:-$HOME/.config}/claude-sandbox/projects"
-  mkdir -p "$(dirname "$listing")"
-  [ -f "$listing" ] || printf '# One project directory per line; a line may be a glob (~/code/*/.git lists the git checkouts).\n' >"$listing"
+  step "Projects"
+  listing="$HOME/.config/claude-sandbox/projects"
+  # A list of directories there (what it used to be) becomes a file per project.
+  [ ! -f "$listing" ] || "$here/.venv/bin/python" -c 'import sys; sys.path.insert(0, sys.argv[1]); from orchestrator.config import projects_dir; projects_dir({})' "$here/src"
+  mkdir -p "$listing"
   for project in ${PROJECTS[@]+"${PROJECTS[@]}"}; do
     [ -d "$project" ] || die "--project $project: no such directory."
     project=$(cd "$project" && pwd)
-    grep -qxF "$project" "$listing" || printf '%s\n' "$project" >>"$listing"
+    file="$listing/$(basename "$project").json"
+    [ -e "$file" ] || jq -n --arg repo "$project" '{repo: $repo}' >"$file"
   done
-  ok "$listing ($(grep -cvE '^\s*(#|$)' "$listing" || true) listed)"
+  ok "$listing ($(find "$listing" -maxdepth 1 -name '[!.]*.json' | wc -l) configured)"
 fi
 
 if [ "$LAUNCHERS" = 1 ]; then
@@ -214,11 +216,12 @@ UNIT
 fi
 
 step "Done"
-say "  In a repo you want an agent to work on:"
-say "    \$EDITOR .claude-sandbox.json   # its settings; $here/.env.example lists them (the web UI's gear edits it too)"
-say "    claude-sandbox                  # or $here/run.sh"
+say "  A project is a file in ~/.config/claude-sandbox/projects, its name the file's:"
+say "    echo '{\"repo\": \"https://github.com/owner/repo\"}' > ~/.config/claude-sandbox/projects/my-app.json"
+say "    # \"repo\": a git URL or a path on this machine; $here/.env.example lists the settings (the web UI's gear edits them too)"
+say "    claude-sandbox --project my-app # or $here/run.sh --project my-app"
 if [ "$WEB" = 1 ]; then
-  say "  The web UI, for every project listed in ${listing/#$HOME/\~}:"
+  say "  The web UI, for every project in ${listing/#$HOME/\~}:"
   say "    claude-sandbox-web              # http://127.0.0.1:8787"
   [ -z "$BIND" ] || say "  The service: http://$BIND:8787"
 fi

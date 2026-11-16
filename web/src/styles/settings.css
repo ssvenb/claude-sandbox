@@ -1,4 +1,4 @@
-/* A project's sandbox settings (its .claude-sandbox.json), drawn from what the kernel, the
+/* A project's sandbox settings (its file in ~/.config/claude-sandbox/projects), drawn from what the kernel, the
    agents and the plugins declare: one card each, a control per setting. It opens over the dashboard. */
 :where([data-page=dashboard]) {
   dialog { width: min(820px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0;

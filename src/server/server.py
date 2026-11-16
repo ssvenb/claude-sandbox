@@ -4,18 +4,16 @@ whatever their enabled plugins have to show (`run.sh --web`: open pull requests 
 a chat page per session, each in its own tab; a terminal page for a project's shell; and what a
 plugin serves itself (web_server: VS Code in the browser, say), on our origin under /plugins/<name>/.
 
-Runs on the HOST, as you, next to run.sh — a session is `run.sh --chat` with the project as its
-cwd: the agent behind its chat bridge (agents/<name>/chat.mjs), whose events (src/services/chat/chat-bridge.mjs)
+Runs on the HOST, as you, next to run.sh — a session is `run.sh --project <name> --chat`: the agent behind its chat bridge (agents/<name>/chat.mjs), whose events (src/services/chat/chat-bridge.mjs)
 come out of run.sh's stdout and go to the page as server-sent events, while prompts come back as
 POSTs. The page is there from the first moment: what is typed while the sandbox still builds and
 boots waits here and is handed to the agent the moment it is ready. A project's terminal is your
 shell in a pty. Standard library only; the terminal page loads xterm.js from a CDN.
 
-    src/server/server.py [--port 8787] [--bind 127.0.0.1] [--allow-host NAME]... [--projects FILE]
+    src/server/server.py [--port 8787] [--bind 127.0.0.1] [--allow-host NAME]... [--projects DIR]
 
-FILE lists one project directory per line (default ~/.config/claude-sandbox/projects) and is
-re-read on every request. A line may be a glob (`~/code/*`); a match ending in `.git` stands for
-its repo, so `~/code/*/.git` lists only the git checkouts. Sessions outlive this process: each
+DIR holds a <name>.json per project (default ~/.config/claude-sandbox/projects), its settings and
+the repo it works on, and is re-read on every request. Sessions outlive this process: each
 runs under src/server/holder.py, which keeps its output while no server listens, and a server that starts
 takes back the sessions the last one left (STATE), running or ended — a restart cuts nothing off.
 """
@@ -41,7 +39,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # src: the orchestrator's auth.py
-from orchestrator import Die, auth  # noqa: E402
+from orchestrator import Die, auth, config as project_config  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent  # the checkout
@@ -56,7 +54,6 @@ PLUGINS = ROOT / "plugins"
 AGENTS = ROOT / "agents"
 KERNEL = ROOT / "src/orchestrator/kernel.json"  # the settings of the sandbox itself, as plugins declare theirs
 EXAMPLE = ROOT / ".claude-sandbox.example.json"  # what each plugin's section may hold
-CONFIG = ".claude-sandbox.json"  # a project's own sandbox configuration, next to its checkout
 RUN_ID = re.compile(r"[0-9a-f]{6}")
 SCROLLBACK = 256 * 1024  # bytes replayed to a browser that (re)opens a terminal
 KEEPALIVE = 15  # seconds between keepalives on a terminal's stream: how soon a closed tab is let go
@@ -103,34 +100,27 @@ def static(path):
     return file
 
 
-def projects(file):
+def projects(directory):
+    """The configured projects' names, a file each in `directory` (a list there is made into them)."""
+    return project_config.project_names(project_config.projects_dir({"SANDBOX_PROJECTS_DIR": str(directory)}))
+
+
+def config_file(project):
+    return project_config.projects_dir(os.environ) / f"{project}.json"
+
+
+def project_dir(project):
+    """Where a project's repo is on this machine, cloned first if it is a URL's."""
     try:
-        lines = [line.strip() for line in Path(file).read_text().splitlines()]
-    except FileNotFoundError:
-        return []
-    found = []
-    for line in lines:
-        if not line or line.startswith("#"):
-            continue
-        path = str(Path(line).expanduser())
-        if not glob.has_magic(path):
-            found.append(path)
-            continue
-        # A pattern stands for every directory it matches now, so a new checkout shows up on the
-        # next request; a match named .git stands for its repo (`~/code/*/.git`: git repos only).
-        for match in sorted(glob.glob(path)):
-            match = Path(match)
-            if match.name == ".git":
-                found.append(str(match.parent))
-            elif match.is_dir():
-                found.append(str(match))
-    return list(dict.fromkeys(found))  # a project listed twice shows once
+        return project_config.repo_dir(os.environ, project, read_config(project)["config"].get("repo"))
+    except Die as e:
+        raise ValueError(str(e))
 
 
-def command(kind, run_id, task=None, chat=False, sets=None):
+def command(project, kind, run_id, task=None, chat=False, sets=None):
     if kind == "shell":  # the project's terminal: your own shell, on this machine, in the project
         return [os.environ.get("SHELL", "/bin/sh")]
-    return [str(RUN_SH), "--resume" if kind == "resume" else "--run-id", run_id] \
+    return [str(RUN_SH), "--project", project, "--resume" if kind == "resume" else "--run-id", run_id] \
         + (["--task", task] if task else []) + (["--chat"] if chat else []) \
         + [arg for name, value in (sets or {}).items() for arg in ("--set", f"{name}={value}")]
 
@@ -148,18 +138,19 @@ class Session:
         self.sets, self.once = sets or {}, once
         self.started, self.exit = time.time(), None
         self._fresh()
+        cwd = project_dir(project) if kind == "shell" else Path.home()
         self.dir = STATE / self.id
         self.dir.mkdir(parents=True)
         (self.dir / "meta.json").write_text(json.dumps({k: getattr(self, k) for k in (*META, "once")}))
         try:
-            hold(self.dir, self.mode, self.argv(task), project)
+            hold(self.dir, self.mode, self.argv(task), cwd)
             self._attach(0)
         except OSError:
             shutil.rmtree(self.dir, ignore_errors=True)
             raise
 
     def argv(self, task):
-        return command(self.kind, self.run_id, task, False, self.sets)
+        return command(self.project, self.kind, self.run_id, task, False, self.sets)
 
     def _fresh(self):
         """What is not saved: a terminal's screen comes back from its holder."""
@@ -397,7 +388,7 @@ class Chat(Session):
             self.prompt(task or "", images)
 
     def argv(self, task):
-        return command(self.kind, self.run_id, None, True, self.sets)
+        return command(self.project, self.kind, self.run_id, None, True, self.sets)
 
     def _fresh(self):
         self.listeners, self.events = [], []
@@ -624,13 +615,13 @@ class Chat(Session):
 
 
 def describe(project, keep=False):
-    """What the project's enabled plugins have for the page: `run.sh --web`, run in the project
-    like a session would be. The page draws it without knowing which plugin said what. With
+    """What the project's enabled plugins have for the page: `run.sh --web` for the project, as a
+    session would be run. The page draws it without knowing which plugin said what. With
     `keep`, a failure leaves the last description standing instead of replacing it."""
     try:
-        done = subprocess.run([str(RUN_SH), "--web"], cwd=project, capture_output=True, text=True,
-                              timeout=120)
-        if done.returncode:  # run.sh's own complaint, e.g. about the project's .claude-sandbox.json
+        done = subprocess.run([str(RUN_SH), "--web", "--project", project], cwd=Path.home(), capture_output=True,
+                              text=True, timeout=120)
+        if done.returncode:  # run.sh's own complaint, e.g. about the project's file
             raise ValueError(done.stderr.strip().splitlines()[-1] if done.stderr.strip() else "run.sh --web failed")
         found = json.loads(done.stdout)
     except (OSError, ValueError, subprocess.TimeoutExpired) as e:
@@ -759,8 +750,8 @@ def kernel_manifest():
 
 
 def read_config(project):
-    """A project's .claude-sandbox.json: what it holds now ({} without one), and where it is."""
-    path = Path(project) / CONFIG
+    """A project's file: what it holds now ({} without one), and where it is."""
+    path = config_file(project)
     try:
         config = json.loads(path.read_text())
     except FileNotFoundError:
@@ -777,6 +768,8 @@ def check_config(config):
     """What run.sh would refuse, refused before it lands in the file (it reads the rest itself)."""
     if not isinstance(config, dict):
         raise ValueError("the configuration must be a JSON object")
+    if not isinstance(config.get("repo"), str) or not config["repo"].strip():
+        raise ValueError(".repo must name the project's repo: a path on this machine or a git URL")
     plugins = config.get("plugins", {})
     if not isinstance(plugins, dict):
         raise ValueError(".plugins must be an object keyed by plugin name")
@@ -872,10 +865,10 @@ def shown(field, siblings, fields):
 
 
 def write_config(project, config):
-    """Replaces the project's .claude-sandbox.json in one step, so run.sh never reads half a file."""
+    """Replaces the project's file in one step, so run.sh never reads half a file."""
     check_config(config)
-    path = Path(project) / CONFIG
-    fd, tmp = tempfile.mkstemp(dir=project, prefix=f".{CONFIG}.")
+    path = config_file(project)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(config, f, indent=2)
@@ -917,8 +910,8 @@ def tidy(s, urls, offered):
         if item.get("url") not in urls:
             continue
         try:
-            done = subprocess.run([str(RUN_SH), "--web-action", str(act["plugin"]), str(act["action"]),
-                                   str(act.get("arg", ""))], cwd=s.project, capture_output=True,
+            done = subprocess.run([str(RUN_SH), "--project", s.project, "--web-action", str(act["plugin"]),
+                                   str(act["action"]), str(act.get("arg", ""))], cwd=Path.home(), capture_output=True,
                                   text=True, timeout=120)
             if done.returncode:
                 said = done.stderr.strip()
@@ -1410,6 +1403,7 @@ def serve(port, projects_file, bind="127.0.0.1", allow_hosts=()):
     port = server.server_address[1]
     server.hosts = local_names(bind) | set(allow_hosts)
     server.projects_file = projects_file
+    os.environ["SANDBOX_PROJECTS_DIR"] = str(projects_file)  # for read_config, and every run.sh it starts
     server.bind = bind
     return server
 
@@ -1423,7 +1417,7 @@ if __name__ == "__main__":
                         help="another name the page may be opened by, e.g. a VPN's DNS name (repeatable)")
     parser.add_argument("--projects", type=Path,
                         default=Path.home() / ".config/claude-sandbox/projects",
-                        help="file listing one project directory per line (default: %(default)s)")
+                        help="directory with a <name>.json per project (default: %(default)s)")
     args = parser.parse_args()
     # For every run.sh this starts, sessions and --web alike.
     os.environ["SANDBOX_WEB_BIND"] = web_bind(args.bind)

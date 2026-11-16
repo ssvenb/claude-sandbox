@@ -69,7 +69,8 @@ def board(tmp_path, browser, ui_dist):
     project.mkdir()
     checkout = tmp_path / f"mirrors/proj-20261112-{RUN}"
     checkout.mkdir(parents=True)
-    (tmp_path / "projects").write_text(f"{project}\n")
+    (tmp_path / "projects").mkdir()
+    (tmp_path / "projects/proj.json").write_text(json.dumps({"repo": str(project)}))
     proc = subprocess.Popen([sandbox / "src/server/server.py", "--port", "0", "--projects", tmp_path / "projects"],
                             stdout=subprocess.PIPE, text=True,
                             env={"PATH": f"{tmp_path}/bin:/usr/bin:/bin", "HOME": str(tmp_path),
@@ -115,7 +116,7 @@ def board(tmp_path, browser, ui_dist):
     def resume():
         """A session of RUN, the way the PR's Resume button starts one."""
         req = urllib.request.Request(base + "/api/sessions", json.dumps(
-            {"project": str(project), "kind": "resume", "run_id": RUN}).encode())
+            {"project": "proj", "kind": "resume", "run_id": RUN}).encode())
         s = json.load(urllib.request.urlopen(req))
         page.wait_for_selector(".window")
         return s
@@ -784,7 +785,7 @@ def test_ctrl_v_pastes(board, keys):
     term.wait_for_selector("text=pasted-5", timeout=5000)
 
 
-def test_the_gear_configures_the_projects_plugins_in_its_claude_sandbox_json(board):
+def test_the_gear_configures_the_projects_plugins_in_its_file(board):
     """Every declared setting gets a control of its type; what the form has none for is kept. An
     authentication is picked from those configured of its type, by name."""
     auth = board.project.parent / ".config/claude-sandbox/auth.json"  # the server's HOME is the test's
@@ -792,12 +793,13 @@ def test_the_gear_configures_the_projects_plugins_in_its_claude_sandbox_json(boa
     auth.write_text(json.dumps({"coder": {"type": "github-app"}, "reviewer": {"type": "github-app"},
                                 "openai": {"type": "api-key", "key": "never-shown"}, "gcs": {"type": "gcp-service-account"}}))
     auth.chmod(0o600)
-    file = board.project / ".claude-sandbox.json"
-    file.write_text(json.dumps({"env": {"CLAUDE_EFFORT": "high", "GH_AUTH": "coder"},
+    file = board.project.parent / "projects/proj.json"
+    file.write_text(json.dumps({"repo": str(board.project), "env": {"CLAUDE_EFFORT": "high", "GH_AUTH": "coder"},
                                 "plugins": {"git-workspace": {"branchPrefix": "bot", "extra": 1}, "retired": {"x": 1}}}))
     board.click("button[aria-label='Settings']")
     board.wait_for_selector("dialog[open] b:has-text('docker-cli')")
     assert board.input_value("input[name='plugins.git-workspace.branchPrefix']") == "bot"
+    assert board.input_value("input[name='repo']") == str(board.project)  # the repo it works on
     options = lambda sel: board.eval_on_selector_all(sel + " option", "os => os.map(o => o.value)")  # noqa: E731
     assert board.input_value("select[name='env.GH_AUTH']") == "coder"
     assert options("select[name='env.GH_AUTH']") == ["", "coder", "reviewer"]  # github-apps only
@@ -841,7 +843,7 @@ def test_the_gear_configures_the_projects_plugins_in_its_claude_sandbox_json(boa
     board.click("dialog button[type=submit]")
     board.wait_for_selector("dialog[open]", state="detached")
     assert json.loads(file.read_text()) == {
-        "env": {"CLAUDE_EFFORT": "max"},
+        "repo": str(board.project), "env": {"CLAUDE_EFFORT": "max"},
         "plugins": {"git-workspace": {"branchPrefix": "bot", "extra": 1}, "retired": {"x": 1},
                     "docker-cli": {"enabled": False}, "kvm": {"enabled": True, "briefing": "VMs in /data"},
                     "project-deps": {"apt": ["ripgrep"]},

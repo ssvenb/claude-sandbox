@@ -56,12 +56,22 @@ def ui_dist():
     return build_ui()
 
 
+def configured(tmp_path, monkeypatch, name="proj", repo=None):
+    """A projects directory holding <name>.json, its repo `repo` (else tmp_path), for this test."""
+    listing = tmp_path / "projects"
+    listing.mkdir(exist_ok=True)
+    (listing / f"{name}.json").write_text(json.dumps({"repo": str(repo or tmp_path)}))
+    monkeypatch.setenv("SANDBOX_PROJECTS_DIR", str(listing))
+    return listing
+
+
 @pytest.fixture
 def ui(tmp_path, ui_dist):
     project = tmp_path / "proj"
     project.mkdir()
     listing = tmp_path / "projects"
-    listing.write_text(f"# comment\n\n{project}\n")
+    listing.mkdir()
+    (listing / "proj.json").write_text(json.dumps({"repo": str(project)}))
     proc = subprocess.Popen([REPO / "src/server/server.py", "--port", "0", "--projects", listing,
                              ], stdout=subprocess.PIPE, text=True,
                             env={"PATH": f"{tmp_path}/bin:/usr/bin:/bin", "SHELL": "/bin/sh", "HOME": str(tmp_path)})
@@ -73,7 +83,7 @@ def ui(tmp_path, ui_dist):
             return urllib.request.urlopen(req, timeout=10)
         except urllib.error.HTTPError as e:
             return e
-    call.project, call.tmp = str(project), tmp_path
+    call.project, call.tmp = "proj", tmp_path
     yield call
     for s in json.load(call("/api/state"))["sessions"]:  # they would outlive the server
         call(f"/api/sessions/{s['id']}/delete", b"")
@@ -131,12 +141,12 @@ def test_requests_that_must_not_start_anything(ui, body, headers, status):
 
 
 def test_sandbox_sessions_run_run_sh_under_an_id_the_ui_knows():
-    assert web.command("run", "0a1b2c") == [str(REPO / "run.sh"), "--run-id", "0a1b2c"]
-    assert web.command("resume", "0a1b2c") == [str(REPO / "run.sh"), "--resume", "0a1b2c"]
-    assert web.command("run", "0a1b2c", "Fix #7") == [str(REPO / "run.sh"), "--run-id", "0a1b2c",
-                                                       "--task", "Fix #7"]
-    assert web.command("resume", "0a1b2c", None, True) == [str(REPO / "run.sh"), "--resume", "0a1b2c", "--chat"]
-    assert web.command("run", "0a1b2c", None, True, {"GH_AUTH": "reviewer"})[-3:] == ["--chat", "--set", "GH_AUTH=reviewer"]
+    run = [str(REPO / "run.sh"), "--project", "app"]
+    assert web.command("app", "run", "0a1b2c") == [*run, "--run-id", "0a1b2c"]
+    assert web.command("app", "resume", "0a1b2c") == [*run, "--resume", "0a1b2c"]
+    assert web.command("app", "run", "0a1b2c", "Fix #7") == [*run, "--run-id", "0a1b2c", "--task", "Fix #7"]
+    assert web.command("app", "resume", "0a1b2c", None, True) == [*run, "--resume", "0a1b2c", "--chat"]
+    assert web.command("app", "run", "0a1b2c", None, True, {"GH_AUTH": "reviewer"})[-3:] == ["--chat", "--set", "GH_AUTH=reviewer"]
     with pytest.raises(ValueError, match="ui must be chat or terminal"):
         web.start("/p", "run", None, None, "tui")
     for kind, run_id, task in (("shell", None, "x"), ("resume", "0a1b2c", "x"), ("run", None, 7),
@@ -145,19 +155,31 @@ def test_sandbox_sessions_run_run_sh_under_an_id_the_ui_knows():
             web.start("/p", kind, run_id, task)
 
 
-def test_a_projects_line_may_be_a_glob(tmp_path):
+def test_the_projects_are_the_files_in_their_directory(tmp_path):
+    listing = tmp_path / "projects"
+    listing.mkdir()
+    for name in ("beta", "alpha"):
+        (listing / f"{name}.json").write_text("{}")
+    (listing / ".alpha.json.x1").write_text("")  # a save in progress
+    (listing / "notes.txt").write_text("")
+    assert web.projects(listing) == ["alpha", "beta"]
+    assert web.projects(tmp_path / "none") == []
+
+
+def test_a_list_of_project_directories_becomes_a_file_per_project(tmp_path):
     code = tmp_path / "code"
     for name in ("beta", "alpha", "plain"):
         (code / name).mkdir(parents=True)
     (code / "alpha/.git").mkdir()
-    (code / "beta/.git").write_text("gitdir: elsewhere\n")  # a worktree's .git is a file
-    (code / "notes.txt").write_text("")
+    (code / "alpha/.claude-sandbox.json").write_text('{"env": {"AGENT": "copilot"}}')
+    (tmp_path / "other/plain").mkdir(parents=True)
     listing = tmp_path / "projects"
-    listing.write_text(f"# all of them\n{code}/*\n\n{code}/*/.git\n{tmp_path}/missing-*\n")
-    every = [str(code / d) for d in ("alpha", "beta", "plain")]
-    assert web.projects(listing) == every  # files skipped, repeats listed once, no match → nothing
-    listing.write_text(f"{code}/*/.git\n{code}/plain\n")
-    assert web.projects(listing) == [str(code / "alpha"), str(code / "beta"), str(code / "plain")]
+    listing.write_text(f"# all of them\n{code}/*/.git\n\n{code}/plain\n{tmp_path}/other/plain\n{tmp_path}/missing-*\n")
+    assert web.projects(listing) == ["alpha", "plain", "plain-2"]  # a name taken already gets a number
+    assert json.loads((listing / "alpha.json").read_text()) == {"repo": str(code / "alpha"), "env": {"AGENT": "copilot"}}
+    assert json.loads((listing / "plain-2.json").read_text()) == {"repo": str(tmp_path / "other/plain")}
+    assert (tmp_path / "projects.old").read_text().startswith("# all of them")  # the list is kept
+    assert (code / "alpha/.claude-sandbox.json").exists()  # and so is what it was made from
 
 
 def test_a_network_bind_admits_this_machines_own_names_only():
@@ -280,10 +302,10 @@ def test_the_page_gets_what_the_projects_plugins_describe(ui):
     assert ui("/api/project?project=/etc").status == 404
 
 
-def test_a_projects_settings_are_read_and_saved_to_its_claude_sandbox_json(ui):
-    file = ui.tmp / "proj/.claude-sandbox.json"
+def test_a_projects_settings_are_read_and_saved_to_its_file(ui):
+    file = ui.tmp / "projects/proj.json"
     got = json.load(ui("/api/config?project=" + ui.project))
-    assert (got["file"], got["exists"], got["config"]) == (str(file), False, {})
+    assert (got["file"], got["exists"], got["config"]) == (str(file), True, {"repo": str(ui.tmp / "proj")})
     kvm = next(p for p in got["plugins"] if p["name"] == "kvm")  # every plugin, as its manifest says
     assert kvm["defaultEnabled"] is False and kvm["description"] and "briefing" in kvm["example"]
     assert [s["key"] for s in kvm["settings"]] == ["briefing"]  # the settings it declares
@@ -291,13 +313,13 @@ def test_a_projects_settings_are_read_and_saved_to_its_claude_sandbox_json(ui):
     claude = next(a for a in got["agents"] if a["name"] == "claude")
     assert any(s["env"] == "CLAUDE_EFFORT" for s in claude["settings"])
 
-    config = {"env": {"CLAUDE_EFFORT": "high"}, "plugins": {"kvm": {"enabled": True, "briefing": "VMs"}},
+    config = {"repo": "https://github.com/o/r", "env": {"CLAUDE_EFFORT": "high"}, "plugins": {"kvm": {"enabled": True, "briefing": "VMs"}},
               "mine": [1]}  # whatever else the file holds is the page's to keep
     saved = json.load(ui("/api/config", json.dumps({"project": ui.project, "config": config}).encode()))
     assert saved["exists"] and saved["config"] == config == json.loads(file.read_text())
-    assert file.read_text().endswith("}\n") and list((ui.tmp / "proj").iterdir()) == [file]
+    assert file.read_text().endswith("}\n") and list((ui.tmp / "projects").iterdir()) == [file]
 
-    for bad in ([], {"plugins": []}, {"plugins": {"kvm": "on"}}, {"plugins": {"kvm": {"enabled": "maybe"}}},
+    for bad in ([], {}, {"repo": " "}, {"repo": 1}, {"plugins": []}, {"plugins": {"kvm": "on"}}, {"plugins": {"kvm": {"enabled": "maybe"}}},
                 {"env": {"AGENT": ["claude"]}},
                 # declared settings are checked against their type
                 {"env": {"CLAUDE_EFFORT": "huge"}}, {"env": {"AGENT_WORKSPACE_CLEANUP": "yes"}},
@@ -307,6 +329,7 @@ def test_a_projects_settings_are_read_and_saved_to_its_claude_sandbox_json(ui):
                 {"plugins": {"upstream-proxy": {"routes": [{"name": "a", "port": 70000, "upstream": "https://x"}]}}},
                 {"plugins": {"upstream-proxy": {"routes": [{"name": "a", "port": 1, "upstream": "https://x",
                                                             "auth": {"type": "bearer", "credential": 7}}]}}}):
+        bad = {"repo": "/r", **bad} if isinstance(bad, dict) and bad and "repo" not in bad else bad
         assert ui("/api/config", json.dumps({"project": ui.project, "config": bad}).encode()).status == 400
     assert json.loads(file.read_text()) == config  # none of them touched it
     assert ui("/api/config", json.dumps({"project": "/etc", "config": {}}).encode()).status == 400
@@ -340,10 +363,14 @@ def test_a_plugins_command_runs_in_the_runs_checkout(tmp_path, monkeypatch):
     assert web.plugin_command("/proj", "0a1b2c", "p", "list") is None
 
 
-def test_a_project_run_sh_cannot_describe_says_why(tmp_path):
-    (tmp_path / ".claude-sandbox.json").write_text("{not json")
-    [note] = web.describe(str(tmp_path))["notes"]
-    assert ".claude-sandbox.json" in note
+def test_a_project_run_sh_cannot_describe_says_why(tmp_path, monkeypatch):
+    configured(tmp_path, monkeypatch, "bad")
+    (tmp_path / "projects/bad.json").write_text("{not json")
+    [note] = web.describe("bad")["notes"]
+    assert "bad.json" in note
+    configured(tmp_path, monkeypatch, "gone", tmp_path / "gone")
+    [note] = web.describe("gone")["notes"]
+    assert "is not a directory" in note
 
 
 def test_a_plugins_server_that_will_not_start_says_what_it_printed(tmp_path, monkeypatch):
@@ -367,8 +394,7 @@ def test_a_session_outlives_its_tabs_until_stopped_or_deleted(tmp_path, monkeypa
     monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
     monkeypatch.setattr(web, "command", lambda *_: ["sleep", "30"])
     monkeypatch.setattr(web, "KEEPALIVE", 0.2)
-    (tmp_path / "projects").write_text(f"{tmp_path}\n")
-    server = web.serve(0, tmp_path / "projects")
+    server = web.serve(0, configured(tmp_path, monkeypatch))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_address[1]}"
     post = lambda path: urllib.request.urlopen(urllib.request.Request(  # noqa: E731
@@ -485,7 +511,7 @@ def test_deleting_tidies_up_only_what_a_plugin_offered_for_that_run(tmp_path, mo
     from types import SimpleNamespace as NS
     log = tmp_path / "actions"
     run_sh = tmp_path / "run.sh"
-    run_sh.write_text(f'#!/bin/sh\necho "$*" >>"{log}"\n[ "$4" != 9 ] || {{ echo "❌ gh pr close: gone" >&2; exit 1; }}\n')
+    run_sh.write_text(f'#!/bin/sh\necho "$*" >>"{log}"\n[ "$6" != 9 ] || {{ echo "❌ gh pr close: gone" >&2; exit 1; }}\n')
     run_sh.chmod(0o755)
     monkeypatch.setattr(web, "RUN_SH", run_sh)
     close = lambda n: {"plugin": "github-auth", "action": "close-pr", "arg": n, "ask": f"Close #{n}?"}  # noqa: E731
@@ -503,7 +529,7 @@ def test_deleting_tidies_up_only_what_a_plugin_offered_for_that_run(tmp_path, mo
     offered = web.offers(s)
     assert [i["ref"] for i in offered] == ["#3", "#9"]
     assert web.tidy(s, ["u3", "u4", "u2"], offered) == []  # only #3: u4 is not this run's, u2 offers nothing
-    assert log.read_text() == "--web-action github-auth close-pr 3\n"
+    assert log.read_text() == f"--project {tmp_path} --web-action github-auth close-pr 3\n"
     assert web.tidy(s, ["u9"], offered) == ["#9: ❌ gh pr close: gone"]
 
 
@@ -669,9 +695,8 @@ def test_a_prompt_takes_files_and_its_events_keep_only_their_names(chat):
         chat.until(s, lambda s: s.exit is not None)
 
 
-def test_a_chat_streams_its_events_and_takes_answers_and_interrupts(chat, tmp_path):
-    (tmp_path / "projects").write_text(f"{tmp_path}\n")
-    server = web.serve(0, tmp_path / "projects")
+def test_a_chat_streams_its_events_and_takes_answers_and_interrupts(chat, tmp_path, monkeypatch):
+    server = web.serve(0, configured(tmp_path, monkeypatch))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_address[1]}"
 
@@ -683,7 +708,7 @@ def test_a_chat_streams_its_events_and_takes_answers_and_interrupts(chat, tmp_pa
             return e.code
     try:
         s = json.load(urllib.request.urlopen(urllib.request.Request(base + "/api/sessions", json.dumps(
-            {"project": str(tmp_path), "kind": "run"}).encode())))
+            {"project": "proj", "kind": "run"}).encode())))
         assert s["ui"] == "chat" and s["status"] == "starting"
         live = web.sessions[s["id"]]
         events = urllib.request.urlopen(f"{base}/api/sessions/{s['id']}/events", timeout=10)
@@ -802,7 +827,8 @@ def test_a_chat_runs_on_through_a_restart_of_the_server(chat):
 
 def test_a_terminal_runs_on_through_a_restart_and_says_how_it_ended_while_no_server_listened(tmp_path, monkeypatch):
     monkeypatch.setenv("SHELL", "/bin/sh")
-    s = web.start(str(tmp_path), "shell", None)
+    configured(tmp_path, monkeypatch)
+    s = web.start("proj", "shell", None)
     try:
         s.write(b"echo be$((40+2))\n")
         for _ in range(100):
@@ -842,9 +868,9 @@ def test_the_poller_describes_each_project_as_often_as_its_plugins_asked(tmp_pat
     from types import SimpleNamespace as NS
     watched, quiet = tmp_path / "watched", tmp_path / "quiet"
     listing = tmp_path / "projects"
-    listing.write_text(f"{watched}\n{quiet}\n")
+    listing.mkdir()
     for d in (watched, quiet):
-        d.mkdir()
+        (listing / f"{d.name}.json").write_text("{}")
     now, seen = [1000.0], []
 
     def sleep(seconds):
@@ -854,11 +880,11 @@ def test_the_poller_describes_each_project_as_often_as_its_plugins_asked(tmp_pat
 
     monkeypatch.setattr(web, "time", NS(time=lambda: now[0], sleep=sleep))
     monkeypatch.setattr(web, "describe", lambda project, keep=False: (
-        seen.append((project, now[0] - 1000)), {"poll": 60} if project == str(watched) else {"poll": None})[1])
+        seen.append((project, now[0] - 1000)), {"poll": 60} if project == "watched" else {"poll": None})[1])
     with pytest.raises(StopIteration):
         web.poller(listing)
-    assert [at for p, at in seen if p == str(watched)] == [0, 60, 120, 180, 240, 300]
-    assert [at for p, at in seen if p == str(quiet)] == [0, 300]
+    assert [at for p, at in seen if p == "watched"] == [0, 60, 120, 180, 240, 300]
+    assert [at for p, at in seen if p == "quiet"] == [0, 300]
 
 
 def test_a_plugin_starts_a_session_once_per_key_and_it_goes_when_its_agent_has_finished(chat, monkeypatch):

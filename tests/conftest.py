@@ -109,8 +109,9 @@ class Sandbox:
         }
 
     def config(self, data: dict) -> Path:
-        path = self.cwd / ".claude-sandbox.json"
+        path = self.tmp / "project.json"
         path.write_text(json.dumps(data))
+        self.env["PROJECT_CONFIG_FILE"] = str(path)
         return path
 
     def dotenv(self, text: str) -> Path:

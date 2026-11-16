@@ -37,7 +37,7 @@ def test_env_scan_commented_mode_reads_documented_defaults(sb):
     assert scan(sb, "#BASE_BRANCH=main\n") == {}
 
 
-# --- .claude-sandbox.json -----------------------------------------------------------------
+# --- the project's file -------------------------------------------------------------------
 
 @pytest.mark.parametrize("content, message", [
     ("[]", "must be a JSON object"),
@@ -47,7 +47,7 @@ def test_env_scan_commented_mode_reads_documented_defaults(sb):
     ('{"env": {"A": [1]}}', ".env must be an object of scalar values"),
 ])
 def test_malformed_project_config_fails(sb, content, message):
-    (sb.cwd / ".claude-sandbox.json").write_text(content)
+    sb.config({}).write_text(content)
     sb.staged("").dies(message)
 
 
@@ -89,7 +89,7 @@ def test_each_layer_overrides_the_one_below(sb):
 
 
 def test_the_repos_env_file_sets_nothing(sb):
-    """.claude-sandbox.json is the one place a project's settings are made: its .env is its own."""
+    """The project's file is the one place a project's settings are made: its .env is its own."""
     sb.dotenv("SECRET_API_KEY=hunter2\nENABLE_ANYTHING=0\nGH_APP_ID=99\nCLAUDE_EFFORT=high\n")
     run = sb.staged('echo "flag=${ENABLE_ANYTHING-unset} app=${GH_APP_ID-unset} effort=${CLAUDE_EFFORT-unset}"\n'
                     'env | grep -c hunter2 || true').ok()

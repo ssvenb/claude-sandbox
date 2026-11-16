@@ -49,7 +49,13 @@ export function SettingsCards({ declared, draft, query }: Props) {
 
   const agentNow = env()?.AGENT ?? declared.kernel.settings.find(s => s.env === 'AGENT')?.default;
   const sandbox: CardSpec[] = [
-    { key: 'general', title: 'General', description: declared.kernel.description, fields: declared.kernel.settings.map(s => envField(s)) },
+    {
+      key: 'general', title: 'General', description: declared.kernel.description, fields: [
+        { spec: { type: 'string', label: 'Repository', description: 'The repo the agent works on: a path on this machine, or a git URL (cloned under ~/.cache/claude-sandbox/repos).', placeholder: 'https://github.com/owner/repo', required: true, monospace: true },
+          slot: slot(() => draft, 'repo'), name: 'repo', required: true },
+        ...declared.kernel.settings.map(s => envField(s)),
+      ],
+    },
     ...declared.agents.map(a => ({
       key: 'agent-' + a.name, title: a.name + ' agent', description: a.description,
       fields: a.settings.map(s => envField(s)), tag: a.name === agentNow ? 'selected' : '',
@@ -87,7 +93,7 @@ export function SettingsCards({ declared, draft, query }: Props) {
 
   return (
     <>
-      <p>Unset settings come from the repo's .env or your shell, else their default. ↺ reset unsets one again.</p>
+      <p>Unset settings come from your shell, else their default. ↺ reset unsets one again.</p>
       <CardGroup title="Sandbox" cards={sandbox} query={query} />
       <CardGroup title="Plugins" cards={declared.plugins.map(plugin)} query={query} />
     </>

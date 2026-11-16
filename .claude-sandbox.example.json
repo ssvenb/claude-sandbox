@@ -1,4 +1,5 @@
 {
+  "repo": "https://github.com/owner/repo",
   "env": {
     "PORTS": "3000"
   },

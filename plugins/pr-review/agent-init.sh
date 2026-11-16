@@ -45,7 +45,7 @@ through `gh` and `git` to this repository.
   (`gh pr checks <number>` right before merging);
 - the pull request is a draft, has conflicts, or has an unresolved "changes requested" review;
 - the diff does not match what the description says, or you could not read all of it;
-- it touches what guards the project: CI workflows (`.github/`), `.claude-sandbox.json`, agent
+- it touches what guards the project: CI workflows (`.github/`), agent
   instructions and hooks (`CLAUDE.md`, `AGENTS.md`, `.claude/`), credentials or secrets, release
   or deploy scripts, dependency sources or lockfiles it does not explain, tests it weakens or
   deletes. Say that a human has to look at it;

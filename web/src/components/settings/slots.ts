@@ -24,7 +24,7 @@ export const slot = (obj: Holder, key: string): Slot => ({
 
 export const ON: Value[] = [true, 1, '1', 'true'];
 
-/** Values in .env are exported as strings, so a switch writes 1/0 there and reads either spelling. */
+/** Values of the env block are exported as strings, so a switch writes 1/0 there and reads either spelling. */
 export const envSlot = (s: Slot, spec: SettingSpec): Slot =>
   spec.type !== 'boolean' ? s : {
     get: () => (s.get() === undefined ? undefined : ON.includes(s.get())),

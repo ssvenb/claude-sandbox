@@ -58,13 +58,38 @@ def test_injector_headers(monkeypatch, spec, env, headers):
 
 
 @pytest.mark.parametrize("spec, message", [
-    ({"type": "bearer"}, "auth.valueEnv is required"),
+    ({"type": "bearer"}, "auth.credential or auth.valueEnv is required"),
     ({"type": "bearer", "valueEnv": "UNSET"}, "$UNSET is unset on the host"),
     ({"type": "magic"}, "unknown auth.type"),
 ])
 def test_injector_errors(monkeypatch, spec, message):
     monkeypatch.setattr(proxy.os, "environ", {})
     with pytest.raises(ValueError, match=message.replace("$", r"\$")):
+        proxy._Injector(spec).headers()
+
+
+def test_a_named_credential_is_an_api_key_of_the_authentications_file(tmp_path, monkeypatch):
+    """auth.credential: an api-key entry of --auth-file, read on each use, from a file only its
+    owner can read; it takes the place of valueEnv."""
+    file = tmp_path / "auth.json"
+    file.write_text(json.dumps({"openai": {"type": "api-key", "key": "sk-1"},
+                                "coder": {"type": "github-app", "appId": "1"}}))
+    file.chmod(0o600)
+    monkeypatch.setattr(proxy, "AUTH_FILE", str(file))
+    monkeypatch.setattr(proxy.os, "environ", {"K": "from-env"})
+    spec = {"type": "bearer", "credential": "openai", "valueEnv": "K"}
+    assert proxy._Injector(spec).headers() == {"Authorization": "Bearer sk-1"}
+    file.write_text(json.dumps({"openai": {"type": "api-key", "key": "sk-2"}}))  # rotated: no restart
+    assert proxy._Injector({"type": "header", "header": "x-api-key", "credential": "openai"}).headers() == {"x-api-key": "sk-2"}
+    file.write_text(json.dumps({"coder": {"type": "github-app", "appId": "1"}}))
+    for name in ("coder", "nobody"):
+        with pytest.raises(ValueError, match=f"'{name}': .* has no api-key authentication"):
+            proxy._Injector({"type": "bearer", "credential": name}).headers()
+    file.chmod(0o644)
+    with pytest.raises(ValueError, match="readable by you alone"):
+        proxy._Injector(spec).headers()
+    monkeypatch.setattr(proxy, "AUTH_FILE", None)
+    with pytest.raises(ValueError, match="needs the authentications file"):
         proxy._Injector(spec).headers()
 
 

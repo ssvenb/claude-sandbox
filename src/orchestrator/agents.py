@@ -59,7 +59,7 @@ def resolve_version(agent: Agent, env: dict) -> str:
     """The `AGENT_VERSION` build arg. It is the cache key of the install layer, so resolving the
     latest release here is what makes a new upstream version rebuild that one layer (the
     in-container auto-updater is off, so without this the agent would freeze on an old release).
-    Set in .env it pins explicitly; a failed registry lookup leaves it empty, which reuses the image
+    Set, it pins explicitly; a failed registry lookup leaves it empty, which reuses the image
     as-is rather than failing the run."""
     package = agent.manifest.get("npmPackage")
     if not package:

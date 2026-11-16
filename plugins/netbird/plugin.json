@@ -13,7 +13,7 @@
       "type": "string",
       "secret": true,
       "label": "Setup key",
-      "description": "The key the peer enrols with, preferably ephemeral. Never the NetBird PAT. Stored in plain text in this file: prefer the repo's .env."
+      "description": "The key the peer enrols with, preferably ephemeral. Never the NetBird PAT. Stored in plain text in this file: keep the file out of git, or export the key in the shell that starts the sandbox instead."
     },
     {
       "env": "NB_MANAGEMENT_URL",

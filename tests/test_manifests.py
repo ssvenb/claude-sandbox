@@ -71,8 +71,8 @@ TYPES = {"boolean", "string", "path", "text", "integer", "enum", "list", "map", 
 # Who declares settings: the kernel, each agent, each plugin.
 OWNERS = ([("kernel", REPO / "src/orchestrator/kernel.json")] + [(f"agents/{a}", REPO / "agents" / a / "agent.json") for a in AGENTS]
           + [(f"plugins/{p}", REPO / "plugins" / p / "plugin.json") for p in PLUGINS])
-# Where the settings files are: set in .env.example or the shell only, never in the config file.
-NOT_IN_CONFIG = {"PROJECT_CONFIG_FILE", "PROJECT_ENV_FILE"}
+# Where the settings file is: set in the shell only, never in the config file.
+NOT_IN_CONFIG = {"PROJECT_CONFIG_FILE"}
 
 
 def check_spec(spec, where, top=False):

@@ -31,6 +31,7 @@ class Plugin:
     required_env: list = field(default_factory=list)
     provides: list = field(default_factory=list)
     requires: list = field(default_factory=list)
+    auth: dict | None = None  # the named authentication it takes, see auth.py
 
 
 def plugin_root(env: dict) -> Path:
@@ -58,7 +59,8 @@ def discover(root: Path) -> list[Plugin]:
             priority = m.get("priority")
             found.append(Plugin(path.parent.name, float(50 if priority is None else priority),
                                 tostring(m.get("defaultEnabled", False)) == "true", m.get("requiredAgent") or "",
-                                *(list(m.get(k) or []) for k in ("conflicts", "requiredEnv", "provides", "requires"))))
+                                *(list(m.get(k) or []) for k in ("conflicts", "requiredEnv", "provides", "requires")),
+                                m.get("auth") if isinstance(m.get("auth"), dict) else None))
         except (TypeError, ValueError):
             raise Die(f"Malformed manifest: {path}") from None
     if not found:
@@ -68,7 +70,7 @@ def discover(root: Path) -> list[Plugin]:
 
 def resolve(plugins: list[Plugin], env: dict, project: Project, agent: str) -> list[Plugin]:
     """The plugins that will run, in priority order. The worked-on repo has the last word, then
-    the ENABLE_ flag (already overlaid with the project's own .env, see config.py), then the
+    the ENABLE_ flag (its "env" block, else your shell; see config.py), then the
     manifest default."""
     enabled = []
     for p in plugins:
@@ -97,12 +99,12 @@ def validate(enabled: list[Plugin], everything: list[Plugin], env: dict) -> None
         for other in p.conflicts:
             if other in names:
                 raise Die(f"Plugins '{p.name}' and '{other}' cannot be enabled together. Disable one of them "
-                          "in .env or in the project's .claude-sandbox.json.")
+                          "in the project's .claude-sandbox.json.")
     provided = set()
     for p in enabled:
         for var in p.required_env:
             if not env.get(var):
-                raise Die(f"Plugin '{p.name}' requires {var} to be set in .env or in the project's .claude-sandbox.json")
+                raise Die(f"Plugin '{p.name}' requires {var} to be set in the project's .claude-sandbox.json")
         provided.update(p.provides)
     for p in enabled:
         for cap in p.requires:

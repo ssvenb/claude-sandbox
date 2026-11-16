@@ -31,6 +31,10 @@ elif [ -n "$UPSTREAM_PROXY_ENV_FILE" ] && [ "$UPSTREAM_PROXY_ENV_FILE" != /dev/n
   echo "ℹ️  upstream-proxy: no env file at '$UPSTREAM_PROXY_ENV_FILE'; routes must resolve from the host environment." >&2
 fi
 
+# A route's auth.credential names an api-key entry of your named authentications; the proxy reads
+# that file itself, for the same reason. run.sh says where it is.
+[ -z "${SANDBOX_AUTH_FILE:-}" ] || UPSTREAM_PROXY_ENV_ARGS+=(--auth-file "$SANDBOX_AUTH_FILE")
+
 # One proxy per project: every sandbox launched from this checkout with these routes shares it —
 # the first run starts it and the last one to exit stops it. A changed config gets a proxy of its own.
 UPSTREAM_PROXY_KEY=$(printf '%s\n' "$HOST_CWD" "$UPSTREAM_PROXY_ENV_FILE" "$UPSTREAM_PROXY_ROUTES_JSON" \

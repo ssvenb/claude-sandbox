@@ -148,7 +148,7 @@ cd "{REPO}"
 
     def staged(self, snippet: str, **env) -> Run:
         """snippet in a stage's shell: the project's config loaded and its settings applied by
-        src/orchestrator first, as run.sh does (a refusal there fails the Run), then its .env scanned."""
+        src/orchestrator first, as run.sh does (a refusal there fails the Run)."""
         merged = self._env(env)
         try:
             project = host_config.load_project(merged)
@@ -156,7 +156,7 @@ cd "{REPO}"
         except orchestrator.Die as e:
             return Run(1, "", f"❌ {e}\n")
         config = json.dumps(project.config) if project.config is not None else ""
-        return self.bash("project_env_load\n" + snippet, **{**merged, "PROJECT_CONFIG_JSON": config})
+        return self.bash(snippet, **{**merged, "PROJECT_CONFIG_JSON": config})
 
     def plugin(self, name: str, **env) -> Run:
         """One plugin's host stage, after the project's config and .env were loaded."""

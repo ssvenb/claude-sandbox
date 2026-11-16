@@ -12,8 +12,8 @@
 #   stage.sh web-action <plugin> <action> <arg>
 #
 # Its environment carries what src/orchestrator resolved: HOST_CWD, RUN_ID, RUN_DATE, RESUME, AGENT,
-# AGENT_DIR, ENABLED_PLUGINS, PLUGIN_ROOT, PROJECT_CONFIG_FILE, PROJECT_CONFIG_JSON,
-# PROJECT_ENV_FILE, and the project's settings already applied.
+# AGENT_DIR, ENABLED_PLUGINS, PLUGIN_ROOT, PROJECT_CONFIG_FILE, PROJECT_CONFIG_JSON, and the
+# project's settings already applied.
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
 
@@ -32,7 +32,6 @@ REPORT_FD=${SANDBOX_STAGE_REPORT_FD:?stage.sh is started by run.sh}
 REPORT=${SANDBOX_STAGE_REPORT:?stage.sh is started by run.sh}
 # Context for the stages, not for what they start: run.sh never exported these.
 export -n SANDBOX_STAGE_REPORT_FD SANDBOX_STAGE_REPORT PROJECT_CONFIG_JSON AGENT_DIR ENABLED_PLUGINS RESUME
-project_env_load
 
 # reported: tells run.sh the report is complete. The pipe is not left to close by itself: what the
 # stage started (a proxy, the credentials refresher) holds it open too.

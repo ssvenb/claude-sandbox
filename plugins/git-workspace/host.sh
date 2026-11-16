@@ -24,14 +24,14 @@ if [ -z "${BASE_BRANCH:-}" ]; then
 fi
 
 git -C "$HOST_CWD" rev-parse --verify --quiet "refs/remotes/origin/$BASE_BRANCH" >/dev/null ||
-  die "git-workspace: origin has no branch '$BASE_BRANCH' to cut from (set BASE_BRANCH in .env, or run 'git fetch origin')"
+  die "git-workspace: origin has no branch '$BASE_BRANCH' to cut from (set BASE_BRANCH in .claude-sandbox.json, or run 'git fetch origin')"
 
 pass_value BASE_BRANCH "$BASE_BRANCH"
 
 # The branch name's leading segment belongs to the repo being worked on, so it is read from there:
-# its .claude-sandbox.json first, then its .env, then the environment. With none of them the agent
-# stage falls back to the agent manifest's branchPrefix, then the agent's directory name.
-BRANCH_PREFIX=$(plugin_config '.branchPrefix' "$(project_env BRANCH_PREFIX "${BRANCH_PREFIX:-}")")
+# its .claude-sandbox.json first, then the environment. With neither the agent stage falls back
+# to the agent manifest's branchPrefix, then the agent's directory name.
+BRANCH_PREFIX=$(plugin_config '.branchPrefix' "${BRANCH_PREFIX:-}")
 if [ -n "$BRANCH_PREFIX" ]; then
   pass_value BRANCH_PREFIX "$BRANCH_PREFIX"
 fi

@@ -67,7 +67,7 @@ def test_env_example_documents_every_required_variable(var):
     assert var in EXAMPLE_KEYS
 
 
-TYPES = {"boolean", "string", "path", "text", "integer", "enum", "list", "map", "object", "json"}
+TYPES = {"boolean", "string", "path", "text", "integer", "enum", "list", "map", "object", "json", "auth"}
 # Who declares settings: the kernel, each agent, each plugin.
 OWNERS = ([("kernel", REPO / "src/orchestrator/kernel.json")] + [(f"agents/{a}", REPO / "agents" / a / "agent.json") for a in AGENTS]
           + [(f"plugins/{p}", REPO / "plugins" / p / "plugin.json") for p in PLUGINS])
@@ -80,6 +80,15 @@ def check_spec(spec, where, top=False):
     assert isinstance(spec.get("label", ""), str) and isinstance(spec.get("description", ""), str), where
     if top:
         assert ("env" in spec) != ("key" in spec), f"{where}: exactly one of env / key"
+    if spec["type"] == "auth":
+        from orchestrator.auth import TYPES as AUTH_TYPES
+        kinds = [spec["auth"]] if isinstance(spec["auth"], str) else spec["auth"]
+        assert kinds and set(kinds) <= set(AUTH_TYPES), where
+        if "fills" in spec:  # what an entry of that type holds, into variables no project may set
+            assert isinstance(spec["auth"], str) and "env" in spec, where
+            held = set(sum(AUTH_TYPES[spec["auth"]], ()))
+            assert set(spec["fills"]) <= held, f"{where}: fills what a {spec['auth']} does not hold"
+            assert not set(spec["fills"].values()) & EXAMPLE_KEYS, f"{where}: a filled variable must not be a setting"
     if spec["type"] == "enum":
         assert spec["choices"] and spec.get("default", spec["choices"][0]) in spec["choices"], where
     if spec["type"] == "list":
@@ -118,10 +127,20 @@ def test_the_kernel_offers_every_agent():
     assert sorted(agent["choices"]) == AGENTS
 
 
-def test_the_example_config_passes_the_declared_types():
+def test_the_example_config_passes_the_declared_types(tmp_path, monkeypatch):
+    """With the authentications its routes name configured: a name auth.json lacks is refused."""
+    file = tmp_path / "auth.json"
+    file.write_text(json.dumps({"cribl": {"type": "oauth2-client"}, "azure-openai": {"type": "api-key"},
+                                "gcs-reader": {"type": "gcp-service-account"}}))
+    file.chmod(0o600)
+    monkeypatch.setenv("SANDBOX_AUTH_FILE", str(file))
     sys.path.insert(0, str(REPO / "src/server"))
     import server
-    server.check_config(json.loads((REPO / ".claude-sandbox.example.json").read_text()))
+    example = json.loads((REPO / ".claude-sandbox.example.json").read_text())
+    server.check_config(example)
+    file.write_text(json.dumps({"cribl": {"type": "api-key"}}))
+    with pytest.raises(ValueError, match=r"routes\[1\]\.auth\.credential: no api-key or oauth2-client or gcp-service-account called 'azure-openai' in .* \(there: cribl\)"):
+        server.check_config(example)
 
 
 def test_settings_fragments_are_json_objects():

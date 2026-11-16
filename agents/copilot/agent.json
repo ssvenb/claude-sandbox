@@ -9,11 +9,14 @@
   },
   "settings": [
     {
-      "env": "COPILOT_GITHUB_TOKEN",
-      "type": "string",
-      "secret": true,
+      "env": "COPILOT_AUTH",
+      "type": "auth",
+      "auth": "copilot-token",
       "label": "GitHub token",
-      "description": "Fine-grained PAT with \"Copilot Requests\", or a Copilot/gh OAuth token; not needed while copilot-home mounts a logged-in ~/.copilot. Stored in plain text in this file: prefer the repo's .env."
+      "description": "The copilot-token (a fine-grained PAT with \"Copilot Requests\", or a Copilot/gh OAuth token) Copilot runs with; not needed while copilot-home mounts a logged-in ~/.copilot.",
+      "fills": {
+        "token": "COPILOT_GITHUB_TOKEN"
+      }
     }
   ]
 }

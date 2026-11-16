@@ -5,39 +5,20 @@
   "defaultEnabled": false,
   "provides": ["gcp-credentials"],
   "requires": [],
-  "requiredEnv": ["GCP_SERVICE_ACCOUNT"],
+  "requiredEnv": ["GCP_AUTH"],
   "secrets": [],
-  "auth": {
-    "type": "gcp-service-account",
-    "env": "GCP_AUTH",
-    "fields": {"serviceAccount": "GCP_SERVICE_ACCOUNT", "project": "GCP_PROJECT", "credentialFile": "GCP_CREDENTIAL_FILE"}
-  },
   "settings": [
     {
       "env": "GCP_AUTH",
-      "type": "string",
-      "label": "Authentication",
-      "description": "Name of a gcp-service-account entry in ~/.config/claude-sandbox/auth.json (serviceAccount, optional project and credentialFile). It fills the settings below, which then need not be made here.",
-      "placeholder": "sandbox"
-    },
-    {
-      "env": "GCP_SERVICE_ACCOUNT",
-      "type": "string",
+      "type": "auth",
+      "auth": "gcp-service-account",
       "label": "Service account",
-      "description": "The account the sandbox acts as; your login needs roles/iam.serviceAccountTokenCreator on it.",
-      "placeholder": "sandbox@my-project.iam.gserviceaccount.com"
-    },
-    {
-      "env": "GCP_PROJECT",
-      "type": "string",
-      "label": "Project",
-      "description": "Default project for gcloud and the client libraries. Default: the one in the account's email."
-    },
-    {
-      "env": "GCP_CREDENTIAL_FILE",
-      "type": "path",
-      "label": "Credential file",
-      "description": "Workload identity federation config used instead of your gcloud login."
+      "description": "The gcp-service-account the sandbox acts as. Your gcloud login (or its credentialFile) needs roles/iam.serviceAccountTokenCreator on it.",
+      "fills": {
+        "serviceAccount": "GCP_SERVICE_ACCOUNT",
+        "project": "GCP_PROJECT",
+        "credentialFile": "GCP_CREDENTIAL_FILE"
+      }
     }
   ]
 }

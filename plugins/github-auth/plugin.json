@@ -5,46 +5,21 @@
   "defaultEnabled": true,
   "provides": ["git-credentials"],
   "requires": [],
-  "requiredEnv": ["GH_APP_ID", "GH_PRIVATE_KEY_FILE"],
+  "requiredEnv": ["GH_AUTH"],
   "secrets": [],
-  "auth": {
-    "type": "github-app",
-    "env": "GH_AUTH",
-    "fields": {"appId": "GH_APP_ID", "privateKeyFile": "GH_PRIVATE_KEY_FILE", "host": "GH_HOST", "username": "GH_USERNAME"}
-  },
   "settings": [
     {
       "env": "GH_AUTH",
-      "type": "string",
-      "label": "Authentication",
-      "description": "Name of a github-app entry in ~/.config/claude-sandbox/auth.json (appId, privateKeyFile, optional host and username). It fills the settings below, which then need not be made here.",
-      "placeholder": "coder"
-    },
-    {
-      "env": "GH_APP_ID",
-      "type": "string",
-      "label": "GitHub App ID",
-      "description": "Settings → Developer settings → GitHub Apps → your app.",
-      "placeholder": "123456"
-    },
-    {
-      "env": "GH_PRIVATE_KEY_FILE",
-      "type": "path",
-      "label": "Private key file",
-      "description": "Host path to the App's .pem private key. It never enters the container: the host mints short-lived tokens from it."
-    },
-    {
-      "env": "GH_HOST",
-      "type": "string",
-      "label": "GitHub host",
-      "description": "Your Enterprise Server hostname, to target GHES.",
-      "default": "github.com"
-    },
-    {
-      "env": "GH_USERNAME",
-      "type": "string",
-      "label": "Username",
-      "description": "Account git and gh authenticate as; the web UI also lists pull requests as this account of the host's gh login. Default: the App's bot login."
+      "type": "auth",
+      "auth": "github-app",
+      "label": "GitHub App",
+      "description": "The github-app the sandbox authenticates as. Its App ID, private key (which never enters the container), GitHub host and the username git and gh use are configured with it, in your authentications.",
+      "fills": {
+        "appId": "GH_APP_ID",
+        "privateKeyFile": "GH_PRIVATE_KEY_FILE",
+        "host": "GH_HOST",
+        "username": "GH_USERNAME"
+      }
     }
   ]
 }

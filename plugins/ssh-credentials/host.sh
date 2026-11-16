@@ -6,11 +6,13 @@
 # your personal one), authorized only on the hosts the agent is meant to reach — ideally one that
 # only resolves over the netbird plugin's mesh — and revoke it from those hosts' authorized_keys.
 
-[ -f "$SSH_PRIVATE_KEY_FILE" ] || die "SSH_PRIVATE_KEY_FILE not found: $SSH_PRIVATE_KEY_FILE"
+# SSH_PRIVATE_KEY_FILE, SSH_HOST_USER and SSH_KNOWN_HOSTS_FILE come from the ssh-key authentication
+# SSH_AUTH names (auth.json).
+[ -f "$SSH_PRIVATE_KEY_FILE" ] || die "ssh-credentials: the privateKeyFile of authentication '${SSH_AUTH:-}' is not there: $SSH_PRIVATE_KEY_FILE"
 grep -q 'PRIVATE KEY' "$SSH_PRIVATE_KEY_FILE" \
-  || die "SSH_PRIVATE_KEY_FILE does not look like a private key: $SSH_PRIVATE_KEY_FILE (did you point it at the .pub?)"
+  || die "ssh-credentials: the privateKeyFile of authentication '${SSH_AUTH:-}' does not look like a private key: $SSH_PRIVATE_KEY_FILE (did you point it at the .pub?)"
 if grep -q 'ENCRYPTED' "$SSH_PRIVATE_KEY_FILE"; then
-  die "SSH_PRIVATE_KEY_FILE is passphrase-protected; the sandbox boots non-interactively and cannot unlock it. Use a dedicated key without a passphrase."
+  die "ssh-credentials: the privateKeyFile of authentication '${SSH_AUTH:-}' is passphrase-protected; the sandbox boots non-interactively and cannot unlock it. Use a dedicated key without a passphrase."
 fi
 
 pass_value SSH_PRIVATE_KEY "$(cat "$SSH_PRIVATE_KEY_FILE")"
@@ -21,6 +23,6 @@ pass_env SSH_HOST_PATTERN SSH_HOST_USER SSH_HOST_SUFFIX
 
 # Pinned host keys, if you have them, instead of trust-on-first-use.
 if [ -n "${SSH_KNOWN_HOSTS_FILE:-}" ]; then
-  [ -f "$SSH_KNOWN_HOSTS_FILE" ] || die "SSH_KNOWN_HOSTS_FILE not found: $SSH_KNOWN_HOSTS_FILE"
+  [ -f "$SSH_KNOWN_HOSTS_FILE" ] || die "ssh-credentials: the knownHostsFile of authentication '${SSH_AUTH:-}' is not there: $SSH_KNOWN_HOSTS_FILE"
   pass_value SSH_KNOWN_HOSTS "$(cat "$SSH_KNOWN_HOSTS_FILE")"
 fi

@@ -42,8 +42,7 @@ _BLANK = " \t\n\v\f\r"  # bash's [[:space:]]
 def scan_env(path, commented=False) -> dict[str, str]:
     """KEY=VALUE lines of a .env file, parsed, never executed. With `commented`, `#KEY=value`
     counts too, which is how .env.example documents optional defaults; without it, comments are
-    skipped. The same parser as env_scan_into in src/contract/host/project-env.sh, which plugins use
-    on files of their own; here it reads .env.example, the catalogue of the sandbox's names."""
+    skipped. It reads .env.example, the catalogue of the sandbox's names."""
     out: dict[str, str] = {}
     try:
         text = Path(path).read_bytes().decode("utf-8", "surrogateescape") if path else None

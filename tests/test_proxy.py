@@ -3,6 +3,7 @@ import http.client
 import io
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -22,19 +23,6 @@ proxy = load("plugins/upstream-proxy/host/proxy.py")
 
 # --- units ---------------------------------------------------------------------------------
 
-def test_load_env_file(tmp_path, monkeypatch):
-    env = {"PRESET": "from-shell"}
-    monkeypatch.setattr(proxy.os, "environ", env)
-    path = tmp_path / ".env"
-    path.write_text("\n".join([
-        "# comment", "", "export A=1", 'B="two words"', "C='single'", "D = spaced ",
-        'E="esc \\"q\\""', "PRESET=from-file", "not a line", "1BAD=x", "F=x=y",
-    ]))
-    assert proxy.load_env_file(str(path)) == 6
-    assert env == {"PRESET": "from-shell", "A": "1", "B": "two words", "C": "single",
-                   "D": "spaced", "E": 'esc "q"', "F": "x=y"}
-
-
 @pytest.mark.parametrize("ctype, rewritable", [
     ("application/json", True), ("application/json; charset=utf-8", True),
     ("application/problem+json", True), ("text/html", True), ("application/atom+xml", True),
@@ -45,52 +33,49 @@ def test_rewritable_content_types(ctype, rewritable):
     assert proxy._rewritable(ctype) is rewritable
 
 
-@pytest.mark.parametrize("spec, env, headers", [
-    ({}, {}, {}),
-    ({"type": "none"}, {}, {}),
-    ({"type": "header", "header": "api-key", "valueEnv": "K"}, {"K": "s3"}, {"api-key": "s3"}),
-    ({"type": "header", "valueEnv": "K"}, {"K": "s3"}, {"Authorization": "s3"}),
-    ({"type": "bearer", "valueEnv": "K"}, {"K": "s3"}, {"Authorization": "Bearer s3"}),
+@pytest.fixture
+def auth(tmp_path, monkeypatch):
+    """Writes the authentications file the proxy reads (--auth-file), readable by its owner alone."""
+    file = tmp_path / "auth.json"
+
+    def write(entries, mode=0o600):
+        file.write_text(json.dumps(entries))
+        file.chmod(mode)
+    monkeypatch.setattr(proxy, "AUTH_FILE", str(file))
+    write.file = file
+    return write
+
+
+@pytest.mark.parametrize("spec, headers", [
+    ({}, {}),
+    ({"header": "x-api-key"}, {}),  # no credential named: no authentication
+    ({"credential": "openai"}, {"Authorization": "Bearer sk-1"}),
+    ({"credential": "openai", "header": "x-api-key"}, {"x-api-key": "sk-1"}),
 ])
-def test_injector_headers(monkeypatch, spec, env, headers):
-    monkeypatch.setattr(proxy.os, "environ", env)
+def test_an_api_key_is_sent_as_a_bearer_token_or_in_the_header_named(auth, spec, headers):
+    auth({"openai": {"type": "api-key", "key": "sk-1"}})
     assert proxy._Injector(spec).headers() == headers
 
 
-@pytest.mark.parametrize("spec, message", [
-    ({"type": "bearer"}, "auth.credential or auth.valueEnv is required"),
-    ({"type": "bearer", "valueEnv": "UNSET"}, "$UNSET is unset on the host"),
-    ({"type": "magic"}, "unknown auth.type"),
-])
-def test_injector_errors(monkeypatch, spec, message):
-    monkeypatch.setattr(proxy.os, "environ", {})
-    with pytest.raises(ValueError, match=message.replace("$", r"\$")):
-        proxy._Injector(spec).headers()
-
-
-def test_a_named_credential_is_an_api_key_of_the_authentications_file(tmp_path, monkeypatch):
-    """auth.credential: an api-key entry of --auth-file, read on each use, from a file only its
-    owner can read; it takes the place of valueEnv."""
-    file = tmp_path / "auth.json"
-    file.write_text(json.dumps({"openai": {"type": "api-key", "key": "sk-1"},
-                                "coder": {"type": "github-app", "appId": "1"}}))
-    file.chmod(0o600)
-    monkeypatch.setattr(proxy, "AUTH_FILE", str(file))
-    monkeypatch.setattr(proxy.os, "environ", {"K": "from-env"})
-    spec = {"type": "bearer", "credential": "openai", "valueEnv": "K"}
-    assert proxy._Injector(spec).headers() == {"Authorization": "Bearer sk-1"}
-    file.write_text(json.dumps({"openai": {"type": "api-key", "key": "sk-2"}}))  # rotated: no restart
-    assert proxy._Injector({"type": "header", "header": "x-api-key", "credential": "openai"}).headers() == {"x-api-key": "sk-2"}
-    file.write_text(json.dumps({"coder": {"type": "github-app", "appId": "1"}}))
-    for name in ("coder", "nobody"):
-        with pytest.raises(ValueError, match=f"'{name}': .* has no api-key authentication"):
-            proxy._Injector({"type": "bearer", "credential": name}).headers()
-    file.chmod(0o644)
+def test_a_credential_is_read_on_every_use_from_a_file_only_its_owner_can_read(auth, monkeypatch):
+    auth({"openai": {"type": "api-key", "key": "sk-1"}, "coder": {"type": "github-app", "appId": "1"},
+          "half": {"type": "oauth2-client", "tokenUrl": "https://idp/token", "clientId": "i"}})
+    inj = proxy._Injector({"credential": "openai"})
+    assert inj.headers() == {"Authorization": "Bearer sk-1"}
+    auth({"openai": {"type": "api-key", "key": "sk-2"}, "coder": {"type": "github-app"},
+          "half": {"type": "oauth2-client", "tokenUrl": "https://idp/token", "clientId": "i"}})
+    assert inj.headers() == {"Authorization": "Bearer sk-2"}  # rotated: no restart
+    for name, message in (("nobody", "has no authentication of that name"),
+                          ("coder", "is a github-app; a route takes an api-key, oauth2-client, gcp-service-account"),
+                          ("half", "lacks clientSecret")):
+        with pytest.raises(ValueError, match=f"auth.credential '{name}'.*{re.escape(message)}"):
+            proxy._Injector({"credential": name}).headers()
+    auth({"openai": {"type": "api-key", "key": "sk-2"}}, 0o644)
     with pytest.raises(ValueError, match="readable by you alone"):
-        proxy._Injector(spec).headers()
+        inj.headers()
     monkeypatch.setattr(proxy, "AUTH_FILE", None)
     with pytest.raises(ValueError, match="needs the authentications file"):
-        proxy._Injector(spec).headers()
+        inj.headers()
 
 
 def fake_urlopen(monkeypatch, body):
@@ -103,11 +88,11 @@ def fake_urlopen(monkeypatch, body):
     return calls
 
 
-def test_oauth2_token_is_fetched_once_and_cached(monkeypatch):
-    monkeypatch.setattr(proxy.os, "environ", {"ID": "cid", "SECRET": "csec"})
+def test_oauth2_token_is_fetched_once_and_cached(auth, monkeypatch):
+    auth({"idp": {"type": "oauth2-client", "tokenUrl": "https://idp/token", "audience": "https://api",
+                  "clientId": "cid", "clientSecret": "csec"}})
     calls = fake_urlopen(monkeypatch, {"access_token": "minted", "expires_in": 3600})
-    inj = proxy._Injector({"type": "oauth2_client_credentials", "tokenUrl": "https://idp/token",
-                           "audience": "https://api", "clientIdEnv": "ID", "clientSecretEnv": "SECRET"})
+    inj = proxy._Injector({"credential": "idp"})
     assert inj.headers() == {"Authorization": "Bearer minted"}
     assert inj.headers() == {"Authorization": "Bearer minted"}
     [req] = calls
@@ -116,11 +101,10 @@ def test_oauth2_token_is_fetched_once_and_cached(monkeypatch):
                                     "client_secret": "csec", "audience": "https://api"}
 
 
-def test_oauth2_token_renews_a_minute_before_expiry(monkeypatch):
-    monkeypatch.setattr(proxy.os, "environ", {"ID": "i", "SECRET": "s"})
+def test_oauth2_token_renews_a_minute_before_expiry(auth, monkeypatch):
+    auth({"idp": {"type": "oauth2-client", "tokenUrl": "https://idp/token", "clientId": "i", "clientSecret": "s"}})
     fake_urlopen(monkeypatch, {"access_token": "t", "expires_in": 600})
-    inj = proxy._Injector({"type": "oauth2_client_credentials", "tokenUrl": "https://idp/token",
-                           "clientIdEnv": "ID", "clientSecretEnv": "SECRET"})
+    inj = proxy._Injector({"credential": "idp"})
     inj.headers()
     assert 535 < inj._expires - time.time() <= 540
 
@@ -135,19 +119,20 @@ def gcloud(tmp_path, monkeypatch):
     return log
 
 
-def test_gcp_token_impersonates_the_service_account(gcloud, monkeypatch):
-    monkeypatch.setenv("SA_NAME", "reader")
-    inj = proxy._Injector({"type": "gcp", "serviceAccount": "${SA_NAME}@p.iam.gserviceaccount.com"})
+def test_gcp_token_impersonates_the_service_account(gcloud, auth):
+    auth({"gcs": {"type": "gcp-service-account", "serviceAccount": "reader@p.iam.gserviceaccount.com"}})
+    inj = proxy._Injector({"credential": "gcs"})
     assert inj.headers() == {"Authorization": "Bearer host-token"}
     assert inj.headers() == {"Authorization": "Bearer host-token"}
     assert gcloud.read_text() == ("auth print-access-token --quiet "
                                   "--impersonate-service-account=reader@p.iam.gserviceaccount.com\n")
 
 
-def test_gcp_access_boundary_downscopes_through_sts(gcloud, monkeypatch):
+def test_gcp_access_boundary_downscopes_through_sts(gcloud, auth, monkeypatch):
+    auth({"me": {"type": "gcp-service-account"}})  # no serviceAccount: the host's own gcloud account
     calls = fake_urlopen(monkeypatch, {"access_token": "downscoped", "expires_in": 1800})
     boundary = {"accessBoundaryRules": [{"availableResource": "//storage.googleapis.com/projects/_/buckets/b"}]}
-    inj = proxy._Injector({"type": "gcp", "accessBoundary": boundary})
+    inj = proxy._Injector({"credential": "me", "accessBoundary": boundary})
     assert inj.headers() == {"Authorization": "Bearer downscoped"}
     [req] = calls
     assert req.full_url == "https://sts.googleapis.com/v1/token"
@@ -157,12 +142,13 @@ def test_gcp_access_boundary_downscopes_through_sts(gcloud, monkeypatch):
     assert 1195 < inj._expires - time.time() <= 1200
 
 
-def test_gcp_route_fails_at_startup_without_a_host_login(tmp_path, monkeypatch):
+def test_gcp_route_fails_at_startup_without_a_host_login(tmp_path, auth, monkeypatch):
+    auth({"gcs": {"type": "gcp-service-account"}})
     (tmp_path / "gcloud").write_text("#!/bin/sh\necho 'please log in' >&2\nexit 1\n")
     (tmp_path / "gcloud").chmod(0o755)
     monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     with pytest.raises(RuntimeError, match="please log in"):
-        proxy._Route({"name": "gcs", "upstream": "https://storage.googleapis.com", "auth": {"type": "gcp"}})
+        proxy._Route({"name": "gcs", "upstream": "https://storage.googleapis.com", "auth": {"credential": "gcs"}})
 
 
 def route(**cfg):
@@ -286,14 +272,17 @@ def free_port():
         return s.getsockname()[1]
 
 
+AUTH = {"api": {"type": "api-key", "key": "k"}}
+
+
 class Proxy:
-    def __init__(self, dirpath, routes, env_file=None, env=None):
+    def __init__(self, dirpath, routes, auth=None, env=None):
         self.dir = dirpath
         (dirpath / "routes.json").write_text(json.dumps(routes))
-        args = [sys.executable, PROXY]
-        if env_file:
-            args += ["--env-file", env_file]
-        args += [dirpath / "routes.json", dirpath]
+        self.auth = dirpath / "auth.json"
+        self.auth.write_text(json.dumps(AUTH if auth is None else auth))
+        self.auth.chmod(0o600)
+        args = [sys.executable, PROXY, "--auth-file", self.auth, dirpath / "routes.json", dirpath]
         self.proc = subprocess.Popen(args, env={"PATH": os.environ["PATH"], **(env or {})},
                                      stderr=subprocess.PIPE, text=True)
         names = [r["name"] for r in routes]
@@ -333,32 +322,24 @@ def start(short_tmp):
 
 def api_route(upstream, **cfg):
     return {"name": "api", "upstream": upstream.url, "port": 18080,
-            "auth": {"type": "bearer", "valueEnv": "API_KEY"}, **cfg}
+            "auth": {"credential": "api"}, **cfg}
 
 
-def test_credentials_are_injected_and_the_clients_are_dropped(start, upstream, short_tmp):
-    (short_tmp / "secrets.env").write_text("API_KEY=from-the-env-file\n")
-    p = start([api_route(upstream)], env_file=short_tmp / "secrets.env")
+def test_credentials_are_injected_and_the_clients_are_dropped(start, upstream):
+    p = start([api_route(upstream)], auth={"api": {"type": "api-key", "key": "from-auth-json"}})
     resp, _ = p.request("GET", "/echo?q=1", headers={"Authorization": "Bearer placeholder",
                                                       "X-Api-Key": "placeholder", "X-Trace": "kept"})
     assert resp.status == 200
     [seen] = upstream.seen
     assert seen["path"] == "/echo?q=1"
-    assert seen["headers"]["Authorization"] == "Bearer from-the-env-file"
+    assert seen["headers"]["Authorization"] == "Bearer from-auth-json"
     assert "X-Api-Key" not in seen["headers"]
     assert seen["headers"]["X-Trace"] == "kept"
     assert seen["headers"]["Host"] == upstream.url.removeprefix("http://")
 
 
-def test_the_host_environment_wins_over_the_env_file(start, upstream, short_tmp):
-    (short_tmp / "secrets.env").write_text("API_KEY=from-file\n")
-    p = start([api_route(upstream)], env_file=short_tmp / "secrets.env", env={"API_KEY": "from-env"})
-    p.request("GET", "/echo")
-    assert upstream.seen[0]["headers"]["Authorization"] == "Bearer from-env"
-
-
 def test_urls_are_rewritten_both_ways(start, upstream):
-    p = start([api_route(upstream)], env={"API_KEY": "k"})
+    p = start([api_route(upstream)])
     body = json.dumps({"callback": "http://127.0.0.1:18080/hook"})
     resp, data = p.request("POST", "/echo", body=body, headers={
         "Content-Type": "application/json", "Referer": "http://127.0.0.1:18080/page"})
@@ -371,7 +352,7 @@ def test_urls_are_rewritten_both_ways(start, upstream):
 
 
 def test_binary_bodies_pass_byte_for_byte(start, upstream):
-    p = start([api_route(upstream)], env={"API_KEY": "k"})
+    p = start([api_route(upstream)])
     payload = b"http://127.0.0.1:18080"
     _, data = p.request("PUT", "/binary", body=payload, headers={"Content-Type": "application/octet-stream"})
     assert upstream.seen[0]["body"] == payload
@@ -380,7 +361,7 @@ def test_binary_bodies_pass_byte_for_byte(start, upstream):
 
 def test_request_body_rewrite_ignores_header_case(start, upstream):
     """Node's fetch sends lowercase header names; the rewritten body must still arrive whole."""
-    p = start([api_route(upstream, localUrl="http://api.local")], env={"API_KEY": "k"})
+    p = start([api_route(upstream, localUrl="http://api.local")])
     body = '{"cb": "http://api.local/hook"}'
     p.request("POST", "/echo", body=body,
               headers={"content-type": "application/json", "content-length": str(len(body))})
@@ -388,7 +369,7 @@ def test_request_body_rewrite_ignores_header_case(start, upstream):
 
 
 def test_allowlists_refuse_without_reaching_the_upstream(start, upstream):
-    p = start([api_route(upstream, allowMethods=["GET"], allowPaths=["/echo"])], env={"API_KEY": "k"})
+    p = start([api_route(upstream, allowMethods=["GET"], allowPaths=["/echo"])])
     assert p.request("GET", "/echo")[0].status == 200
     for method, path in (("DELETE", "/echo"), ("GET", "/admin")):
         resp, data = p.request(method, path)
@@ -398,19 +379,19 @@ def test_allowlists_refuse_without_reaching_the_upstream(start, upstream):
 
 
 def test_any_method_is_relayed_without_an_allowlist(start, upstream):
-    p = start([api_route(upstream)], env={"API_KEY": "k"})
+    p = start([api_route(upstream)])
     assert p.request("PURGE", "/echo")[0].status == 200
     assert upstream.seen[0]["method"] == "PURGE"
 
 
 def test_oversized_bodies_are_refused(start, upstream):
-    p = start([api_route(upstream, maxBodyBytes=10)], env={"API_KEY": "k"})
+    p = start([api_route(upstream, maxBodyBytes=10)])
     assert p.request("POST", "/echo", body=b"x" * 11)[0].status == 413
     assert p.request("POST", "/echo", body=b"x" * 10)[0].status == 200
 
 
 def test_upstream_errors_pass_through(start, upstream):
-    p = start([api_route(upstream)], env={"API_KEY": "k"})
+    p = start([api_route(upstream)])
     resp, data = p.request("GET", "/missing")
     assert (resp.status, json.loads(data)) == (404, {"error": "nope"})
 
@@ -421,17 +402,17 @@ def test_unreachable_upstream_is_a_502(start):
     assert resp.status == 502 and "could not reach" in data.decode()
 
 
-def test_missing_credential_is_a_502(start, upstream):
+def test_a_credential_gone_since_the_start_is_a_502(start, upstream):
     p = start([api_route(upstream)])
+    p.auth.write_text("{}")  # taken out of auth.json while the proxy runs
     resp, data = p.request("GET", "/echo")
     assert resp.status == 502 and "credentials" in data.decode()
     assert upstream.seen == []
 
 
 def test_oauth2_route_mints_once_for_many_requests(start, upstream):
-    auth = {"type": "oauth2_client_credentials", "tokenUrl": f"{upstream.url}/token",
-            "clientIdEnv": "CID", "clientSecretEnv": "CSECRET"}
-    p = start([api_route(upstream, auth=auth)], env={"CID": "i", "CSECRET": "s"})
+    p = start([api_route(upstream, auth={"credential": "idp"})],
+              auth={"idp": {"type": "oauth2-client", "tokenUrl": f"{upstream.url}/token", "clientId": "i", "clientSecret": "s"}})
     p.request("GET", "/echo")
     p.request("GET", "/echo")
     assert [s["headers"]["Authorization"] for s in upstream.seen] == ["Bearer oauth-1"] * 2
@@ -439,7 +420,7 @@ def test_oauth2_route_mints_once_for_many_requests(start, upstream):
 
 
 def test_each_route_gets_its_own_socket(start, upstream):
-    p = start([api_route(upstream), {"name": "other", "upstream": upstream.url}], env={"API_KEY": "k"})
+    p = start([api_route(upstream), {"name": "other", "upstream": upstream.url}])
     p.request("GET", "/echo", name="other")
     assert "Authorization" not in upstream.seen[0]["headers"]
     assert oct((p.dir / "other.sock").stat().st_mode & 0o777) == "0o666"
@@ -448,6 +429,8 @@ def test_each_route_gets_its_own_socket(start, upstream):
 @pytest.mark.parametrize("routes, message", [
     ([{"name": "api", "upstream": "http://x", "allowMethods": []}], "allowMethods is empty"),
     ([{"name": "x" * 120, "upstream": "http://x"}], "socket path too long"),
+    ([{"name": "api", "upstream": "http://x", "auth": {"credential": "nobody"}}],
+     "route 'api': auth.credential 'nobody' needs the authentications file"),
 ])
 def test_bad_routes_fail_the_start(short_tmp, routes, message):
     (short_tmp / "routes.json").write_text(json.dumps(routes))

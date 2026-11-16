@@ -11,44 +11,30 @@ from conftest import REPO, orchestrator
 from orchestrator import agents, config, plugins
 
 
-def scan(sb, text, commented=False, shell="python"):
+def scan(sb, text, commented=False):
     path = sb.tmp / "scanned.env"
     path.write_bytes(text.encode())
-    if shell == "python":
-        return config.scan_env(path, commented)
-    run = sb.bash(f'declare -A OUT=()\nenv_scan_into OUT "{path}" {"commented" if commented else ""}\n'
-                  'for k in "${!OUT[@]}"; do printf "%s=%s\\0" "$k" "${OUT[$k]}"; done').ok()
-    return dict(item.split("=", 1) for item in run.out.split("\0")[:-1])
+    return config.scan_env(path, commented)
 
 
-# --- .env files: src/orchestrator/config.py and contract/host/project-env.sh read them alike ---------------
+# --- .env.example: src/orchestrator/config.py reads the sandbox's names from it ------------------
 
-BOTH = pytest.mark.parametrize("shell", ["python", "bash"])
-
-
-@BOTH
-def test_env_scan_parses_without_executing(sb, shell):
+def test_env_scan_parses_without_executing(sb):
     text = "\n".join([
         "# comment", "", "export A=1", 'B = "two words"', "C='single'", "D=x=y", "   E=  padded  ",
         "F=$(touch pwned)", "1BAD=no", "some prose with = in it", "G=crlf\r", "A=2", "H=\"", "I=''",
         "\tJ=\ttabbed\t", "exportK=glued", "L=#not a comment",
     ])
-    assert scan(sb, text, shell=shell) == {
+    assert scan(sb, text) == {
         "A": "2", "B": "two words", "C": "single", "D": "x=y", "E": "padded", "F": "$(touch pwned)",
         "G": "crlf", "H": '"', "I": "", "J": "tabbed", "K": "glued", "L": "#not a comment"}
     assert not (REPO / "pwned").exists()
 
 
-@BOTH
-def test_env_scan_commented_mode_reads_documented_defaults(sb, shell):
-    assert scan(sb, "#BASE_BRANCH=main\n# prose here\nAGENT=claude\n", True, shell) == {
+def test_env_scan_commented_mode_reads_documented_defaults(sb):
+    assert scan(sb, "#BASE_BRANCH=main\n# prose here\nAGENT=claude\n", True) == {
         "BASE_BRANCH": "main", "AGENT": "claude"}
-    assert scan(sb, "#BASE_BRANCH=main\n", shell=shell) == {}
-
-
-def test_both_parsers_agree_on_the_sandboxs_own_example(sb):
-    text = (REPO / ".env.example").read_text()
-    assert scan(sb, text, True) == scan(sb, text, True, "bash")
+    assert scan(sb, "#BASE_BRANCH=main\n") == {}
 
 
 # --- .claude-sandbox.json -----------------------------------------------------------------
@@ -399,36 +385,45 @@ def test_agent_without_npm_package_skips_version_lookup(sb, registry, capsys):
     assert sb.bash("agent_host_stage", AGENT="plain", AGENT_ROOT=sb.tmp / "agents").ok().out == ""
 
 
-# --- src/orchestrator/auth.py: named authentications ---------------------------------------------
+# --- src/orchestrator/auth.py: authentications ------------------------------------------------
 
-def test_a_named_authentication_fills_the_settings_of_the_plugin_that_takes_it(sb):
-    """auth.json, outside every project: the entry a plugin's setting names (GH_AUTH) becomes the
-    plugin's own settings, over whatever the project set one by one."""
+def test_an_auth_setting_names_an_entry_whose_fields_fill_its_owners_variables(sb):
+    """auth.json, outside every project: the entry a setting names (GH_AUTH) fills the variables its
+    `fills` maps, of the enabled plugins and of the agent, over whatever was there."""
     from orchestrator import auth
     found = {p.name: p for p in plugins.discover(REPO / "plugins")}
-    takers = [found["github-auth"], found["gcp-auth"], found["git-workspace"]]
+    owners = [(n, found[n].settings) for n in ("github-auth", "gcp-auth", "git-workspace")] + [
+        ("agents/claude", agents.resolve_agent({"AGENT": "claude"}).manifest["settings"])]
     file = sb.home / ".config/claude-sandbox/auth.json"
     file.parent.mkdir(parents=True)
     file.write_text(json.dumps({
         "coder": {"type": "github-app", "appId": 123, "privateKeyFile": "~/keys/coder.pem"},
         "reviewer": {"type": "github-app", "appId": "456", "privateKeyFile": "/k/reviewer.pem", "username": "rev"},
-        "data": {"type": "gcp-service-account", "serviceAccount": "sa@p.iam.gserviceaccount.com"}}))
+        "data": {"type": "gcp-service-account", "serviceAccount": "sa@p.iam.gserviceaccount.com"},
+        "max": {"type": "claude-token", "token": "oat-1"},
+        "broken": {"type": "github-app", "appId": "7"}}))
+    file.chmod(0o600)
     env = {"HOME": str(sb.home), "GH_APP_ID": "999", "GH_HOST": "ghe.example"}
-    assert auth.apply_auth(env, takers) == [] and env["GH_APP_ID"] == "999"  # none named: as before
-    env.update(GH_AUTH="reviewer", GCP_AUTH="data")
-    assert auth.apply_auth(env, takers) == ["reviewer", "data"]
+    assert auth.apply_auth(env, owners) == [] and env["GH_APP_ID"] == "999"  # none named: nothing filled
+    env.update(GH_AUTH="reviewer", GCP_AUTH="data", CLAUDE_AUTH="max")
+    assert auth.apply_auth(env, owners) == ["reviewer", "data", "max"]
     assert (env["GH_APP_ID"], env["GH_PRIVATE_KEY_FILE"], env["GH_USERNAME"]) == ("456", "/k/reviewer.pem", "rev")
-    assert env["GH_HOST"] == "ghe.example"  # what the entry leaves out stays the project's
-    assert env["GCP_SERVICE_ACCOUNT"] == "sa@p.iam.gserviceaccount.com"
+    assert env["GH_HOST"] == "ghe.example"  # what the entry leaves out stays as it was
+    assert env["GCP_SERVICE_ACCOUNT"] == "sa@p.iam.gserviceaccount.com" and env["CLAUDE_CODE_OAUTH_TOKEN"] == "oat-1"
     env["GH_AUTH"] = "coder"
-    auth.apply_auth(env, takers)
+    auth.apply_auth(env, owners)
     assert (env["GH_APP_ID"], env["GH_PRIVATE_KEY_FILE"]) == ("123", os.path.expanduser("~/keys/coder.pem"))
-    for name, message in (("nobody", "does not have (it has: coder, data, reviewer)"),
-                          ("data", "takes a github-app authentication")):
-        with pytest.raises(orchestrator.Die, match=re.escape(message)):
-            auth.apply_auth({**env, "GH_AUTH": name}, takers)
+    assert auth.names(env, "github-app") == ["broken", "coder", "reviewer"]
+    for name, message in (("nobody", "No authentication 'nobody' in .* \\(it has: broken, coder, data, max, reviewer\\)"),
+                          ("data", "Authentication 'data' in .* is a gcp-service-account, not a github-app"),
+                          ("broken", "Authentication 'broken' in .* lacks privateKeyFile")):
+        with pytest.raises(orchestrator.Die, match=f"github-auth: GH_AUTH={name}: {message}"):
+            auth.apply_auth({**env, "GH_AUTH": name}, owners)
+    file.chmod(0o644)  # it holds keys and tokens
+    with pytest.raises(orchestrator.Die, match="readable by you alone"):
+        auth.apply_auth(env, owners)
+    file.chmod(0o600)
     file.write_text("[]")
     with pytest.raises(orchestrator.Die, match="must be a JSON object"):
-        auth.apply_auth(env, takers)
-    with pytest.raises(orchestrator.Die, match="does not have"):  # no file at all
-        auth.apply_auth({**env, "SANDBOX_AUTH_FILE": str(sb.tmp / "none.json")}, takers)
+        auth.apply_auth(env, owners)
+    assert auth.load({**env, "SANDBOX_AUTH_FILE": str(sb.tmp / "none.json")}) == {}  # no file: none configured

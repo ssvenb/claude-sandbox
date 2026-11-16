@@ -118,7 +118,8 @@ def run(opts: dict) -> int:
     names = [p.name for p in enabled]
     env["SANDBOX_AUTH_FILE"] = str(auth_file(env))  # for a plugin that reads entries itself (upstream-proxy)
     try:
-        used = apply_auth(env, enabled)
+        used = apply_auth(env, [(p.name, p.settings) for p in enabled]
+                          + [(f"agents/{agent.name}", agent.manifest.get("settings") or [])])
     except Die:
         if not web:  # the page still has pull requests to show for a project that cannot start yet
             raise

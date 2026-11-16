@@ -211,7 +211,8 @@ def test_only_what_the_build_made_for_the_pages_is_served(ui, path):
 
 
 def test_without_a_build_the_pages_say_how_to_make_one(tmp_path):
-    shutil.copytree(REPO / "src/server", tmp_path / "src/server", ignore=shutil.ignore_patterns("__pycache__"))
+    for part in ("src/server", "src/orchestrator"):  # the server, with the auth.py it reads authentications with
+        shutil.copytree(REPO / part, tmp_path / part, ignore=shutil.ignore_patterns("__pycache__"))
     proc = subprocess.Popen([tmp_path / "src/server/server.py", "--port", "0", "--projects", tmp_path / "projects"],
                             stdout=subprocess.PIPE, text=True, env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)})
     try:

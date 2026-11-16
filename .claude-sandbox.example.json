@@ -4,29 +4,34 @@
   },
   "plugins": {
     "data-mounts": {
-      "mounts": ["/srv/datasets:/data:ro", "~/scratch:/scratch"]
+      "mounts": [
+        "/srv/datasets:/data:ro",
+        "~/scratch:/scratch"
+      ]
     },
     "kvm": {
-      "briefing": ["Disk images are mounted read-only at /data/vm-images.", "Boot them through a qcow2 overlay."]
+      "briefing": [
+        "Disk images are mounted read-only at /data/vm-images.",
+        "Boot them through a qcow2 overlay."
+      ]
     },
     "git-workspace": {
       "branchPrefix": "sandbox"
     },
     "upstream-proxy": {
-      "envFile": ".env",
       "routes": [
         {
           "name": "cribl",
           "port": 8081,
           "upstream": "${CRIBL_SERVER_URL}",
-          "allowMethods": ["GET"],
-          "allowPaths": ["/api/v1/"],
+          "allowMethods": [
+            "GET"
+          ],
+          "allowPaths": [
+            "/api/v1/"
+          ],
           "auth": {
-            "type": "oauth2_client_credentials",
-            "tokenUrl": "https://login.cribl.cloud/oauth/token",
-            "audience": "https://api.cribl.cloud",
-            "clientIdEnv": "CRIBL_CLIENT_ID",
-            "clientSecretEnv": "CRIBL_CLIENT_SECRET"
+            "credential": "cribl"
           },
           "containerEnv": {
             "CRIBL_SERVER_URL": "http://127.0.0.1:8081",
@@ -37,12 +42,15 @@
           "name": "azure-openai",
           "port": 8082,
           "upstream": "${AZURE_OPENAI_ENDPOINT}",
-          "allowMethods": ["POST"],
-          "allowPaths": ["/openai/"],
+          "allowMethods": [
+            "POST"
+          ],
+          "allowPaths": [
+            "/openai/"
+          ],
           "auth": {
-            "type": "header",
-            "header": "api-key",
-            "credential": "azure-openai"
+            "credential": "azure-openai",
+            "header": "api-key"
           },
           "containerEnv": {
             "AZURE_OPENAI_ENDPOINT": "http://127.0.0.1:8082",
@@ -55,16 +63,25 @@
           "name": "gcs",
           "port": 8083,
           "upstream": "https://storage.googleapis.com",
-          "allowMethods": ["GET", "HEAD"],
-          "allowPaths": ["/storage/v1/b/my-bucket/o", "/download/storage/v1/b/my-bucket/o"],
+          "allowMethods": [
+            "GET",
+            "HEAD"
+          ],
+          "allowPaths": [
+            "/storage/v1/b/my-bucket/o",
+            "/download/storage/v1/b/my-bucket/o"
+          ],
           "auth": {
-            "type": "gcp",
-            "serviceAccount": "sandbox-reader@my-project.iam.gserviceaccount.com",
+            "credential": "gcs-reader",
             "accessBoundary": {
-              "accessBoundaryRules": [{
-                "availableResource": "//storage.googleapis.com/projects/_/buckets/my-bucket",
-                "availablePermissions": ["inRole:roles/storage.objectViewer"]
-              }]
+              "accessBoundaryRules": [
+                {
+                  "availableResource": "//storage.googleapis.com/projects/_/buckets/my-bucket",
+                  "availablePermissions": [
+                    "inRole:roles/storage.objectViewer"
+                  ]
+                }
+              ]
             }
           },
           "containerEnv": {
@@ -78,10 +95,20 @@
       "command": "pnpm dev --port 3000"
     },
     "project-deps": {
-      "apt": ["ripgrep", "postgresql-client"],
-      "npm": ["pnpm@9"],
-      "pip": ["ruff"],
-      "setup": ["pnpm install --frozen-lockfile", "make bootstrap"]
+      "apt": [
+        "ripgrep",
+        "postgresql-client"
+      ],
+      "npm": [
+        "pnpm@9"
+      ],
+      "pip": [
+        "ruff"
+      ],
+      "setup": [
+        "pnpm install --frozen-lockfile",
+        "make bootstrap"
+      ]
     }
   }
 }

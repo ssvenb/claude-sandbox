@@ -5,7 +5,7 @@
 #
 # Routes are per-project, from the config file in the directory you launched from:
 #
-#   { "plugins": { "upstream-proxy": { "routes": [ ... ], "envFile": ".env" } } }
+#   { "plugins": { "upstream-proxy": { "routes": [ ... ] } } }
 #
 # No routes → the plugin does nothing, which is why it can stay on by default.
 
@@ -18,26 +18,14 @@ if [ "$(printf '%s' "$UPSTREAM_PROXY_ROUTES_JSON" | jq 'length')" = 0 ]; then
   return 0
 fi
 
-# The credentials a route names usually live in the target repo's own .env, which run.sh never
-# sources. Hand the path to the proxy and let IT read the file: sourcing here would put the secrets
-# in run.sh's environment, one stray pass_env away from the container. "envFile" (relative to
-# $HOST_CWD) overrides; /dev/null loads nothing.
-UPSTREAM_PROXY_ENV_FILE=$(plugin_config '.envFile' ".env")
-case "$UPSTREAM_PROXY_ENV_FILE" in /*|"") ;; *) UPSTREAM_PROXY_ENV_FILE="$HOST_CWD/$UPSTREAM_PROXY_ENV_FILE" ;; esac
-UPSTREAM_PROXY_ENV_ARGS=()
-if [ -n "$UPSTREAM_PROXY_ENV_FILE" ] && [ -f "$UPSTREAM_PROXY_ENV_FILE" ]; then
-  UPSTREAM_PROXY_ENV_ARGS=(--env-file "$UPSTREAM_PROXY_ENV_FILE")
-elif [ -n "$UPSTREAM_PROXY_ENV_FILE" ] && [ "$UPSTREAM_PROXY_ENV_FILE" != /dev/null ]; then
-  echo "ℹ️  upstream-proxy: no env file at '$UPSTREAM_PROXY_ENV_FILE'; routes must resolve from the host environment." >&2
-fi
-
-# A route's auth.credential names an api-key entry of your named authentications; the proxy reads
-# that file itself, for the same reason. run.sh says where it is.
-[ -z "${SANDBOX_AUTH_FILE:-}" ] || UPSTREAM_PROXY_ENV_ARGS+=(--auth-file "$SANDBOX_AUTH_FILE")
+# A route's auth.credential names an entry of your authentications, which the proxy reads itself:
+# no key ever passes through run.sh's environment, one stray pass_env away from the container.
+UPSTREAM_PROXY_ARGS=()
+[ -z "${SANDBOX_AUTH_FILE:-}" ] || UPSTREAM_PROXY_ARGS=(--auth-file "$SANDBOX_AUTH_FILE")
 
 # One proxy per project: every sandbox launched from this checkout with these routes shares it —
 # the first run starts it and the last one to exit stops it. A changed config gets a proxy of its own.
-UPSTREAM_PROXY_KEY=$(printf '%s\n' "$HOST_CWD" "$UPSTREAM_PROXY_ENV_FILE" "$UPSTREAM_PROXY_ROUTES_JSON" \
+UPSTREAM_PROXY_KEY=$(printf '%s\n' "$HOST_CWD" "${SANDBOX_AUTH_FILE:-}" "$UPSTREAM_PROXY_ROUTES_JSON" \
   | sha256sum | cut -c1-12)
 UPSTREAM_PROXY_DIR="${TMPDIR:-/tmp}/upstream-proxy-$(id -u)-$UPSTREAM_PROXY_KEY"
 mkdir -p -m 755 "$UPSTREAM_PROXY_DIR"
@@ -102,7 +90,7 @@ else
   # proxy.py takes a file; keep the routes out of the process table.
   printf '%s' "$UPSTREAM_PROXY_ROUTES_JSON" >"$UPSTREAM_PROXY_ROUTE_FILE"
   "$PLUGIN_DIR/host/proxy.py" \
-    ${UPSTREAM_PROXY_ENV_ARGS[@]+"${UPSTREAM_PROXY_ENV_ARGS[@]}"} \
+    ${UPSTREAM_PROXY_ARGS[@]+"${UPSTREAM_PROXY_ARGS[@]}"} \
     "$UPSTREAM_PROXY_ROUTE_FILE" "$UPSTREAM_PROXY_SOCK_DIR" \
     </dev/null >"$UPSTREAM_PROXY_LOG" 2>&1 {UPSTREAM_PROXY_LOCK_FD}>&- &
   UPSTREAM_PROXY_PID=$!
@@ -137,12 +125,9 @@ pass_value UPSTREAM_PROXY_PORTS "$(jq -r '[.[] | "\(.name):\(.port)"] | join(" "
 # Each route declares the env the agent should see: endpoints pointed at loopback, and placeholder
 # credentials for SDKs that insist on one. The real values never leave this host.
 #
-# ${VAR} in a value is expanded from the route file's envFile, else run.sh's environment, so
-# non-secret settings (a deployment name, an api version) need not be duplicated here. This DOES
-# put that value in the container — naming a credential here defeats the proxy, so don't.
-declare -A UPSTREAM_PROXY_ENV=()
-env_scan_into UPSTREAM_PROXY_ENV "$UPSTREAM_PROXY_ENV_FILE"
-
+# ${VAR} in a value is expanded from run.sh's environment, so a non-secret setting the host already
+# has (a deployment name, an api version) need not be repeated. This DOES put that value in the
+# container — naming a credential here defeats the proxy, so don't.
 upstream_proxy_expand() {
   local in=$1 out="" name rest
   while [ -n "$in" ]; do
@@ -153,7 +138,7 @@ upstream_proxy_expand() {
         case "$rest" in
           *'}'*)
             name=${rest%%\}*}
-            out+="${UPSTREAM_PROXY_ENV[$name]-${!name-}}"
+            out+="${!name-}"
             in=${rest#*\}}
             ;;
           *) out+=$rest; in="" ;;

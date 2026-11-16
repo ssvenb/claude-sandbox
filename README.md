@@ -191,8 +191,8 @@ stay out of it; the image is tagged per agent, so switching back and forth doesn
 
 | Agent | CLI | Credentials | Launched as |
 |-------|-----|-------------|-------------|
-| `claude` | Claude Code (`@anthropic-ai/claude-code`, npm) | `CLAUDE_CODE_OAUTH_TOKEN`, or the `claude-home` plugin | `claude --dangerously-skip-permissions --effort ${CLAUDE_EFFORT:-medium} [--append-system-prompt briefing]` |
-| `copilot` | GitHub Copilot CLI (`@github/copilot`, npm) | `COPILOT_GITHUB_TOKEN`, or the `copilot-home` plugin | `copilot --allow-all [-i briefing]` |
+| `claude` | Claude Code (`@anthropic-ai/claude-code`, npm) | a `claude-token` authentication named by `CLAUDE_AUTH`, or the `claude-home` plugin | `claude --dangerously-skip-permissions --effort ${CLAUDE_EFFORT:-medium} [--append-system-prompt briefing]` |
+| `copilot` | GitHub Copilot CLI (`@github/copilot`, npm) | a `copilot-token` authentication named by `COPILOT_AUTH`, or the `copilot-home` plugin | `copilot --allow-all [-i briefing]` |
 
 ### Anatomy of an agent
 
@@ -256,7 +256,7 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | `claude-home` | 5 | on | claude | `claude-home` | — | mounts the host's `~/.claude` (or `$CLAUDE_HOME_DIR`) at `/home/node/.claude`; sets `AGENT_AUTH_PROVIDED=1` |
 | `copilot-home` | 5 | on | copilot | `copilot-home` | — | mounts the host's `~/.copilot` (or `$COPILOT_HOME_DIR`) at `/home/node/.copilot`; sets `AGENT_AUTH_PROVIDED=1` |
 | `docker-cli` | 5 | on | any | `docker-cli` | — | Docker CLI + compose plugin install; mounts the host's `/var/run/docker.sock` |
-| `netbird` | 5 | off | any | `mesh-network` | — | NetBird client install; enrols the container as its own peer (`sandbox-<RUN_ID>`) from `$NB_SETUP_KEY`, adding `NET_ADMIN` + `/dev/net/tun` |
+| `netbird` | 5 | off | any | `mesh-network` | — | NetBird client install; enrols the container as its own peer (`sandbox-<RUN_ID>`) from the `netbird-setup-key` authentication `NB_AUTH` names, adding `NET_ADMIN` + `/dev/net/tun` |
 | `ports` | 5 | on | any | `ports` | — | publishes the ports listed in `PORTS`: joins the central port proxy on the HOST, shared by every sandbox of every project, and offers what the agent listens on as unix sockets in a root-only directory; see [Published ports](#published-ports); nothing listed → does nothing |
 | `github-auth` | 10 | on | any | `git-credentials` | — | `gh` CLI install; mints App installation tokens on the host as the `github-token` credential (re-minted every 40 min), `gh auth login` with each one; briefs the agent to open a pull request for its work and fix whatever fails until its CI is green |
 | `gcp-auth` | 10 | off | any | `gcp-credentials` | — | Google Cloud CLI install; mints 1h service-account tokens on the host and makes them the container's ambient identity: `gcloud` reads the token file, a stand-in GCE metadata server serves the client libraries |
@@ -305,7 +305,7 @@ so the agent cannot edit or disable its own guardrails.
   "defaultEnabled": false,
   "provides": ["mesh-network"],
   "requires": [],
-  "requiredEnv": ["NB_SETUP_KEY"],
+  "requiredEnv": ["NB_AUTH"],
   "secrets": ["NB_SETUP_KEY"]
 }
 ```
@@ -348,12 +348,11 @@ which must also be in `.env.example`; there a boolean is written as `1`/`0`). Th
 
 | Key | Meaning |
 |-----|---------|
-| `type` | `boolean` (a switch), `string`, `path` (a text field), `text` (several lines), `integer` (with optional `min`/`max`), `enum` (a dropdown of `choices`), `list` (of `items`, itself a type: a list of enums is a set of checkboxes), `map` (name → value pairs), `object` (its own `fields`), `json` (anything, edited as JSON) |
+| `type` | `boolean` (a switch), `string`, `path` (a text field), `text` (several lines), `integer` (with optional `min`/`max`), `enum` (a dropdown of `choices`), `list` (of `items`, itself a type: a list of enums is a set of checkboxes), `map` (name → value pairs), `object` (its own `fields`), `json` (anything, edited as JSON), `auth` (the name of one of your [authentications](#authentications--configclaude-sandboxauthjson) of the type(s) its `auth` names: a dropdown of those configured, see there) |
 | `label`, `description` | What the form shows. |
 | `default` | What applies while it is unset; shown as the placeholder or the switch's resting state. Informational: the owner still applies its own default. |
 | `placeholder` | An example value, for settings without a fixed default. |
 | `required` | The value must be set (inside an `object`; a plugin's `requiredEnv` is marked as well). |
-| `secret` | A password field. The file is plain text: keep it out of git when it holds one, or export the variable in the shell that starts the sandbox instead. |
 | `pattern` | A regular expression a string must match whole. |
 | `monospace` | Draw the field in a fixed-width font (commands, paths). |
 | `when` | Inside an `object`: show (and check) the field only while a sibling has one of these values, e.g. `{"type": ["header", "bearer"]}`. |
@@ -419,7 +418,8 @@ Recognised output:
 
 ```sh
 # shellcheck shell=bash
-[ -f "$GH_PRIVATE_KEY_FILE" ] || die "GH_PRIVATE_KEY_FILE not found: $GH_PRIVATE_KEY_FILE"
+# GH_APP_ID and GH_PRIVATE_KEY_FILE are filled from the authentication GH_AUTH names.
+[ -f "$GH_PRIVATE_KEY_FILE" ] || die "github-auth: the App's privateKeyFile is not there: $GH_PRIVATE_KEY_FILE"
 
 GITHUB_AUTH_DIR=$PLUGIN_DIR   # $PLUGIN_DIR is gone by the time the function runs
 github_auth_mint() {
@@ -511,8 +511,8 @@ configuration. `PROJECT_CONFIG_FILE` points somewhere else.
 {
   "plugins": {
     "upstream-proxy": {
-      "envFile": ".env",
-      "routes": [ { "name": "azure-openai", "port": 8082, "upstream": "${AZURE_OPENAI_ENDPOINT}" } ]
+      "routes": [ { "name": "azure-openai", "port": 8082, "upstream": "${AZURE_OPENAI_ENDPOINT}",
+                    "auth": { "credential": "azure-openai", "header": "api-key" } } ]
     },
     "project-deps": {
       "apt": ["ripgrep"],
@@ -531,7 +531,7 @@ a fallback used when the file, the section or the key is missing:
 ```sh
 # shellcheck shell=bash
 ROUTES=$(plugin_config_json '.routes' '[]')
-ENV_FILE=$(plugin_config '.envFile' ".env")
+PREFIX=$(plugin_config '.branchPrefix' "")
 ```
 
 Both the file and every key in it are optional, so a plugin that reads config must still work
@@ -545,11 +545,11 @@ container's own Google identity, so `gcloud` and every Google client library wor
 real endpoints, real TLS, no emulator variables:
 
 ```json
-{ "env": { "GCP_SERVICE_ACCOUNT": "sandbox-reader@my-project.iam.gserviceaccount.com" },
-  "plugins": { "gcp-auth": { "enabled": true } } }
+{ "env": { "GCP_AUTH": "data" }, "plugins": { "gcp-auth": { "enabled": true } } }
 ```
 
-`run.sh` mints a 1-hour token for the account with your own gcloud login (you need
+where `data` is a `gcp-service-account` of your authentications. `run.sh` mints a 1-hour token for
+its account with your own gcloud login (you need
 `roles/iam.serviceAccountTokenCreator` on it) and re-mints it every 40 minutes as the `gcp-token`
 credential. In the container, `gcloud` reads that file on every call, and a root-owned stand-in
 for the GCE metadata server hands it to the client libraries, which find it through
@@ -559,26 +559,32 @@ token, usable from anywhere until it expires, but never anything it could mint a
 it can do is decided by the account's IAM roles alone. For per-method/path restrictions on top,
 use the proxy route below instead.
 
-### Model API keys through `upstream-proxy`
+### Credentials of `upstream-proxy` routes
 
-A model provider's API key is an `api-key` entry of your [authentications](#authentications--configclaude-sandboxauthjson),
-named by a route's `auth.credential` in place of `valueEnv`; `bearer` sends it as
-`Authorization: Bearer <key>` (OpenAI and most others), `header` under the header you name
-(`x-api-key` for Anthropic, `api-key` for Azure OpenAI):
+A route's `auth.credential` names one of your [authentications](#authentications--configclaude-sandboxauthjson),
+and its type says how the proxy authenticates with it:
+
+| Type | Sent as |
+|------|---------|
+| `api-key` (a model provider's key, say) | `Authorization: Bearer <key>` (OpenAI and most others), or as it is in the header `auth.header` names (`x-api-key` for Anthropic, `api-key` for Azure OpenAI) |
+| `oauth2-client` | `Authorization: Bearer <token>`, a client-credentials token from its `tokenUrl` (with its `audience`), cached until a minute before it expires |
+| `gcp-service-account` | `Authorization: Bearer <token>`, minted with your gcloud login for its `serviceAccount` (none: your own account), see below |
 
 ```json
 { "name": "azure-openai", "port": 8082, "upstream": "https://my-resource.openai.azure.com",
-  "auth": { "type": "header", "header": "api-key", "credential": "azure-openai" },
+  "auth": { "credential": "azure-openai", "header": "api-key" },
   "containerEnv": { "AZURE_OPENAI_ENDPOINT": "http://127.0.0.1:8082", "AZURE_OPENAI_API_KEY": "proxied-on-the-host" } }
 ```
 
-The key stays in the host proxy: the agent's SDK gets a placeholder and the loopback address.
-A name `auth.json` lacks, or a file others can read, fails `run.sh` at startup.
+The credential stays in the host proxy, which reads it from the file itself, again on every
+request: the agent's SDK gets a placeholder and the loopback address. A name the file lacks, one
+of another type, or a file others can read fails `run.sh` at startup. No credential named: the
+route adds none.
 
 ### Scoped GCP access through `upstream-proxy`
 
-A route with `"auth": {"type": "gcp"}` gives the agent Google Cloud access without a single
-credential entering the container. The host proxy mints the token itself, running
+A route whose `auth.credential` is a `gcp-service-account` gives the agent Google Cloud access
+without a single credential entering the container. The host proxy mints the token itself, running
 `gcloud auth print-access-token --impersonate-service-account=<serviceAccount>` on your own
 login, caches it, and re-mints it before it expires, so long runs keep working. Access is narrowed
 in three places:
@@ -658,27 +664,37 @@ else), each under a name:
 }
 ```
 
-| Type | Taken by | Fields |
+| Type | Named by | Fields |
 |------|----------|--------|
-| `github-app` | `github-auth`, as `GH_AUTH` | `appId`, `privateKeyFile`; optional `host`, `username` |
-| `gcp-service-account` | `gcp-auth`, as `GCP_AUTH` | `serviceAccount`; optional `project`, `credentialFile` |
-| `api-key` | `upstream-proxy`, as a route's `auth.credential` | `key`: a model provider's API key (or any other), sent as the route's `bearer` or `header` value |
+| `github-app` | `GH_AUTH` (`github-auth`), `.plugins["pr-review"].auth` | `appId`, `privateKeyFile`; optional `host` (GitHub Enterprise Server), `username` (what git and `gh` authenticate as, and the host `gh` login the page lists pull requests as; default: the App's bot) |
+| `gcp-service-account` | `GCP_AUTH` (`gcp-auth`), a route's `auth.credential` (`upstream-proxy`) | `serviceAccount`; optional `project`, `credentialFile` (a workload identity federation config, used instead of your gcloud login) |
+| `api-key` | a route's `auth.credential` (`upstream-proxy`) | `key` |
+| `oauth2-client` | a route's `auth.credential` (`upstream-proxy`) | `tokenUrl`, `clientId`, `clientSecret`; optional `audience` |
+| `netbird-setup-key` | `NB_AUTH` (`netbird`) | `key`; optional `managementUrl` (a self-hosted server) |
+| `ssh-key` | `SSH_AUTH` (`ssh-credentials`) | `privateKeyFile` (no passphrase); optional `user`, `knownHostsFile` |
+| `claude-token` | `CLAUDE_AUTH` (agent `claude`) | `token`, from `claude setup-token` |
+| `copilot-token` | `COPILOT_AUTH` (agent `copilot`) | `token`: a fine-grained PAT with "Copilot Requests", or a Copilot/`gh` OAuth token |
 
-A project picks one by name — `{"env": {"GH_AUTH": "coder"}}` — and so can a single run
-(`run.sh --set GH_AUTH=reviewer`, which is how `pr-review` reviews under another App than the
-one that wrote the pull request). Nothing of the file reaches the container: tokens are still
-minted on the host, and an `api-key` is read only by the host process of `upstream-proxy`, on
-every request (a rotated key takes effect at once), which refuses the file unless only you can
-read it (`chmod 600`).
+This file is the only place a key, a token or an identity is configured: no plugin or agent has a
+setting for one, and a project only names an entry — in the settings form, a dropdown of those of
+the right type (names only; what they hold never reaches the page). A single run may name another
+(`run.sh --set GH_AUTH=reviewer`, which is how `pr-review` reviews under another App than the one
+that wrote the pull request). The file must be readable by you alone (`chmod 600`), or nothing
+uses it. Nothing of it reaches the container but what a plugin hands over: GitHub and Google
+tokens are minted on the host, and `upstream-proxy` keeps its credentials in its host process.
 
-The core (`src/orchestrator/auth.py`) knows no provider. A plugin that authenticates declares in
-its manifest which setting names the entry and which of its own settings each field fills, and
-then runs exactly as if those had been set one by one (they still can be):
+The core (`src/orchestrator/auth.py`) knows the types, no provider. A plugin or an agent declares a
+setting of type `auth` naming the type it takes, and which of its own variables each field of the
+entry fills; its stages then read those variables as before, and no project can set them itself
+(they are not in `.env.example`):
 
 ```json
-"auth": {"type": "github-app", "env": "GH_AUTH",
-         "fields": {"appId": "GH_APP_ID", "privateKeyFile": "GH_PRIVATE_KEY_FILE", "host": "GH_HOST", "username": "GH_USERNAME"}}
+{"env": "GH_AUTH", "type": "auth", "auth": "github-app", "label": "GitHub App",
+ "fills": {"appId": "GH_APP_ID", "privateKeyFile": "GH_PRIVATE_KEY_FILE", "host": "GH_HOST", "username": "GH_USERNAME"}}
 ```
+
+Without `fills` (a route's `credential`, `pr-review`'s `auth`) the setting only names the entry,
+and its owner reads the file itself, from `$SANDBOX_AUTH_FILE`, which `run.sh` hands every stage.
 
 ### Watching and starting: `web_poll`, `web_start`
 
@@ -820,15 +836,11 @@ only required while that agent or plugin is in use.
 | `SANDBOX_WEB_BIND` / `SANDBOX_WEB_NAME` | core | Set by the web UI for every `run.sh` it starts: the address it listens on, and the host name its `--bind` gave for it (plugins that publish what a session serves default to it) |
 | `PORTS` | ports | Space-separated ports a sandbox opens: published on the host, and shown on the dashboard, while something in it listens on them (default: none) |
 | `PORTS_BIND` | ports | Address the central port proxy publishes the sandboxes' ports on (default: `SANDBOX_WEB_BIND`, else `127.0.0.1`; `0.0.0.0` for your whole network) |
-| `CLAUDE_CODE_OAUTH_TOKEN` | agents/claude | Claude Code OAuth token (`claude setup-token`). Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does |
+| `CLAUDE_AUTH` | agents/claude | Name of the `claude-token` authentication Claude Code runs with. Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does |
 | `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low`, `medium` (the sandbox default), `high`, `xhigh`, `max` |
-| `COPILOT_GITHUB_TOKEN` | agents/copilot | Fine-grained PAT with the "Copilot Requests" permission (or a Copilot/`gh` OAuth token). Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
+| `COPILOT_AUTH` | agents/copilot | Name of the `copilot-token` authentication Copilot runs with. Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
 | `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_CA_CERTS` / `ENABLE_DEV_SERVER` / `ENABLE_PORTS` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_NETBIRD` / `ENABLE_GCP_AUTH` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_PR_REVIEW` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `gcp-auth`, `netbird`, `pr-review` and `ssh-credentials`) |
-| `GH_AUTH` | github-auth | Name of a `github-app` authentication, which fills the four below |
-| `GH_APP_ID` | github-auth | GitHub App ID |
-| `GH_PRIVATE_KEY_FILE` | github-auth | Host path to the App's `.pem` private key |
-| `GH_HOST` | github-auth | GitHub hostname for Enterprise Server (default `github.com`) |
-| `GH_USERNAME` | github-auth | Username git and `gh` authenticate as with the installation token (default: the App's bot login) |
+| `GH_AUTH` | github-auth | Name of the `github-app` authentication the sandbox authenticates as |
 | `BASE_BRANCH` | git-workspace | Branch to cut from (default: the repo's own default branch, via `origin/HEAD`) |
 | `HOST_WORKSPACE_DIR` | cwd-workspace | Host dir mounted at `/workspace` (default: `run.sh`'s cwd) |
 | `BRANCH_PREFIX` | git-workspace | Leading segment of the per-run branch name; `.plugins["git-workspace"].branchPrefix` in the project's `.claude-sandbox.json` wins over it, and with neither it defaults to the agent manifest's `branchPrefix`, else the agent's directory name |
@@ -864,7 +876,7 @@ The core is grouped by role under `src/`; each folder has one reason to change.
 | [pyproject.toml](pyproject.toml), [uv.lock](uv.lock) | the uv project: Python version, and the test tools as its `dev` group |
 | [Dockerfile](Dockerfile) | image: base tools, agent install stage, plugin install stage, permissions |
 | [src/orchestrator/](src/orchestrator) | **decides what a run is and starts it** (Python): the command line, build and `docker run` (`main.py`), project config and settings (`config.py`), named authentications (`auth.py`), agent (`agents.py`) and plugin (`plugins.py`) resolution, the plugins' stages (`stage.py`), the sandbox's own settings (`kernel.json`) |
-| [src/contract/host/](src/contract/host) | **what a plugin's or agent's `host.sh` / `web.sh` is sourced with** (bash): `stage.sh` (the shell that sources them), `plugins.sh` (`pass_*`, `on_exit`, `web_*`), `agents.sh`, `project-config.sh` (`plugin_config`), `project-env.sh` (`project_env`, `env_scan_into`) |
+| [src/contract/host/](src/contract/host) | **what a plugin's or agent's `host.sh` / `web.sh` is sourced with** (bash): `stage.sh` (the shell that sources them), `plugins.sh` (`pass_*`, `on_exit`, `web_*`), `agents.sh`, `project-config.sh` (`plugin_config`) |
 | [src/contract/container/](src/contract/container) | the same contract in the image: `plugins.sh` (stage runner, fragment/secret listing), `agents.sh` (manifest lookup, stage runner) |
 | [src/boot/](src/boot) | **from started container to running agent**: `entrypoint.sh` (root stage, privilege handoff), `agent-setup.sh` (agent stage, launch) |
 | [src/services/credentials/](src/services/credentials) | `register_credential`: minting on the host, refreshing, the `/run/credentials` mount |
@@ -887,7 +899,7 @@ piece by piece, to keep the code that has to be maintained here small:
 |---|---|
 | Markdown rendering, terminal loading, component plumbing in the web UI | **replaced** by npm packages (React, `react-markdown`, `@xterm/xterm`), bundled by Vite — see [web/package.json](web/package.json) |
 | `src/server/server.py`'s HTTP layer → FastAPI/Starlette | kept: the server tunnels what plugins serve (VS Code's `code serve-web`) over raw sockets, upgrade requests included, which ASGI does not expose; sessions are ptys and pipes read by threads. A framework would replace the ~80 lines of routing and leave the rest |
-| `.env.example` scanning (`config.py`) → `python-dotenv` | kept: 30 lines, and its rules must match `env_scan_into`, the bash twin plugins use (a test holds the two together); `python-dotenv` reads quotes and comments differently and has no "commented defaults" mode |
+| `.env.example` scanning (`config.py`) → `python-dotenv` | kept: 30 lines; `python-dotenv` reads quotes and comments differently and has no "commented defaults" mode |
 | GitHub App JWT (`mint-gh-token.py`) → `PyJWT` + `cryptography` | kept: ten lines around `openssl dgst`, against a compiled dependency in every environment |
 | Settings validation (`src/server/server.py`) → `pydantic` / `jsonschema` | kept: the types are declared by plugin manifests at run time, so a schema library would need a translation layer as long as the checks |
 | Credential-injecting proxy (`upstream-proxy`), port proxy (`portd.py`) | kept: socket plumbing with a security boundary and their own tests; no library does this job as is |

@@ -104,7 +104,6 @@ export interface SettingSpec {
   default?: Json;
   placeholder?: string;
   required?: boolean;
-  secret?: boolean;
   monospace?: boolean;
   pattern?: string;
   min?: number;

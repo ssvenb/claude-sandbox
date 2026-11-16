@@ -45,7 +45,11 @@ def calls(done, command):
 
 def test_the_host_pipeline_builds_and_runs_the_image(sb, run_sh):
     sb.dotenv("API_SECRET=hunter2\nCLAUDE_EFFORT=low\n")  # the repo's own: not read
-    done = run_sh(config={**BASE, "env": {**BASE["env"], "CLAUDE_CODE_OAUTH_TOKEN": "oauth-tok", "CLAUDE_EFFORT": "high"}})
+    auth = sb.tmp / "auth.json"  # the token is an authentication the project only names
+    auth.write_text(json.dumps({"max": {"type": "claude-token", "token": "oauth-tok"}}))
+    auth.chmod(0o600)
+    done = run_sh(config={**BASE, "env": {**BASE["env"], "CLAUDE_AUTH": "max", "CLAUDE_EFFORT": "high"}},
+                  SANDBOX_AUTH_FILE=auth)
     assert done.returncode == 0, done.stderr
     [build], [run] = calls(done, "build"), calls(done, "run")
     plugins = ("herdr ports data-mounts upstream-proxy cwd-workspace package-managers "
@@ -198,7 +202,10 @@ def test_a_chat_runs_without_a_terminal_behind_the_agents_bridge(sb, run_sh):
 def test_a_plugin_refusing_stops_the_run_before_docker(run_sh):
     done = run_sh()  # no CLAUDE_CODE_OAUTH_TOKEN: the agent's host.sh dies
     assert done.returncode == 1 and done.calls == []
-    assert "CLAUDE_CODE_OAUTH_TOKEN must be set" in done.stderr and "Traceback" not in done.stderr
+    assert "Claude Code needs credentials: set CLAUDE_AUTH" in done.stderr and "Traceback" not in done.stderr
+    # A token is not a setting a project makes: it only names one.
+    done = run_sh(config={**BASE, "env": {**BASE["env"], "CLAUDE_CODE_OAUTH_TOKEN": "t"}})
+    assert ".env.CLAUDE_CODE_OAUTH_TOKEN is not a sandbox setting" in done.stderr
 
 
 def test_what_a_host_stage_exports_reaches_docker(sb, run_sh):

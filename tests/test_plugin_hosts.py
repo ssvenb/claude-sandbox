@@ -522,7 +522,8 @@ def test_upstream_proxy_reads_a_routes_named_credential_itself(proxy_sb):
     assert run.env == {"UPSTREAM_PROXY_PORTS": "api:18080"}
     assert not any("hunter2" in a for a in run.args)
     proxy_sb.config({"plugins": {"upstream-proxy": {"routes": routes(auth={"type": "bearer", "credential": "nobody"})}}})
-    proxy_sb.plugin("upstream-proxy", SANDBOX_AUTH_FILE=file).dies("has no api-key authentication of that name")
+    died = proxy_sb.plugin("upstream-proxy", SANDBOX_AUTH_FILE=file).dies("route 'api': auth.credential 'nobody'")
+    assert "has no api-key authentication of that name" in died.err and "Traceback" not in died.err
 
 
 def test_upstream_proxy_is_shared_while_another_run_uses_it(proxy_sb):

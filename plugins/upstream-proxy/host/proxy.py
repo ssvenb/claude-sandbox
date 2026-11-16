@@ -430,7 +430,11 @@ def main() -> int:
 
     servers = []
     for cfg in raw:
-        route = _Route(cfg)
+        try:
+            route = _Route(cfg)
+        except (ValueError, RuntimeError) as e:  # a misconfigured route or no host login: what is wrong, not a traceback
+            log(f"route '{cfg.get('name')}': {e}")
+            return 1
         path = os.path.join(sock_dir, f"{route.name}.sock")
         # AF_UNIX paths are capped around 108 bytes and the kernel's error says nothing useful.
         if len(path.encode()) > 100:

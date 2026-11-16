@@ -30,7 +30,6 @@ decides what, if anything, crosses over.
 """
 from __future__ import annotations
 
-import glob
 import json
 import os
 import re
@@ -135,12 +134,8 @@ def load_project(env: dict) -> Project:
 
 
 def projects_dir(env: dict) -> Path:
-    """Where the projects' files are: a <name>.json each. A list of directories there (what it
-    used to be) is turned into those files first."""
-    path = Path(env.get("SANDBOX_PROJECTS_DIR") or Path(env.get("HOME") or Path.home()) / ".config/claude-sandbox/projects")
-    if path.is_file():
-        _migrate(path)
-    return path
+    """Where the projects' files are: a <name>.json each."""
+    return Path(env.get("SANDBOX_PROJECTS_DIR") or Path(env.get("HOME") or Path.home()) / ".config/claude-sandbox/projects")
 
 
 def project_names(directory) -> list[str]:
@@ -184,34 +179,6 @@ def repo_dir(env: dict, name: str, repo) -> str:
         if subprocess.run(["git", "-C", str(path), "fetch", "--quiet", "--prune", "origin"], **git).returncode:
             say(f"⚠️  Project '{name}': could not fetch {repo}; working from the last fetch", file=sys.stderr)
     return str(path)
-
-
-def _migrate(listing: Path) -> None:
-    """The list of project directories (one per line, `~/code/*/.git` globs too) turned into a
-    file per project: the directory as its repo, and the .claude-sandbox.json it held, which stays."""
-    dirs = []
-    for line in listing.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        for match in sorted(glob.glob(os.path.expanduser(line))) if glob.has_magic(line) else [os.path.expanduser(line)]:
-            match = Path(match)
-            match = match.parent if match.name == ".git" else match
-            if match.is_dir() and str(match) not in dirs:
-                dirs.append(str(match))
-    listing.rename(listing.with_name(listing.name + ".old"))
-    listing.mkdir()
-    for d in dirs:
-        name, n = Path(d).name, 2
-        while (listing / f"{name}.json").exists():
-            name, n = f"{Path(d).name}-{n}", n + 1
-        try:
-            config = json.loads((Path(d) / ".claude-sandbox.json").read_text())
-        except (OSError, ValueError):
-            config = {}
-        config = config if isinstance(config, dict) else {}
-        (listing / f"{name}.json").write_text(json.dumps({"repo": d, **config}, indent=2) + "\n")
-    say(f"📁 {listing}: a file per project now, {len(dirs)} made from the list (kept as {listing.name}.old)", file=sys.stderr)
 
 
 def sandbox_vars(env: dict) -> set[str]:

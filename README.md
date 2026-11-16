@@ -41,10 +41,7 @@ want to build without running.
 claude-sandbox-web        # http://127.0.0.1:8787  (--port N, --projects DIR, --allow-host NAME)
 ```
 
-The projects are the `<name>.json` files in `~/.config/claude-sandbox/projects`. (A list of
-directories there, as it used to be, becomes a file per project — each directory as its `repo`,
-with the `.claude-sandbox.json` it held — the first time it is read; the list is kept as
-`projects.old`.) `claude-sandbox-web` is
+The projects are the `<name>.json` files in `~/.config/claude-sandbox/projects`. `claude-sandbox-web` is
 `src/server/serve.sh`, the server (`src/server/server.py`) in the uv environment.
 
 The home page is a dashboard of all your sandboxes. On top is a box to start a session by writing

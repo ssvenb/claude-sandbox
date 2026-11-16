@@ -1,7 +1,9 @@
 # shellcheck shell=bash
 # Web stage: the project's open pull requests and issues, each linking to its GitHub page. Asked
-# through the host's own `gh` login — yours, as the project's GH_USERNAME when it names one (gh
-# keeps a token per account); the App's tokens are for the container.
+# with an installation token of the project's GitHub App (GH_AUTH), so the host needs no gh login
+# of its own: what the page does on GitHub (closing a pull request) is done as the App's bot. A
+# project without one is asked through the host's own `gh` login instead — yours, as its
+# GH_USERNAME when it names one (gh keeps a token per account).
 #
 # Issues get a section. Pull requests show only for the run a later plugin ties them to
 # (git-workspace, by branch): on that run's session row, where they offer to be closed when the
@@ -14,9 +16,36 @@ if ! command -v gh >/dev/null; then
   return 0
 fi
 
-# The project's account, not whichever one gh has active: a host logged in to several picks per project.
+# github_app_token: an installation token of the project's App for its origin, in gh_token. The
+# page asks every minute, and minting is two API calls, so one is kept for 40 minutes (tokens last
+# 60) in a directory only this user can read; failing, the minter's complaint becomes a note.
+github_app_token() {
+  local origin dir file err
+  origin=$(git -C "$HOST_CWD" remote get-url origin)
+  dir=${XDG_CACHE_HOME:-$HOME/.cache}/claude-sandbox/github-auth
+  file=$dir/$(printf '%s\n' "$GH_APP_ID" "${GH_HOST:-github.com}" "$origin" | cksum | cut -d" " -f1)
+  if [ -n "$(find "$file" -mmin -40 2>/dev/null)" ]; then
+    gh_token=$(cat "$file")
+    return 0
+  fi
+  mkdir -p "$dir" && chmod 700 "$dir"
+  err=$(mktemp)
+  if gh_token=$(GH_APP_ID="$GH_APP_ID" GH_PRIVATE_KEY_FILE="$GH_PRIVATE_KEY_FILE" GH_HOST="${GH_HOST:-github.com}" \
+       REPO_URL="$origin" timeout 30 "$PLUGIN_DIR/host/mint-gh-token.py" 2>"$err") && [ -n "$gh_token" ]; then
+    (umask 077 && printf '%s' "$gh_token" >"$file.tmp" && mv -f "$file.tmp" "$file")
+  else
+    web_note "$(head -n 1 "$err" | grep . || echo "mint-gh-token: failed or timed out")"
+    gh_token=
+  fi
+  rm -f "$err"
+  [ -n "$gh_token" ]
+}
+
 gh_token=
-if [ -n "${GH_USERNAME:-}" ] &&
+if [ -n "${GH_APP_ID:-}" ] && [ -n "${GH_PRIVATE_KEY_FILE:-}" ]; then
+  github_app_token || return 0
+# The project's account, not whichever one gh has active: a host logged in to several picks per project.
+elif [ -n "${GH_USERNAME:-}" ] &&
    ! gh_token=$(gh auth token --hostname "${GH_HOST:-github.com}" --user "$GH_USERNAME" 2>/dev/null); then
   web_note "gh is not logged in as $GH_USERNAME on ${GH_HOST:-github.com} (gh auth login)"
   return 0
@@ -27,7 +56,7 @@ fi
 github_gh() {
   local err rc=0
   err=$(mktemp)
-  github_out=$(cd "$HOST_CWD" && { [ -z "$gh_token" ] || export GH_TOKEN=$gh_token; } && timeout 30 gh "$@" 2>"$err") || rc=$?
+  github_out=$(cd "$HOST_CWD" && { [ -z "$gh_token" ] || export GH_TOKEN=$gh_token GH_ENTERPRISE_TOKEN=$gh_token; } && timeout 30 gh "$@" 2>"$err") || rc=$?
   [ "$rc" = 0 ] || web_note "gh $1 $2: $(head -n 1 "$err" | grep . || echo "failed or timed out")"
   rm -f "$err"
   return "$rc"

@@ -60,8 +60,9 @@ that unsets it again. A filter narrows the form; the **JSON** view edits the who
 checks every declared value against its type before writing, and keeps whatever the form has no
 control for; the next session reads the file.
 For a project whose
-`origin` is on GitHub it lists the open pull requests, with their CI status, and issues through the
-host's `gh` login, each a link to its GitHub page (one tab per item, brought to the front when it
+`origin` is on GitHub it lists the open pull requests, with their CI status, and issues with a token of
+the project's GitHub App (`GH_AUTH`; the host's own `gh` login when it names none; the App then needs read access to issues, checks and commit statuses, and
+write to pull requests to close one), each a link to its GitHub page (one tab per item, brought to the front when it
 is already open); a PR on a per-run branch (`<prefix>/<date>-<RUN_ID>`) gets a **Resume** button,
 which is `run.sh --resume <RUN_ID>`; an ended session in the list has one too. An issue's
 **Resolve** starts a new session whose agent begins on it straight away: its first message

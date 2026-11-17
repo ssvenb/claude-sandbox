@@ -1,19 +1,21 @@
-// A project's sandbox settings, its file in ~/.config/claude-sandbox/projects, as a form (SettingsCards) or as the
-// whole file in JSON. A setting left unset falls through to your shell, then its
-// default. run.sh reads the file on the project's next session.
-import { useMemo, useReducer, useRef, useState, type FormEvent } from 'react';
+// A settings file — a project's (SettingsCards), your authentications (AuthCards) — as a form or as
+// the whole file in JSON.
+import { useMemo, useReducer, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { message } from '../../api/client';
-import { saveConfig } from '../../api/sessions';
-import type { Json, JsonObject, ProjectConfig } from '../../api/types';
-import { projectName } from '../../lib/session';
+import type { Json, JsonObject } from '../../api/types';
 import { FormContext, type FormHandle } from './FormContext';
-import { SettingsCards } from './SettingsCards';
 import { clone, isObject, pretty, tidy } from './slots';
 
 interface Props {
-  project: string;
-  /** The file as it is, and what can be set in it. */
-  declared: ProjectConfig;
+  title: string;
+  /** Where the file is, whether it is there yet, and what it holds. */
+  file: string;
+  exists: boolean;
+  config: JsonObject;
+  /** Writes the file. */
+  save: (config: JsonObject) => Promise<unknown>;
+  /** The form's cards, drawn from the draft they write into and the filter's text in lower case. */
+  cards: (draft: JsonObject, query: string) => ReactNode;
   onClose: () => void;
   /** After the file was written. */
   onSaved: () => void;
@@ -36,8 +38,8 @@ function fileOf(draft: JsonObject): JsonObject {
   return next;
 }
 
-export function SettingsForm({ project, declared, onClose, onSaved }: Props) {
-  const draft = useRef(clone(declared.config));
+export function SettingsForm({ title, file, exists, config, save: write, cards, onClose, onSaved }: Props) {
+  const draft = useRef(clone(config));
   const [mode, setMode] = useState<Mode>('form');
   const [gen, setGen] = useState(0);  // the body is drawn anew from the draft, after the other view
   const [error, setError] = useState('');
@@ -84,7 +86,7 @@ export function SettingsForm({ project, declared, onClose, onSaved }: Props) {
     e.preventDefault();
     setError('');
     try {
-      await saveConfig(project, result());
+      await write(result());
       onClose();
       onSaved();  // what the plugins show now, or run.sh's complaint about the file
     } catch (err) {
@@ -96,10 +98,10 @@ export function SettingsForm({ project, declared, onClose, onSaved }: Props) {
     <FormContext value={form}>
       <form onSubmit={save}>
         <header>
-          <h2>{projectName(project)} settings</h2>
-          <p>{declared.file + (declared.exists ? '' : ' (not there yet: saving creates it)')}</p>
+          <h2>{title}</h2>
+          <p>{file + (exists ? '' : ' (not there yet: saving creates it)')}</p>
           <div className="tools">
-            <input type="search" placeholder="Filter settings and plugins…" aria-label="Filter" disabled={mode === 'json'}
+            <input type="search" placeholder="Filter settings…" aria-label="Filter" disabled={mode === 'json'}
               onChange={e => setQuery(e.target.value)} />
             <div className="modes" role="group" aria-label="View">
               <button type="button" aria-pressed={mode === 'form'} onClick={() => switchTo('form')}>Form</button>
@@ -114,7 +116,7 @@ export function SettingsForm({ project, declared, onClose, onSaved }: Props) {
           </div>
         ) : (
           <div className="body" key={'form' + gen}>
-            <SettingsCards declared={declared} draft={draft.current} query={query.trim().toLowerCase()} />
+            {cards(draft.current, query.trim().toLowerCase())}
           </div>
         )}
         <footer>

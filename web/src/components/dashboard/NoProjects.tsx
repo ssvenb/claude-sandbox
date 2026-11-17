@@ -3,7 +3,7 @@ export function NoProjects({ file }: { file?: string }) {
   return (
     <div className="empty">
       <b>No projects yet</b>
-      Add a file per project to {file}: <code>my-app.json</code> holding <code>{'{"repo": "~/code/my-app"}'}</code>,
+      Add one in the menu's Settings, or a file per project to {file}: <code>my-app.json</code> holding <code>{'{"repo": "~/code/my-app"}'}</code>,
       a path on this machine or a git URL.
     </div>
   );

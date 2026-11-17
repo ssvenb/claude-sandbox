@@ -25,7 +25,9 @@ export default function Chat() {
   const state = over !== null ? null : t.status;
   const working = state === 'working';
 
-  useTabIdentity(session && `${titled(session)} · ${projectName(session.project)}`, !session ? 'starting' : state ?? 'unlit');
+  // As on the dashboard's cards: idle with background tasks still running counts as working.
+  const lamp = state === 'idle' && t.tasks.length ? 'working' : state;
+  useTabIdentity(session && `${titled(session)} · ${projectName(session.project)}`, !session ? 'starting' : lamp ?? 'unlit');
 
   // The column keeps its newest line in view, until the reader scrolls up.
   const scroller = useRef<HTMLElement>(null), log = useRef<HTMLDivElement>(null);

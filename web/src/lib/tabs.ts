@@ -43,4 +43,4 @@ export const closeTab = (name: string): void => opened.get(name)?.close();
 
 export const sessionTab = (id: string): string => 'session-' + id;
 export const itemTab = (url: string): string => 'item-' + url;
-export const terminalTab = (project: string): string => 'terminal-' + project;
+export const TERMINAL_TAB = 'terminal';

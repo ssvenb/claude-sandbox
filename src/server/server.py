@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Web UI to orchestrate sandboxes: a dashboard of the configured projects with their sessions and
 whatever their enabled plugins have to show (`run.sh --web`: open pull requests and issues, say);
-a chat page per session, each in its own tab; a terminal page for a project's shell; and what a
+a chat page per session, each in its own tab; a terminal page for your shell; and what a
 plugin serves itself (web_server: VS Code in the browser, say), on our origin under /plugins/<name>/.
 
 Runs on the HOST, as you, next to run.sh — a session is `run.sh --project <name> --chat`: the agent behind its chat bridge (agents/<name>/chat.mjs), whose events (src/services/chat/chat-bridge.mjs)
 come out of run.sh's stdout and go to the page as server-sent events, while prompts come back as
 POSTs. The page is there from the first moment: what is typed while the sandbox still builds and
-boots waits here and is handed to the agent the moment it is ready. A project's terminal is your
-shell in a pty. Standard library only; the terminal page loads xterm.js from a CDN.
+boots waits here and is handed to the agent the moment it is ready. The terminal is your
+shell in a pty, in your home folder. Standard library only; the terminal page loads xterm.js from a CDN.
 
     src/server/server.py [--port 8787] [--bind 127.0.0.1] [--allow-host NAME]... [--projects DIR]
 
@@ -109,16 +109,8 @@ def config_file(project):
     return project_config.projects_dir(os.environ) / f"{project}.json"
 
 
-def project_dir(project):
-    """Where a project's repo is on this machine, cloned first if it is a URL's."""
-    try:
-        return project_config.repo_dir(os.environ, project, read_config(project)["config"].get("repo"))
-    except Die as e:
-        raise ValueError(str(e))
-
-
 def command(project, kind, run_id, task=None, chat=False, sets=None):
-    if kind == "shell":  # the project's terminal: your own shell, on this machine, in the project
+    if kind == "shell":  # the terminal: your own shell, on this machine
         return [os.environ.get("SHELL", "/bin/sh")]
     return [str(RUN_SH), "--project", project, "--resume" if kind == "resume" else "--run-id", run_id] \
         + (["--task", task] if task else []) + (["--chat"] if chat else []) \
@@ -126,7 +118,7 @@ def command(project, kind, run_id, task=None, chat=False, sets=None):
 
 
 class Session:
-    """A terminal: a project's shell, or an agent's own TUI (`"ui": "terminal"`), in a pty, held by
+    """A terminal: your shell (of no project), or an agent's own TUI (`"ui": "terminal"`), in a pty, held by
     src/server/holder.py so it outlives this server."""
     ui, mode = "terminal", "pty"
 
@@ -138,12 +130,11 @@ class Session:
         self.sets, self.once = sets or {}, once
         self.started, self.exit = time.time(), None
         self._fresh()
-        cwd = project_dir(project) if kind == "shell" else Path.home()
         self.dir = STATE / self.id
         self.dir.mkdir(parents=True)
         (self.dir / "meta.json").write_text(json.dumps({k: getattr(self, k) for k in (*META, "once")}))
         try:
-            hold(self.dir, self.mode, self.argv(task), cwd)
+            hold(self.dir, self.mode, self.argv(task), Path.home())
             self._attach(0)
         except OSError:
             shutil.rmtree(self.dir, ignore_errors=True)
@@ -1079,9 +1070,9 @@ def start(project, kind, run_id, task=None, ui=None, images=None, sets=None, onc
         for s in list(sessions.values()):
             if (s.project, s.run_id, s.kind == "shell") != (project, run_id, kind == "shell"):
                 continue
-            # Two containers on one branch would push over each other, and one terminal per
-            # project is enough: hand back the live one. An ended one stays (its tab shows how it
-            # ended) until the next one of its run, or of its project for a terminal, replaces it:
+            # Two containers on one branch would push over each other, and one terminal is
+            # enough: hand back the live one. An ended one stays (its tab shows how it
+            # ended) until the next one of its run, or the next terminal, replaces it:
             # a run is one session however often it is resumed, and a resumed chat replays it.
             if s.exit is None:
                 return s
@@ -1248,7 +1239,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if url.path == "/api/sessions":
                 req = json.loads(body)
-                if req.get("project") not in projects(self.server.projects_file):
+                if req.get("kind") == "shell":  # the terminal is of no project
+                    req["project"] = ""
+                elif req.get("project") not in projects(self.server.projects_file):
                     raise ValueError("not a configured project")
                 self.reply(200, start(req["project"], req.get("kind"), req.get("run_id"), req.get("task"),
                                       req.get("ui"), req.get("images")).json())

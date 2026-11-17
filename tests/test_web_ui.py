@@ -135,6 +135,13 @@ def board(tmp_path, browser, ui_dist):
     proc.wait(10)
 
 
+def terminal(board):
+    """Clicks the menu's Terminal button, opening the menu first unless it is open."""
+    if not board.is_visible("#board-menu"):
+        board.click("button[aria-label='Menu']")
+    board.click("#board-menu button[aria-label='Terminal']")
+
+
 def opens_tab(page, click):
     """The page a click opens, after it has loaded."""
     with page.context.expect_page() as new:
@@ -185,7 +192,7 @@ def test_the_dashboard_is_a_chat_bar_over_running_sessions_and_projects(board):
     assert board.query_selector("h1") is None and board.query_selector(".totals") is None
     assert board.locator("h2.band").all_inner_texts() == ["Projects"]  # nothing runs: no side for it, and no word about it
     assert "Nothing running" not in board.inner_text("#board")
-    for name in ("New session", "Terminal", "Settings"):  # the project's buttons, on its panel on the right
+    for name in ("New session", "Settings"):  # the project's buttons, on its panel on the right
         button = board.query_selector(f".project button[aria-label='{name}']")
         assert button.inner_text() == "" and button.query_selector("svg") and button.get_attribute("title")
     assert board.inner_text(".project .head h3 small") == "claude"  # the project's agent, as run.sh --web says
@@ -581,7 +588,7 @@ def test_the_pages_follow_the_browsers_day_or_night_unless_one_is_pinned(board):
     tab.click(".theme button[aria-label='Follow the browser']")
     assert tab.evaluate("document.documentElement.dataset.theme") is None
     assert paper(tab) == "rgb(15, 17, 35)"
-    term = opens_tab(board, lambda: board.click("button[aria-label='Terminal']"))
+    term = opens_tab(board, lambda: terminal(board))
     term.emulate_media(color_scheme="light")
     # and so does the terminal (which comes with xterm.js, loaded after the page itself)
     term.wait_for_function("window.term && term.options.theme.background === '#fbfbfe'")
@@ -589,14 +596,14 @@ def test_the_pages_follow_the_browsers_day_or_night_unless_one_is_pinned(board):
     term.wait_for_function("term.options.theme.background === '#0f1123'")
 
 
-def test_one_terminal_per_project_on_this_machine(board):
-    term = opens_tab(board, lambda: board.click("button[aria-label='Terminal']"))
+def test_one_terminal_on_this_machine_at_home(board):
+    term = opens_tab(board, lambda: terminal(board))
     term.wait_for_selector("header .what:has-text('terminal')")
     term.wait_for_function("decodeURIComponent(document.querySelector('link[rel=icon]').href).includes('<path')")
     term.click(".xterm")
-    term.keyboard.type("echo $(basename $PWD)-$((40+2))\n")
-    term.wait_for_selector("text=proj-42")  # in the project's directory
-    again_opens_nothing(board, lambda: board.click("button[aria-label='Terminal']"))
+    term.keyboard.type("test \"$PWD\" = \"$HOME\" && echo home-$((40+2))\n")
+    term.wait_for_selector("text=home-42")  # in your home folder
+    again_opens_nothing(board, lambda: terminal(board))
     assert board.query_selector(".window") is None and board.is_visible(NOBODY)  # a terminal is not a session
 
     term.keyboard.type("exit 3\n")
@@ -667,7 +674,7 @@ def test_deleting_a_session_closes_its_tabs_and_only_its_own(board):
     assert "/plugins/agent-workspace/?folder=" in code.url
     its_pr = opens_tab(board, lambda: board.click(f"{ROW} a.chip:has-text('#3')"))
     issue = opens_tab(board, lambda: board.click("text=A bug"))
-    term = opens_tab(board, lambda: board.click("button[aria-label='Terminal']"))
+    term = opens_tab(board, lambda: terminal(board))
 
     delete(board)
     for tab in (session, code, its_pr):
@@ -731,7 +738,7 @@ def test_stopping_keeps_the_session_and_its_tab_and_deleting_closes_them(board):
 
 def test_ctrl_c_copies_a_selection_and_interrupts_without_one(board):
     board.context.grant_permissions(["clipboard-read", "clipboard-write"])
-    term = opens_tab(board, lambda: board.click("button[aria-label='Terminal']"))
+    term = opens_tab(board, lambda: terminal(board))
     term.click(".xterm")
     term.keyboard.type("echo copy-me-$((40+2))\n")
     term.wait_for_selector("text=copy-me-42")
@@ -749,7 +756,7 @@ def test_ctrl_c_copies_a_selection_and_interrupts_without_one(board):
 
 
 def test_shift_drag_selects_while_the_program_has_the_mouse(board):
-    term = opens_tab(board, lambda: board.click("button[aria-label='Terminal']"))
+    term = opens_tab(board, lambda: terminal(board))
     term.click(".xterm")
     term.keyboard.type("printf '\\033[?1000h'; echo mouse-taken\n")  # what a TUI does
     term.wait_for_selector("text=mouse-taken")
@@ -776,7 +783,7 @@ def test_resolve_starts_a_session_on_the_items_task(board):
 @pytest.mark.parametrize("keys", ["Control+v", "Control+Shift+v"])
 def test_ctrl_v_pastes(board, keys):
     board.context.grant_permissions(["clipboard-read", "clipboard-write"])
-    term = opens_tab(board, lambda: board.click("button[aria-label='Terminal']"))
+    term = opens_tab(board, lambda: terminal(board))
     term.click(".xterm")
     term.evaluate("navigator.clipboard.writeText('pasted-$((2+3))')")
     term.keyboard.type("echo ")

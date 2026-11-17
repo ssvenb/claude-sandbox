@@ -95,20 +95,20 @@ def ui(tmp_path, ui_dist):
     proc.wait(5)
 
 
-def test_a_projects_terminal_runs_there_streams_and_is_one_per_project(ui):
+def test_the_terminal_runs_at_home_streams_and_is_the_only_one(ui):
     assert json.load(ui("/api/state"))["projects"] == [ui.project]
-    ask = {"project": ui.project, "kind": "shell"}
+    ask = {"kind": "shell"}  # of no project
     s = json.load(ui("/api/sessions", json.dumps(ask).encode()))
-    assert json.load(ui("/api/sessions", json.dumps(ask).encode()))["id"] == s["id"]  # one per project
+    assert json.load(ui("/api/sessions", json.dumps(ask).encode()))["id"] == s["id"]  # just the one
     assert ui(f"/api/sessions/{s['id']}/resize?cols=100&rows=30", b"").status == 200
-    ui(f"/api/sessions/{s['id']}/input", b"echo $(basename $PWD)-$((40+2)); exit 3\n")
+    ui(f"/api/sessions/{s['id']}/input", b"test \"$PWD\" = \"$HOME\" && echo home-$((40+2)); exit 3\n")
     seen, events = b"", ui(f"/api/sessions/{s['id']}/stream")
     for line in events:
         if line.startswith(b"data: ") and line != b"data: x\n":
             seen += base64.b64decode(line[6:])
         if line.startswith(b"event: exit"):
             break
-    assert b"proj-42" in seen
+    assert b"home-42" in seen
     [ended] = json.load(ui("/api/state"))["sessions"]  # kept, so its tab can show how it ended
     assert (ended["id"], ended["exit"]) == (s["id"], 3)
     again = json.load(ui("/api/sessions", json.dumps(ask).encode()))  # the next one replaces it
@@ -128,7 +128,7 @@ def test_a_proxy_may_put_the_page_on_another_port(ui):
 
 
 @pytest.mark.parametrize("body, headers, status", [
-    ({"project": "/etc", "kind": "shell"}, {}, 400),                       # not a configured project
+    ({"project": "/etc", "kind": "run"}, {}, 400),                         # not a configured project
     ({"kind": "resume", "run_id": "x; rm -rf"}, {}, 400),                  # not a run id
     ({"kind": "shell"}, {"Origin": "http://evil.example"}, 403),           # another site's page
     ({"kind": "shell"}, {"Host": "evil.example"}, 403),                    # DNS rebinding

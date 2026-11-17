@@ -10,12 +10,16 @@ container's metadata server reports the expiry as one hour from when this file w
 With $GCP_CREDENTIAL_FILE (a workload identity federation config, e.g. X.509 from
 `gcloud iam workload-identity-pools create-cred-config`) the host itself is the identity: gcloud
 reads that file instead of any login, federates and impersonates the service account it names, and
-its token is the one handed out. Each gcloud process exchanges afresh, so no stale cached token.
+its token is the one handed out. gcloud caches that token across runs (access_tokens.db) and only
+renews it in its last 5 minutes, so it runs here against a scratch config dir that links to all of
+yours except that cache: every mint is a fresh exchange with a full hour, as the metadata server
+assumes.
 """
 import json
 import os
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 
@@ -23,9 +27,24 @@ LIFETIME = 3600
 ACCOUNT = os.environ["GCP_SERVICE_ACCOUNT"]
 CRED_FILE = os.environ.get("GCP_CREDENTIAL_FILE")
 
-env = dict(os.environ, CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=CRED_FILE) if CRED_FILE else None
-done = subprocess.run(["gcloud", "auth", "print-access-token", "--quiet"], capture_output=True, text=True,
-                      env=env)
+
+def print_access_token(env=None):
+    return subprocess.run(["gcloud", "auth", "print-access-token", "--quiet"], capture_output=True,
+                          text=True, env=env)
+
+
+if CRED_FILE:
+    user_config = os.environ.get("CLOUDSDK_CONFIG") or os.path.expanduser("~/.config/gcloud")
+    with tempfile.TemporaryDirectory(prefix="gcp-auth-") as config:
+        # Properties, certificate_config.json and the rest stay yours; only the token cache is new.
+        if os.path.isdir(user_config):
+            for name in os.listdir(user_config):
+                if name != "access_tokens.db":
+                    os.symlink(os.path.join(user_config, name), os.path.join(config, name))
+        done = print_access_token(dict(os.environ, CLOUDSDK_CONFIG=config,
+                                       CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=CRED_FILE))
+else:
+    done = print_access_token()
 if CRED_FILE:
     if done.returncode != 0:
         sys.exit(f"mint-gcp-token: gcloud could not federate with {CRED_FILE}.\n{done.stderr.strip()}")

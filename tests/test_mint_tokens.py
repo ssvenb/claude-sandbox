@@ -181,6 +181,21 @@ def test_gcp_credential_file_mints_through_gcloud_without_iam(gcloud, monkeypatc
     assert api.requests == []
 
 
+def test_gcp_credential_file_never_reuses_gclouds_cached_token(gcloud, monkeypatch, capsys, tmp_path):
+    # gcloud hands back a cached federated token until its last 5 minutes; the metadata server
+    # would then promise an hour for a token about to die (issue #56).
+    user = tmp_path / "user-gcloud"
+    (user / "configurations").mkdir(parents=True)
+    (user / "access_tokens.db").write_text("cached")
+    monkeypatch.setenv("CLOUDSDK_CONFIG", str(user))
+    monkeypatch.setenv("GCP_CREDENTIAL_FILE", "/etc/wif.json")
+    gcloud('[ -d "$CLOUDSDK_CONFIG/configurations" ] && [ ! -e "$CLOUDSDK_CONFIG/access_tokens.db" ] '
+           '&& echo fresh')
+    run(GCP_MINT)
+    assert capsys.readouterr().out == "fresh\n"
+    assert (user / "access_tokens.db").read_text() == "cached"
+
+
 def test_gcp_credential_file_failure_names_the_file(gcloud, monkeypatch):
     gcloud("echo 'mTLS handshake failed' >&2; exit 1")
     monkeypatch.setenv("GCP_CREDENTIAL_FILE", "/etc/wif.json")

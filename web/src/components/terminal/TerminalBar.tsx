@@ -19,7 +19,7 @@ export function TerminalBar({ session: s, onStop, onDelete }: Props) {
   return (
     <header id="bar">
       <HomeLink />
-      <strong>{projectName(s.project)}</strong>
+      {s.project && <strong>{projectName(s.project)}</strong>}
       <span className={'what' + (running ? ' lit' : '') + (s.status === 'question' ? ' ask' : '')}>
         {label(s) + (!running ? `, exited ${s.exit}` : s.status ? ', ' + SAYS[s.status] : ', running')}
       </span>

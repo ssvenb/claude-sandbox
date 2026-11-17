@@ -36,9 +36,9 @@
   @media (prefers-reduced-motion: reduce) { #board-menu:popover-open { animation: none; } }
   @supports not (anchor-name: --a) { #board-menu { position: fixed; top: 64px; right: 14px; margin: 0; } }
   #board-menu .row { display: flex; justify-content: center; padding: 4px; }
-  #board-menu .sync { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0; border-radius: 9px; padding: 8px 10px; }
-  #board-menu .sync:hover { background: var(--sunk); }
-  #board-menu .sync svg { width: 16px; height: 16px; color: var(--muted); }
+  #board-menu :is(.sync, .term) { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0; border-radius: 9px; padding: 8px 10px; }
+  #board-menu :is(.sync, .term):hover { background: var(--sunk); }
+  #board-menu :is(.sync, .term) svg { width: 16px; height: 16px; color: var(--muted); }
 
   .board { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
            grid-template-rows: minmax(0, 1fr); gap: 12px 24px; margin-top: 20px; }

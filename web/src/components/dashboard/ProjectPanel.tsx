@@ -20,13 +20,12 @@ interface Props {
 /** A project: its buttons, what its plugins list for it (the page only draws it), and its ended
  *  sessions at its foot. */
 export function ProjectPanel({ project, info, lists, ended }: Props) {
-  const { configure, openTerminal, start } = useDashboardActions();
+  const { configure, start } = useDashboardActions();
   return (
     <section className="project">
       <div className="head">
         <h3 title={project}>{projectName(project)}{info?.agent && <small>{info.agent}</small>}</h3>
         <BusyButton className="glyph" onClick={() => configure(project)} title="Settings" aria-label="Settings"><Icon name="gear" /></BusyButton>
-        <BusyButton className="glyph" onClick={() => openTerminal(project)} title="Terminal" aria-label="Terminal"><Icon name="prompt" /></BusyButton>
         <BusyButton className="glyph primary" onClick={() => start({ project, kind: 'run' })} title="New session" aria-label="New session"><Icon name="plus" /></BusyButton>
       </div>
       <div className="notes">

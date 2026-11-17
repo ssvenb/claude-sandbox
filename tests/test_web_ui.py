@@ -897,12 +897,15 @@ def test_the_files_a_runs_checkout_changed_are_beside_its_chat_or_behind_a_heade
     tab.set_viewport_size({"width": 1400, "height": 800})
     tab.goto(f"{board.base}/chat#{s['id']}")
     # On a desk: a column of its own beside the chat, the button not needed.
-    tab.wait_for_selector("#changes .file")
+    tab.wait_for_selector("#changes .file:has-text('app.py')")
     # A tree of folders, each with the lines changed below it; a folder holding only a folder is one line with it.
-    rows = lambda: [" ".join(t.split()) for t in tab.locator("#changes .file, #changes summary").all_inner_texts()]  # noqa: E731
-    assert rows() == ["docs/guide +1", "A intro.md +1", "web +3", "lib +2", "A util.ts +2", "src +1", "A New.tsx +1", "M app.py +2 −1"]
+    rows = lambda: [" ".join(t.split()) for t in tab.locator("#changes .file:visible, #changes summary:visible").all_inner_texts()]  # noqa: E731
+    assert rows() == ["docs/guide +1", "web +3", "M app.py +2 −1"]  # folders start closed
     assert " ".join(tab.inner_text("#changes .head").split()) == "Changed files +6 −1"
-    tab.click("#changes summary:has-text('web')")  # closed: its folders and files go, its own line stays
+    for name in ["docs/guide", "web", "lib", "src"]:  # a click opens one
+        tab.click(f"#changes summary:has-text('{name}')")
+    assert rows() == ["docs/guide +1", "A intro.md +1", "web +3", "lib +2", "A util.ts +2", "src +1", "A New.tsx +1", "M app.py +2 −1"]
+    tab.click("#changes summary:has-text('web')")  # closed again: its folders and files go, its own line stays
     assert tab.is_hidden("#changes .file:has-text('util.ts')") and tab.is_visible("#changes summary:has-text('web')")
     assert tab.eval_on_selector("#changes", "e => e.getBoundingClientRect().left") > tab.eval_on_selector("#scroll", "e => e.getBoundingClientRect().right") - 1
     assert tab.is_hidden("header .files")

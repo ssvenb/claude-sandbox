@@ -91,7 +91,7 @@ def test_a_chat_boots_into_the_agents_bridge_and_its_sdk(image):
 
 def test_the_agent_cli_and_every_plugins_tools_are_installed(image):
     tools = ["/usr/bin/gh", "docker", "gcloud", "qemu-img", "cloud-localds", "virsh", "ssh", "sudo",
-             "terraform", "chromium", "/usr/local/bin/netbird", AGENT]
+             "terraform", "ruff", "chromium", "/usr/local/bin/netbird", AGENT]
     if AGENT == "claude":
         tools.append("playwright-mcp")
     probe = (f"for t in {' '.join(tools)}; do command -v $t >/dev/null || echo missing $t; done\n"

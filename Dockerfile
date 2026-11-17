@@ -35,6 +35,9 @@ RUN curl -fsSL https://apt.releases.hashicorp.com/gpg \
     && apt-get update && apt-get install -y --no-install-recommends terraform \
     && rm -rf /var/lib/apt/lists/*
 
+# Ruff, Python's linter and formatter. Debian has no package; the PyPI wheel is one static binary.
+RUN pip3 install --no-cache-dir --break-system-packages ruff
+
 # Headless Chromium, from Debian's repository. Docker has no user namespaces for its sandbox and a
 # 64 MB /dev/shm, so the Debian wrapper always adds the flags that work around both; Puppeteer is
 # pointed at it instead of downloading its own browser.

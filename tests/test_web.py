@@ -166,22 +166,6 @@ def test_the_projects_are_the_files_in_their_directory(tmp_path):
     assert web.projects(tmp_path / "none") == []
 
 
-def test_a_list_of_project_directories_becomes_a_file_per_project(tmp_path):
-    code = tmp_path / "code"
-    for name in ("beta", "alpha", "plain"):
-        (code / name).mkdir(parents=True)
-    (code / "alpha/.git").mkdir()
-    (code / "alpha/.claude-sandbox.json").write_text('{"env": {"AGENT": "copilot"}}')
-    (tmp_path / "other/plain").mkdir(parents=True)
-    listing = tmp_path / "projects"
-    listing.write_text(f"# all of them\n{code}/*/.git\n\n{code}/plain\n{tmp_path}/other/plain\n{tmp_path}/missing-*\n")
-    assert web.projects(listing) == ["alpha", "plain", "plain-2"]  # a name taken already gets a number
-    assert json.loads((listing / "alpha.json").read_text()) == {"repo": str(code / "alpha"), "env": {"AGENT": "copilot"}}
-    assert json.loads((listing / "plain-2.json").read_text()) == {"repo": str(tmp_path / "other/plain")}
-    assert (tmp_path / "projects.old").read_text().startswith("# all of them")  # the list is kept
-    assert (code / "alpha/.claude-sandbox.json").exists()  # and so is what it was made from
-
-
 def test_a_network_bind_admits_this_machines_own_names_only():
     names = web.local_names("0.0.0.0")
     assert {"127.0.0.1", "localhost", web.socket.gethostname()} <= names

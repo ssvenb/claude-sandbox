@@ -141,8 +141,6 @@ if [ "$WEB" = 1 ]; then
 
   step "Projects"
   listing="$HOME/.config/claude-sandbox/projects"
-  # A list of directories there (what it used to be) becomes a file per project.
-  [ ! -f "$listing" ] || "$here/.venv/bin/python" -c 'import sys; sys.path.insert(0, sys.argv[1]); from orchestrator.config import projects_dir; projects_dir({})' "$here/src"
   mkdir -p "$listing"
   for project in ${PROJECTS[@]+"${PROJECTS[@]}"}; do
     [ -d "$project" ] || die "--project $project: no such directory."

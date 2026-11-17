@@ -599,6 +599,8 @@ def test_the_pages_follow_the_browsers_day_or_night_unless_one_is_pinned(board):
 def test_one_terminal_on_this_machine_at_home(board):
     term = opens_tab(board, lambda: terminal(board))
     term.wait_for_selector("header .what:has-text('terminal')")
+    assert term.query_selector("header strong") is None and term.title().startswith("terminal")  # of no project
+    assert not board.is_visible("#board-menu")  # the click closed the menu
     term.wait_for_function("decodeURIComponent(document.querySelector('link[rel=icon]').href).includes('<path')")
     term.click(".xterm")
     term.keyboard.type("test \"$PWD\" = \"$HOME\" && echo home-$((40+2))\n")

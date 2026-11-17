@@ -29,7 +29,7 @@ export default function TerminalPage() {
   // Closing a session closes every tab of it: this one, when another page says it is gone.
   useEffect(() => onSessionDeleted(s => { if (s.id === id) window.close(); }), [id]);
 
-  useTabIdentity(session ? `${projectName(session.project)} ${label(session)}` : null,
+  useTabIdentity(session ? `${projectName(session.project)} ${label(session)}`.trim() : null,
     !session || session.kind === 'shell' ? 'shell' : session.status ?? 'unlit');
 
   const shell = (s: Session) => (s.kind === 'shell' ? 'terminal' : 'session');

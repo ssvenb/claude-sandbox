@@ -15,7 +15,7 @@ export function BoardMenu() {
       </button>
       <div id="board-menu" popover="auto">
         <div className="row"><ThemeSwitch /></div>
-        <BusyButton className="term" onClick={openTerminal} title="A shell in your home folder" aria-label="Terminal">
+        <BusyButton className="term" onClick={() => { document.getElementById('board-menu')?.hidePopover(); return openTerminal(); }} title="A shell in your home folder" aria-label="Terminal">
           <Icon name="prompt" /><span>Terminal</span>
         </BusyButton>
         <SyncButton />

@@ -61,14 +61,14 @@ function Lines({ added, removed }: { added: number; removed: number }) {
   return <span className="n">{added > 0 && <ins>+{added}</ins>} {removed > 0 && <del>−{removed}</del>}</span>;
 }
 
-/** A folder's content: its folders first, each open to begin with and closed with a click, then its files. */
+/** A folder's content: its folders first, each closed to begin with and opened with a click, then its files. */
 function Items({ of }: { of: Folder }) {
   const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
   return (
     <ul>
       {[...of.folders.values()].sort(byName).map(d => (
         <li key={d.path} className="folder">
-          <details open>
+          <details>
             <summary title={d.path}>
               <Icon name="down" />
               <span className="name">{d.name}</span>

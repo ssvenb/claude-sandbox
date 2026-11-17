@@ -60,6 +60,10 @@ field, number field, dropdown, list or name/value editor, with its default shown
 that unsets it again. A filter narrows the form; the **JSON** view edits the whole file. The server
 checks every declared value against its type before writing, and keeps whatever the form has no
 control for; the next session reads the file.
+The menu (**⋯**, top right) has the sandbox's own **Settings**: the projects, added (a name and its
+repo) and deleted (its file only, refused while it has sessions) at once, and your
+[authentications](#authentications--configclaude-sandboxauthjson) as the same form — an entry each,
+its fields those of its type — or JSON, saved readable by you alone.
 For a project whose
 `origin` is on GitHub it lists the open pull requests, with their CI status, and issues with a token of
 the project's GitHub App (`GH_AUTH`; the host's own `gh` login when it names none; the App then needs read access to issues, checks and commit statuses, and
@@ -680,7 +684,7 @@ else), each under a name:
 
 This file is the only place a key, a token or an identity is configured: no plugin or agent has a
 setting for one, and a project only names an entry — in the settings form, a dropdown of those of
-the right type (names only; what they hold never reaches the page). A single run may name another
+the right type (names only; what they hold reaches the page only in the menu's Settings, which edits this file). A single run may name another
 (`run.sh --set GH_AUTH=reviewer`, which is how `pr-review` reviews under another App than the one
 that wrote the pull request). The file must be readable by you alone (`chmod 600`), or nothing
 uses it. Nothing of it reaches the container but what a plugin hands over: GitHub and Google

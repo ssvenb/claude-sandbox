@@ -127,6 +127,14 @@ export interface PluginManifest extends SettingsPart {
   requiredEnv?: string[];
 }
 
+/** Your authentications' file, and what each type of entry holds. */
+export interface AuthConfig {
+  file: string;
+  exists: boolean;
+  config: JsonObject;
+  types: Record<string, { required: string[]; optional: string[] }>;
+}
+
 export interface ProjectConfig {
   file: string;
   exists: boolean;

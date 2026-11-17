@@ -325,6 +325,29 @@ def test_a_projects_settings_are_read_and_saved_to_its_file(ui):
     assert "not valid JSON" in json.load(ui("/api/config?project=" + ui.project))["error"]
 
 
+def test_projects_are_added_and_deleted_and_authentications_saved_readable_by_you_alone(ui):
+    post = lambda path, body: ui(path, json.dumps(body).encode())  # noqa: E731
+    assert post("/api/projects", {"name": "new", "repo": "~/code/new"}).status == 200
+    assert json.loads((ui.tmp / "projects/new.json").read_text()) == {"repo": "~/code/new"}
+    assert json.load(ui("/api/state"))["projects"] == ["new", ui.project]
+    for bad in ({"name": "new", "repo": "/r"}, {"name": "../x", "repo": "/r"}, {"name": ".x", "repo": "/r"}, {"name": "x", "repo": " "}):
+        assert post("/api/projects", bad).status == 400
+    assert post("/api/projects/delete", {"name": "new"}).status == 200
+    assert post("/api/projects/delete", {"name": "new"}).status == 400  # not there any more
+    assert json.load(ui("/api/state"))["projects"] == [ui.project]
+
+    file = ui.tmp / ".config/claude-sandbox/auth.json"
+    got = json.load(ui("/api/auth"))
+    assert (got["file"], got["exists"], got["config"]) == (str(file), False, {})
+    assert got["types"]["github-app"] == {"required": ["appId", "privateKeyFile"], "optional": ["host", "username"]}
+    entries = {"coder": {"type": "github-app", "appId": "1", "privateKeyFile": "~/k.pem"}, "openai": {"type": "api-key", "key": "sk"}}
+    assert json.load(post("/api/auth", {"config": entries}))["config"] == entries == json.loads(file.read_text())
+    assert file.stat().st_mode & 0o777 == 0o600
+    for bad in ([], {"x": "y"}, {"x": {"type": "nope"}}, {"x": {"type": "api-key"}}):
+        assert post("/api/auth", {"config": bad}).status == 400
+    assert json.loads(file.read_text()) == entries
+
+
 def test_a_runs_checkout_is_found_where_a_plugin_says_it_is(tmp_path, monkeypatch):
     (tmp_path / "proj-20261112-0a1b2c").mkdir()
     monkeypatch.setitem(web.described, "/proj", {"checkout": f"{tmp_path}/*-{{run_id}}"})

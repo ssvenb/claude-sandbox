@@ -1,7 +1,7 @@
 // The server's API, call by call.
 import { api, post } from './client';
 import type { Answers } from './events';
-import type { AppState, JsonObject, NewSession, Offer, Picture, ProjectConfig, Upload, ProjectInfo, Session } from './types';
+import type { AppState, AuthConfig, JsonObject, NewSession, Offer, Picture, ProjectConfig, Upload, ProjectInfo, Session } from './types';
 
 const session = (id: string) => `/api/sessions/${id}`;
 const project = (path: string) => 'project=' + encodeURIComponent(path);
@@ -37,3 +37,9 @@ export const resizeTerminal = (id: string, cols: number, rows: number) =>
 // A project's settings, its ~/.config/claude-sandbox/projects/<name>.json.
 export const getConfig = (path: string) => api<ProjectConfig>('/api/config?' + project(path));
 export const saveConfig = (path: string, config: JsonObject) => post<ProjectConfig>('/api/config', { project: path, config });
+
+// The sandbox's own settings: your authentications (~/.config/claude-sandbox/auth.json), and the projects.
+export const getAuth = () => api<AuthConfig>('/api/auth');
+export const saveAuth = (config: JsonObject) => post<AuthConfig>('/api/auth', { config });
+export const addProject = (name: string, repo: string) => post('/api/projects', { name, repo });
+export const deleteProject = (name: string) => post('/api/projects/delete', { name });

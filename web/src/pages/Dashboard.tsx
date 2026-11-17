@@ -2,7 +2,7 @@
 // running, grouped by project, and on the right each project with what its plugins list.
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { message } from '../api/client';
-import { getConfig } from '../api/sessions';
+import { getAuth, getConfig } from '../api/sessions';
 import type { Session } from '../api/types';
 import { Loading } from '../components/common/Spinner';
 import { BoardMenu } from '../components/dashboard/BoardMenu';
@@ -13,6 +13,7 @@ import { ProjectPanel } from '../components/dashboard/ProjectPanel';
 import { RunningSessions } from '../components/dashboard/RunningSessions';
 import { SettingsDialog, type OpenSettings } from '../components/settings/SettingsDialog';
 import { useDashboard } from '../hooks/useDashboard';
+import { useLatest } from '../hooks/useLatest';
 import { endedIn, isLive, listedIn, runningIn, tiedItems } from '../lib/board';
 
 export default function Dashboard() {
@@ -29,8 +30,17 @@ export default function Dashboard() {
       alert(message(e));
     }
   }, []);
-  const actions = useMemo<DashboardActions>(() => ({ start, openTerminal, stop, remove, show, openItem, configure }),
-    [start, openTerminal, stop, remove, show, openItem, configure]);
+  const projects = useLatest(state.projects);
+  const configureSandbox = useCallback(async () => {
+    try {
+      const auth = await getAuth();
+      setSettings({ auth, projects: projects.current, opening: ++openings.current });
+    } catch (e) {
+      alert(message(e));
+    }
+  }, [projects]);
+  const actions = useMemo<DashboardActions>(() => ({ start, openTerminal, stop, remove, show, openItem, configure, configureSandbox }),
+    [start, openTerminal, stop, remove, show, openItem, configure, configureSandbox]);
 
   const itemsOf = (s: Session) => tiedItems(state, plugins, s);
   const groups = state.projects.map(project => ({ project, sessions: runningIn(state, project) })).filter(g => g.sessions.length);
@@ -62,7 +72,7 @@ export default function Dashboard() {
           </>
         )}
       </main>
-      <SettingsDialog settings={settings} onClose={() => setSettings(null)} onSaved={project => void reload(project)} />
+      <SettingsDialog settings={settings} onClose={() => setSettings(null)} onSaved={project => (project ? [project] : state.projects).forEach(p => void reload(p))} />
     </DashboardContext>
   );
 }

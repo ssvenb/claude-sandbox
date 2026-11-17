@@ -887,6 +887,50 @@ def test_the_gear_configures_the_projects_plugins_in_its_file(board):
     assert "docker-cli" not in json.loads(file.read_text())["plugins"]
 
 
+def test_the_menus_settings_add_and_delete_projects_and_edit_your_authentications(board):
+    auth = board.project.parent / ".config/claude-sandbox/auth.json"
+    auth.parent.mkdir(parents=True)
+    auth.write_text(json.dumps({"coder": {"type": "github-app", "appId": "1", "privateKeyFile": "~/k.pem", "extra": 1}}))
+    board.click("button[aria-label='Menu']")
+    board.click("button[aria-label='Sandbox settings']")
+    board.wait_for_selector("dialog[open] h2:has-text('Sandbox settings')")
+
+    # Projects: added and deleted at once.
+    board.fill("input[name='new-project.name']", "other")
+    board.fill("input[name='new-project.repo']", "~/code/other")
+    board.click(".card.projects button.add")
+    board.wait_for_selector("button[aria-label='Delete project other']")
+    assert json.loads((board.project.parent / "projects/other.json").read_text()) == {"repo": "~/code/other"}
+    board.once("dialog", lambda d: d.accept())
+    board.click("button[aria-label='Delete project other']")
+    board.wait_for_selector("button[aria-label='Delete project other']", state="detached")
+    assert not (board.project.parent / "projects/other.json").exists()
+
+    # Authentications: an entry each, its fields those of its type; what the form has none for is kept.
+    assert board.input_value("input[name='auth.0.appId']") == "1"
+    board.click(".field:has(label:text-is('Entries')) > .control > .entries > button.add")
+    board.fill("input[name='auth.1.name']", "openai")
+    board.select_option("select[name='auth.1.type']", "api-key")
+    assert not board.is_visible("input[name='auth.1.appId']")
+    board.click("dialog button[type=submit]")
+    board.wait_for_selector("dialog .error:has-text('lacks key')")  # the server's check
+    board.fill("input[name='auth.1.key']", "sk")
+    board.click("dialog button[type=submit]")
+    board.wait_for_selector("dialog[open]", state="detached")
+    assert json.loads(auth.read_text()) == {"coder": {"type": "github-app", "appId": "1", "privateKeyFile": "~/k.pem", "extra": 1},
+                                            "openai": {"type": "api-key", "key": "sk"}}
+    assert auth.stat().st_mode & 0o777 == 0o600
+
+    # The JSON view edits the whole file.
+    board.click("button[aria-label='Menu']")
+    board.click("button[aria-label='Sandbox settings']")
+    board.click(".modes button:has-text('JSON')")
+    board.fill("textarea[name='json']", json.dumps({"openai": {"type": "api-key", "key": "sk2"}}))
+    board.click("dialog button[type=submit]")
+    board.wait_for_selector("dialog[open]", state="detached")
+    assert json.loads(auth.read_text()) == {"openai": {"type": "api-key", "key": "sk2"}}
+
+
 def test_the_files_a_runs_checkout_changed_are_beside_its_chat_or_behind_a_header_button(board):
     git = lambda *a: subprocess.run(["git", "-C", board.checkout, "-c", "user.name=t", "-c", "user.email=t@t", *a],  # noqa: E731
                                     check=True, capture_output=True)

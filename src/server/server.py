@@ -858,20 +858,75 @@ def shown(field, siblings, fields):
 def write_config(project, config):
     """Replaces the project's file in one step, so run.sh never reads half a file."""
     check_config(config)
-    path = config_file(project)
+    write_json(config_file(project), config)
+
+
+def write_json(path, data, mode=None):
+    """Replaces `path` in one step; it keeps its mode (`mode` when given, else 644 for a new one)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
         with os.fdopen(fd, "w") as f:
-            json.dump(config, f, indent=2)
+            json.dump(data, f, indent=2)
             f.write("\n")
         try:
-            os.chmod(tmp, path.stat().st_mode & 0o777)
+            os.chmod(tmp, mode or path.stat().st_mode & 0o777)
         except FileNotFoundError:
             os.chmod(tmp, 0o644)
         os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
+
+
+def add_project(name, repo):
+    """A new project: its file, naming its repo."""
+    if not isinstance(name, str) or not re.fullmatch(r"\w[\w.-]*", name):
+        raise ValueError("a project's name is letters, digits, '.', '-' and '_', not starting with '.' or '-'")
+    if config_file(name).exists():
+        raise ValueError(f"there is a project '{name}' already")
+    config = {"repo": repo}
+    check_config(config)
+    write_json(config_file(name), config)
+
+
+def delete_project(name):
+    """A project's file goes; refused while a session of it is listed, which would be left without one."""
+    with lock:
+        if any(s.project == name for s in sessions.values()):
+            raise ValueError(f"'{name}' still has sessions: delete them first")
+    config_file(name).unlink()
+    described.pop(name, None)
+
+
+def read_auth():
+    """Your authentications as they are in their file ({} without one), and what each type holds.
+    Unlike auth.load, a file others may read is shown too: saving it here makes it yours alone."""
+    path = auth.auth_file(os.environ)
+    try:
+        entries = json.loads(path.read_text())
+    except FileNotFoundError:
+        entries = {}
+    except (OSError, ValueError) as e:
+        raise ValueError(f"{path} is not valid JSON ({e}): fix it by hand first")
+    if not isinstance(entries, dict):
+        raise ValueError(f"{path} must hold a JSON object: fix it by hand first")
+    return {"file": str(path), "exists": path.exists(), "config": entries,
+            "types": {t: {"required": list(r), "optional": list(o)} for t, (r, o) in auth.TYPES.items()}}
+
+
+def write_auth(entries):
+    """Replaces the authentications' file, readable by you alone, once each entry is a complete one of its type."""
+    if not isinstance(entries, dict):
+        raise ValueError("the authentications must be a JSON object of entries keyed by name")
+    for name, e in entries.items():
+        if not isinstance(e, dict) or e.get("type") not in auth.TYPES:
+            raise ValueError(f"{name}: .type must be one of {', '.join(auth.TYPES)}")
+        try:
+            auth.entry(os.environ, name, e["type"], entries)
+        except Die as err:
+            raise ValueError(str(err)) from None
+    write_json(auth.auth_file(os.environ), entries, 0o600)
 
 
 def run_items(said, run_id):
@@ -1202,6 +1257,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(200, read_config(query["project"]))
             except ValueError as e:
                 self.reply(400, {"error": str(e)})
+        elif url.path == "/api/auth":
+            try:
+                self.reply(200, read_auth())
+            except ValueError as e:
+                self.reply(400, {"error": str(e)})
         elif m := re.fullmatch(r"/api/sessions/(\w+)/offers", url.path):
             # What its page asks about before deleting it, one yes/no each.
             # Described afresh first: the pull request a run opened a moment ago is offered too,
@@ -1251,6 +1311,19 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("not a configured project")
                 write_config(req["project"], req.get("config"))
                 self.reply(200, read_config(req["project"]))
+            elif url.path == "/api/auth":
+                write_auth(json.loads(body).get("config"))
+                self.reply(200, read_auth())
+            elif url.path == "/api/projects":
+                req = json.loads(body)
+                add_project(req.get("name"), req.get("repo"))
+                self.reply(200, {})
+            elif url.path == "/api/projects/delete":
+                req = json.loads(body)
+                if req.get("name") not in projects(self.server.projects_file):
+                    raise ValueError("not a configured project")
+                delete_project(req["name"])
+                self.reply(200, {})
             elif url.path == "/api/sync":
                 self.reply(200, sync(self.server.bind))
             elif m := re.fullmatch(r"/api/sessions/(\w+)/(prompt|interrupt|answer|model|effort|task)", url.path):

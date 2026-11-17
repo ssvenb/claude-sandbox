@@ -15,6 +15,8 @@ export interface DashboardActions {
   openItem: (e: MouseEvent, item: Item, s?: Session) => void;
   /** Opens a project's settings. */
   configure: (project: string) => Promise<void>;
+  /** Opens the sandbox's own settings: the projects, and your authentications. */
+  configureSandbox: () => Promise<void>;
 }
 
 export const DashboardContext = createContext<DashboardActions | null>(null);

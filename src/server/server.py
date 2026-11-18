@@ -34,7 +34,6 @@ import shutil
 import tempfile
 import threading
 import time
-import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -51,7 +50,7 @@ META = ("id", "project", "kind", "run_id", "started", "ui")
 SAVED = ("exit", "events", "info", "todos", "tasks", "ready", "state", "waiting", "pending", "title", "activity",
          "said", "cost", "context", "sent", "offset")  # of a chat
 # Where the page was last opened (http://<Host>), from the last request guard() let in: the address
-# a webhook's message links a session's page by (notify()).
+# web_on_status is told a session's page by (on_status()).
 page_origin = None
 OFFERS = ("models", "efforts", "commands")  # what an agent offers on `ready`; see agent_offers()
 RUN_SH = ROOT / "run.sh"
@@ -311,7 +310,7 @@ class Session:
         shutil.rmtree(self.dir, ignore_errors=True)
 
     def shown(self):
-        """Its status as the page shows it, and webhooks are told it (notify)."""
+        """Its status as the page shows it, and web_on_status is told it (on_status)."""
         return self.status()
 
     def json(self):
@@ -644,45 +643,41 @@ def describe(project, keep=False):
     return found
 
 
-SAY = {"idle": "idle, waiting for its next task", "question": "needs you"}  # what a webhook is told, and when
-
-
-def notify(last):
-    """Posts to each project's webhooks (web_notify) for every session whose status, as the page
-    shows it, turned idle or question since `last` (id → status, updated here): once per change,
-    not for a session first seen (this server just started) nor for the boot that ends in idle."""
-    posts = []
+def on_status(last):
+    """Runs each project's plugins' web_on_status commands for every session whose status, as the
+    page shows it, changed since `last` (id → status, updated here); not for one first seen."""
+    runs = []
     with lock:
         for s in sessions.values():
             status, before = s.shown(), last.get(s.id, "unseen")
             last[s.id] = status
-            hooks = described.get(s.project, {}).get("notify") or []
-            if status in SAY and before not in ("unseen", "starting", status) and hooks:
-                page = f"{page_origin}/{'chat' if s.ui == 'chat' else 'session'}#{s.id}" if page_origin else ""
-                name = Path(s.project).name
-                text = f"{name} ({s.run_id}): {SAY[status]}" if s.run_id else f"{name}: {SAY[status]}"
-                text += f"\n{page}" if page else ""  # a bare URL: Slack, Discord and Google Chat all link it
-                body = {"text": text, "content": text, "project": name, "run_id": s.run_id or "", "status": status, "url": page}
-                posts += [(h.get("url"), {"text": text} if h.get("type") == "google-chat" else body)  # Google refuses more
-                          for h in hooks if isinstance(h, dict)]
+            commands = described.get(s.project, {}).get("on_status") or {}
+            if before in ("unseen", status) or not isinstance(commands, dict):
+                continue
+            page = f"{page_origin}/{'chat' if s.ui == 'chat' else 'session'}#{s.id}" if page_origin else ""
+            event = json.dumps({"project": s.project, "run_id": s.run_id, "session": s.id, "url": page,
+                                "status": status, "before": before})
+            runs += [(plugin, command, event) for plugin, command in commands.items() if isinstance(command, list)]
         for gone in last.keys() - sessions.keys():
             del last[gone]
-    for url, body in posts:
-        threading.Thread(target=post_hook, args=(url, body), daemon=True).start()
+    for run in runs:
+        threading.Thread(target=run_on_status, args=run, daemon=True).start()
 
 
-def post_hook(url, body):
+def run_on_status(plugin, command, event):
     try:
-        req = urllib.request.Request(url, json.dumps(body).encode(), {"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=10).close()
-    except (OSError, ValueError) as e:  # urllib's errors are OSErrors; a bad URL a ValueError
-        print(f"  webhook {url.split('?')[0] if isinstance(url, str) else url!r} failed: {e}", file=sys.stderr, flush=True)
+        done = subprocess.run(command, input=event, capture_output=True, text=True, timeout=60, cwd=Path.home())
+        if done.returncode:
+            print(f"  {plugin}'s web_on_status exited with {done.returncode}: {done.stderr.strip()[-300:]}",
+                  file=sys.stderr, flush=True)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f"  {plugin}'s web_on_status failed: {e}", file=sys.stderr, flush=True)
 
 
-def notifier():
+def status_watcher():
     last = {}
     while True:
-        notify(last)
+        on_status(last)
         time.sleep(1)
 
 
@@ -1576,7 +1571,7 @@ if __name__ == "__main__":
         os.environ["SANDBOX_WEB_NAME"] = args.bind  # a name resolved to its address: links may keep the name
     restore()
     threading.Thread(target=poller, args=(args.projects,), daemon=True).start()
-    threading.Thread(target=notifier, daemon=True).start()
+    threading.Thread(target=status_watcher, daemon=True).start()
     server = serve(args.port, args.projects, args.bind, args.allow_host)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # so `finally` cleans up on a plain kill too
     print(f"Sandboxes: http://127.0.0.1:{server.server_address[1]}  (projects: {args.projects})",

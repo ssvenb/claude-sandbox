@@ -658,11 +658,12 @@ printf '%s' "$WEB_JSON" >'""" + str(out) + "'").ok()
 
 
 def test_agent_status_hands_its_webhook_to_the_web_server(sb, described):
-    assert described("agent-status").get("notify") is None  # none configured: the dot alone
+    notify = str(REPO / "plugins/agent-status/host/notify.py")
+    assert described("agent-status").get("on_status") is None  # none configured: the dot alone
     sb.config({"plugins": {"agent-status": {"webhook": "https://chat.example/hook?key=k"}}})
-    assert described("agent-status")["notify"] == [{"url": "https://chat.example/hook?key=k", "type": "generic"}]
+    assert described("agent-status")["on_status"] == {"agent-status": [notify, "https://chat.example/hook?key=k", "generic"]}
     sb.config({"plugins": {"agent-status": {"webhook": "https://chat.example/h", "webhookType": "google-chat"}}})
-    assert described("agent-status")["notify"] == [{"url": "https://chat.example/h", "type": "google-chat"}]
+    assert described("agent-status")["on_status"] == {"agent-status": [notify, "https://chat.example/h", "google-chat"]}
     assert "AGENT_STATUS" not in str(sb.plugin("agent-status").ok().env)  # the sandbox is told nothing of it
 
 

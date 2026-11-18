@@ -49,6 +49,9 @@ STATE = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") /
 META = ("id", "project", "kind", "run_id", "started", "ui")
 SAVED = ("exit", "events", "info", "todos", "tasks", "ready", "state", "waiting", "pending", "title", "activity",
          "said", "cost", "context", "sent", "offset")  # of a chat
+# Where the page was last opened (http://<Host>), from the last request guard() let in: a session
+# started from then on is told its own page's address, SANDBOX_SESSION_URL, for links back to it.
+page_origin = None
 OFFERS = ("models", "efforts", "commands")  # what an agent offers on `ready`; see agent_offers()
 RUN_SH = ROOT / "run.sh"
 PLUGINS = ROOT / "plugins"
@@ -135,7 +138,8 @@ class Session:
         self.dir.mkdir(parents=True)
         (self.dir / "meta.json").write_text(json.dumps({k: getattr(self, k) for k in (*META, "once")}))
         try:
-            hold(self.dir, self.mode, self.argv(task), Path.home())
+            url = page_origin and f"{page_origin}/{'chat' if self.ui == 'chat' else 'session'}#{self.id}"
+            hold(self.dir, self.mode, self.argv(task), Path.home(), url)
             self._attach(0)
         except OSError:
             shutil.rmtree(self.dir, ignore_errors=True)
@@ -1077,16 +1081,18 @@ def plugin_server(plugin):
 scoped = []
 
 
-def hold(folder, mode, argv, cwd):
+def hold(folder, mode, argv, cwd, url=None):
     """Starts a session's process under src/server/holder.py, which outlives this server. Under systemd
-    it goes into a scope of its own: restarting this server's unit stops everything in its cgroup."""
+    it goes into a scope of its own: restarting this server's unit stops everything in its cgroup.
+    `url`, the session's page, goes to it as SANDBOX_SESSION_URL; none is passed on from this server's own."""
     if not scoped:
         unit = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--"]
         ok = os.environ.get("INVOCATION_ID") and shutil.which("systemd-run") and subprocess.run(
             unit + ["true"], capture_output=True).returncode == 0
         scoped.append(unit if ok else [])
+    env = {k: v for k, v in os.environ.items() if k != "SANDBOX_SESSION_URL"} | ({"SANDBOX_SESSION_URL": url} if url else {})
     with open(folder / "log", "ab") as log:  # what the holder itself says, should it fail
-        subprocess.Popen(scoped[0] + [sys.executable, str(HOLDER), str(folder), mode, "--", *argv], cwd=cwd,
+        subprocess.Popen(scoped[0] + [sys.executable, str(HOLDER), str(folder), mode, "--", *argv], cwd=cwd, env=env,
                          start_new_session=True, stdin=subprocess.DEVNULL, stdout=log, stderr=log)
 
 
@@ -1193,6 +1199,8 @@ class Handler(BaseHTTPRequestHandler):
         # published port) may put this server on another, and the name is what rebinding forges.
         host = self.headers.get("Host", "")
         if host.rsplit(":", 1)[0] in self.server.hosts and self.headers.get("Origin", f"http://{host}") == f"http://{host}":
+            global page_origin
+            page_origin = f"http://{host}"
             return True
         print(f"forbidden: Host={host!r} Origin={self.headers.get('Origin')!r} {self.command} {self.path}", file=sys.stderr, flush=True)
         self.reply(403, {"error": "forbidden"})

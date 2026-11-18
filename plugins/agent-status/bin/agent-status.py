@@ -81,7 +81,9 @@ def notify(state):
             os.dup2(null, fd)
         project, run = os.environ.get("AGENT_STATUS_PROJECT") or "sandbox", os.environ.get("RUN_ID", "")
         text = f"{project} ({run}): {SAY[state]}" if run else f"{project}: {SAY[state]}"
-        body = {"text": text, "content": text, "project": project, "run_id": run, "status": state}
+        page = os.environ.get("SANDBOX_SESSION_URL", "")
+        text += f"\n{page}" if page else ""  # a bare URL: Slack, Discord and Google Chat all link it
+        body = {"text": text, "content": text, "project": project, "run_id": run, "status": state, "url": page}
         if os.environ.get("AGENT_STATUS_WEBHOOK_TYPE") == "google-chat":
             body = {"text": text}  # Google's API refuses fields it does not know
         req = urllib.request.Request(url, json.dumps(body).encode(), {"Content-Type": "application/json"})

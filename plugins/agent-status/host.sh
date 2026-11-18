@@ -13,5 +13,6 @@ if [ -n "$AGENT_STATUS_WEBHOOK" ]; then
   _project=${PROJECT_CONFIG_FILE:-$HOST_CWD}
   _project=${_project##*/}
   pass_value AGENT_STATUS_PROJECT "${_project%.json}"
+  pass_env SANDBOX_SESSION_URL  # the session's page, when the web UI started it: a link in the message
   unset _project
 fi

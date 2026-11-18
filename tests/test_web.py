@@ -531,6 +531,7 @@ def test_the_agent_status_hook_posts_to_the_webhook_once_per_idle_or_question(tm
     server = http.server.HTTPServer(("127.0.0.1", 0), Hook)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     env = {**os.environ, "TMPDIR": str(tmp_path), "RUN_ID": "0a1b2c", "AGENT_STATUS_PROJECT": "demo",
+           "SANDBOX_SESSION_URL": "http://box:8787/chat#ab12cd34",
            "AGENT_STATUS_WEBHOOK": f"http://127.0.0.1:{server.server_port}/", "AGENT_STATUS_WEBHOOK_TYPE": kind}
     hook = REPO / "plugins/agent-status/bin/agent-status.py"
     try:
@@ -547,11 +548,12 @@ def test_the_agent_status_hook_posts_to_the_webhook_once_per_idle_or_question(tm
                 time.sleep(0.1)
     finally:
         server.shutdown()
-    texts = ["demo (0a1b2c): idle, waiting for its next task", "demo (0a1b2c): needs you"]
+    link = "\nhttp://box:8787/chat#ab12cd34"
+    texts = ["demo (0a1b2c): idle, waiting for its next task" + link, "demo (0a1b2c): needs you" + link]
     if kind == "google-chat":
         assert got == [{"text": t} for t in texts]
     else:
-        assert got == [{"text": t, "content": t, "project": "demo", "run_id": "0a1b2c", "status": s}
+        assert got == [{"text": t, "content": t, "project": "demo", "run_id": "0a1b2c", "status": s, "url": link[1:]}
                        for t, s in zip(texts, ["idle", "question"])]
 
 
@@ -790,6 +792,8 @@ def test_a_chat_streams_its_events_and_takes_answers_and_interrupts(chat, tmp_pa
                         return event
         assert read(lambda e: True)["type"] == "snapshot"  # the page starts from the whole session
         assert read(lambda e: e["type"] == "ready")["efforts"] == ["low", "medium", "high"]
+        with web.lock:  # run.sh was told the session's page, as the request reached this server
+            assert f"🔗 {base}/chat#{s['id']}" in live.boot["text"]
         assert post(f"/api/sessions/{s['id']}/prompt", {"text": "ask me"}) == 200
         asked = read(lambda e: e["type"] == "ask")
         assert read(lambda e: e["type"] == "status")["state"] == "question"

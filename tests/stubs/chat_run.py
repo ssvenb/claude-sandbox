@@ -66,6 +66,8 @@ for line in ("🤖 Agent: claude", "🔌 Plugins: github-auth git-workspace", "#
              f"📥 Cloning into /workspace on claude-code/20261113-{run_id}"):
     print(line, flush=True)
     time.sleep(BOOT)
+if os.environ.get("SANDBOX_SESSION_URL"):  # the page the web UI says this session is at
+    print(f"🔗 {os.environ['SANDBOX_SESSION_URL']}", flush=True)
 while (HERE / "hold").exists():  # a test holds the boot here, to act while the sandbox still starts
     time.sleep(0.02)
 if os.environ.get("STUB_BOOT_FAILS"):

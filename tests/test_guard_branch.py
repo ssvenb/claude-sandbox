@@ -38,6 +38,9 @@ def test_branch_switching_is_always_blocked(command):
     "git push origin HEAD:main",
     "git push origin claude-code/20260102-ffffff",
     "git push origin refs/heads/main",
+    f"git push origin {BRANCH}; git push origin main",
+    "git commit -m x && git push origin main; echo pushed",
+    "echo hi\ngit push origin main",
 ])
 def test_push_to_another_branch_is_blocked(command):
     done = guard(command)
@@ -59,6 +62,14 @@ def test_push_to_another_branch_is_blocked(command):
     "git push origin ${AGENT_BRANCH}",
     "git push origin claude-code/$RUN_ID",
     "git push origin claude-code/${RUN_ID}",
+    # #63: shell operators end the push's arguments; they are not part of the refspec.
+    f"git commit -m x && git push origin {BRANCH}; echo pushed",
+    f"git push origin {BRANCH}&& echo pushed",
+    f"git push origin {BRANCH} || echo failed",
+    f"git push origin {BRANCH}|tail -1",
+    "git push\necho pushed",
+    # A push quoted inside another command's argument is text, not a push.
+    "gh issue create --body \"ran: git push origin main; echo it's done\"",
 ])
 def test_own_branch_and_unrelated_commands_pass(command):
     done = guard(command)

@@ -1,6 +1,6 @@
 {
   "name": "agent-status",
-  "description": "Hooks that tell the terminal whether the agent is working, idle or waiting on a question, for the web UI's status dots on a session that runs in a terminal (a chat's bridge reports it itself), and post to a webhook when it goes idle or needs you.",
+  "description": "Hooks that tell the terminal whether the agent is working, idle or waiting on a question, for the web UI's status dots on a session that runs in a terminal (a chat's bridge reports it itself), and have the web server post to a webhook when a session goes idle or needs you (nothing left running in the background, as its dot shows).",
   "priority": 30,
   "defaultEnabled": true,
   "requiredAgent": "claude",
@@ -13,7 +13,7 @@
       "key": "webhook",
       "type": "string",
       "label": "Webhook",
-      "description": "URL that gets a JSON POST when the agent goes idle or needs you, with a link to the session when the web UI started it; the format is the webhook type's. The agent can read it.",
+      "description": "URL that gets a JSON POST, with a link to the session, when a session the web UI runs goes idle (nothing left running in the background) or needs you; the format is the webhook type's.",
       "placeholder": "https://hooks.slack.com/services/…",
       "pattern": "https?://\\S+",
       "monospace": true

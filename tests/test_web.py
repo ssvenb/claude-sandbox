@@ -513,9 +513,10 @@ def test_the_agent_status_hook_writes_its_state_to_the_agents_terminal(event, sa
 
 
 @pytest.mark.parametrize("kind", ["generic", "google-chat"])
-def test_the_agent_status_hook_posts_to_the_webhook_once_per_idle_or_question(tmp_path, kind):
-    """Only idle and question are told, once per change of state, with the project and run; to
-    Google Chat as its text alone."""
+def test_webhooks_hear_once_per_turn_to_idle_or_question_and_not_while_background_tasks_run(chat, monkeypatch, kind):
+    """notify(): a session whose status, as the page shows it, turns idle or question is told to its
+    project's webhooks (web_notify), once per change, with a link to its page; idle with background
+    tasks running is working, and a boot that ends in idle says nothing. Google Chat gets the text alone."""
     import http.server
     got = []
 
@@ -530,31 +531,41 @@ def test_the_agent_status_hook_posts_to_the_webhook_once_per_idle_or_question(tm
 
     server = http.server.HTTPServer(("127.0.0.1", 0), Hook)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    env = {**os.environ, "TMPDIR": str(tmp_path), "RUN_ID": "0a1b2c", "AGENT_STATUS_PROJECT": "demo",
-           "SANDBOX_SESSION_URL": "http://box:8787/chat#ab12cd34",
-           "AGENT_STATUS_WEBHOOK": f"http://127.0.0.1:{server.server_port}/", "AGENT_STATUS_WEBHOOK_TYPE": kind}
-    hook = REPO / "plugins/agent-status/bin/agent-status.py"
+    monkeypatch.setattr(web, "page_origin", "http://box:8787")
+    project = str(chat.tmp)
+    monkeypatch.setitem(web.described, project, {"notify": [{"url": f"http://127.0.0.1:{server.server_port}/", "type": kind}]})
+    last = {}
     try:
-        # Each event with the number of POSTs there should be by then.
-        for event, posts in [({"hook_event_name": "Stop"}, 1),
-                             ({"hook_event_name": "Notification", "notification_type": "idle_prompt"}, 1),
-                             ({"hook_event_name": "PreToolUse", "tool_name": "Bash"}, 1),
-                             ({"hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion"}, 2)]:
-            done = subprocess.run([str(hook)], input=json.dumps(event), text=True, env=env, capture_output=True)
-            assert (done.returncode, done.stdout) == (0, "")
-            for _ in range(50):  # the POST runs detached
-                if len(got) >= posts:
-                    break
-                time.sleep(0.1)
+        s = chat()
+        web.notify(last)  # starting: first seen
+        chat.until(s, lambda s: s.ready)
+        web.notify(last)  # the boot ended in idle: nothing to say
+        s.prompt("run it in the background")
+        chat.until(s, lambda s: s.status() == "working")
+        web.notify(last)
+        chat.until(s, lambda s: s.status() == "idle" and len(s.tasks) == 2)
+        web.notify(last)  # its turn is over, but two tasks run on: still working
+        time.sleep(0.3)
+        assert got == []
+        for task in ("bg1a", "bg1b"):
+            s.tell({"type": "task", "id": task})
+        chat.until(s, lambda s: not s.tasks)
+        web.notify(last)
+        web.notify(last)  # once per change
+        for _ in range(50):  # the POST runs on a thread of its own
+            if got:
+                break
+            time.sleep(0.1)
+        time.sleep(0.2)
     finally:
         server.shutdown()
-    link = "\nhttp://box:8787/chat#ab12cd34"
-    texts = ["demo (0a1b2c): idle, waiting for its next task" + link, "demo (0a1b2c): needs you" + link]
+    name = os.path.basename(project)
+    text = f"{name} ({s.run_id}): idle, waiting for its next task\nhttp://box:8787/chat#{s.id}"
     if kind == "google-chat":
-        assert got == [{"text": t} for t in texts]
+        assert got == [{"text": text}]
     else:
-        assert got == [{"text": t, "content": t, "project": "demo", "run_id": "0a1b2c", "status": s, "url": link[1:]}
-                       for t, s in zip(texts, ["idle", "question"])]
+        assert got == [{"text": text, "content": text, "project": name, "run_id": s.run_id, "status": "idle",
+                        "url": f"http://box:8787/chat#{s.id}"}]
 
 
 def test_deleting_tidies_up_only_what_a_plugin_offered_for_that_run(tmp_path, monkeypatch):
@@ -597,7 +608,7 @@ def test_a_running_sessions_live_items_are_read_afresh_on_every_poll(tmp_path, m
     assert web.live_items(str(tmp_path), "0a1b2c") == [port]
     assert web.live_items(str(tmp_path), None) == []
     s = NS(project=str(tmp_path), run_id="0a1b2c", exit=None, kind="resume", id="a", started=0,
-           ui="terminal", status=lambda: None)
+           ui="terminal", status=lambda: None, shown=lambda: None)
     assert web.Session.json(s)["items"] == [port]
     s.exit = 0
     assert web.Session.json(s)["items"] == []
@@ -792,8 +803,6 @@ def test_a_chat_streams_its_events_and_takes_answers_and_interrupts(chat, tmp_pa
                         return event
         assert read(lambda e: True)["type"] == "snapshot"  # the page starts from the whole session
         assert read(lambda e: e["type"] == "ready")["efforts"] == ["low", "medium", "high"]
-        with web.lock:  # run.sh was told the session's page, as the request reached this server
-            assert f"🔗 {base}/chat#{s['id']}" in live.boot["text"]
         assert post(f"/api/sessions/{s['id']}/prompt", {"text": "ask me"}) == 200
         asked = read(lambda e: e["type"] == "ask")
         assert read(lambda e: e["type"] == "status")["state"] == "question"

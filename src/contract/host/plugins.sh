@@ -137,6 +137,13 @@ web_start() {
   WEB_JSON=$(jq -c --arg plugin "$PLUGIN_NAME" --argjson start "$1" '.starts += [$start + {plugin: $plugin}]' <<<"$WEB_JSON")
 }
 
+# web_notify <url> [generic|google-chat]: the web server POSTs to url when a session of the project
+# turns idle or needs you, as the dashboard shows it (idle with background tasks running is working),
+# once per change. generic: {text, content, project, run_id, status, url}; google-chat: {text}.
+web_notify() {
+  WEB_JSON=$(jq -c --arg url "$1" --arg type "${2:-generic}" '.notify += [{url: $url, type: $type}]' <<<"$WEB_JSON")
+}
+
 # web_note <text>: one line shown with the project, for what kept a plugin from listing anything.
 web_note() { WEB_JSON=$(jq -c --arg note "$1" '.notes += [$note]' <<<"$WEB_JSON"); }
 

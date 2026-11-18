@@ -485,6 +485,7 @@ request, with its CI). An item is `{title, url}` plus optional `ref` (a short id
 | `web_note TEXT` | one line saying why there is nothing to list |
 | `web_poll SECONDS` | nothing: has the server describe the project at least this often, page or no page (see [Watching and starting](#watching-and-starting-web_poll-web_start)) |
 | `web_start JSON` | nothing: a session the server starts by itself, once per `key`, removed when its agent has finished |
+| `web_notify URL [generic\|google-chat]` | nothing: the server POSTs to URL when a session of the project turns idle or needs you, as its dot shows it (idle with background tasks running counts as working), once per change, with a link to the session's page; `generic` sends `{text, content, project, run_id, status, url}`, `google-chat` `{text}` |
 | `web_checkout GLOB` | where a run's `/workspace` is on this machine, `{run_id}` standing for the run: its session's `workspace` |
 | `web_command NAME CMD [ARG]…` | a command the server runs in a run's checkout (see `web_checkout`) when the plugin's page code asks (`GET /api/sessions/<id>/plugins/<plugin>/<NAME>`); the JSON it prints is the answer |
 | `web_server CMD [ARG]…` | an HTTP server of the plugin's, started on the first request under `/plugins/<plugin>/` and handed every such request (WebSockets too), behind the web UI's own guard; one for all projects, listening on the unix socket `$WEB_SOCKET` under the base path `$WEB_BASE` |

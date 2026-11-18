@@ -657,6 +657,15 @@ printf '%s' "$WEB_JSON" >'""" + str(out) + "'").ok()
     sb.bash("web_poll soon").dies("web_poll takes seconds")
 
 
+def test_agent_status_hands_its_webhook_to_the_web_server(sb, described):
+    assert described("agent-status").get("notify") is None  # none configured: the dot alone
+    sb.config({"plugins": {"agent-status": {"webhook": "https://chat.example/hook?key=k"}}})
+    assert described("agent-status")["notify"] == [{"url": "https://chat.example/hook?key=k", "type": "generic"}]
+    sb.config({"plugins": {"agent-status": {"webhook": "https://chat.example/h", "webhookType": "google-chat"}}})
+    assert described("agent-status")["notify"] == [{"url": "https://chat.example/h", "type": "google-chat"}]
+    assert "AGENT_STATUS" not in str(sb.plugin("agent-status").ok().env)  # the sandbox is told nothing of it
+
+
 def test_a_failing_gh_becomes_a_note_on_the_page(sb, described):
     subprocess.run(["git", "init", "-q", sb.cwd], check=True)
     subprocess.run(["git", "-C", sb.cwd, "remote", "add", "origin", "https://github.com/o/r"], check=True)

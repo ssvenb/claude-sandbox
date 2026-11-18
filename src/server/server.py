@@ -34,6 +34,7 @@ import shutil
 import tempfile
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -49,8 +50,8 @@ STATE = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") /
 META = ("id", "project", "kind", "run_id", "started", "ui")
 SAVED = ("exit", "events", "info", "todos", "tasks", "ready", "state", "waiting", "pending", "title", "activity",
          "said", "cost", "context", "sent", "offset")  # of a chat
-# Where the page was last opened (http://<Host>), from the last request guard() let in: a session
-# started from then on is told its own page's address, SANDBOX_SESSION_URL, for links back to it.
+# Where the page was last opened (http://<Host>), from the last request guard() let in: the address
+# a webhook's message links a session's page by (notify()).
 page_origin = None
 OFFERS = ("models", "efforts", "commands")  # what an agent offers on `ready`; see agent_offers()
 RUN_SH = ROOT / "run.sh"
@@ -138,8 +139,7 @@ class Session:
         self.dir.mkdir(parents=True)
         (self.dir / "meta.json").write_text(json.dumps({k: getattr(self, k) for k in (*META, "once")}))
         try:
-            url = page_origin and f"{page_origin}/{'chat' if self.ui == 'chat' else 'session'}#{self.id}"
-            hold(self.dir, self.mode, self.argv(task), Path.home(), url)
+            hold(self.dir, self.mode, self.argv(task), Path.home())
             self._attach(0)
         except OSError:
             shutil.rmtree(self.dir, ignore_errors=True)
@@ -310,9 +310,13 @@ class Session:
             self.sock.close()
         shutil.rmtree(self.dir, ignore_errors=True)
 
+    def shown(self):
+        """Its status as the page shows it, and webhooks are told it (notify)."""
+        return self.status()
+
     def json(self):
         return {**{k: getattr(self, k) for k in ("id", "project", "kind", "run_id", "started", "exit", "ui")},
-                "status": self.status(), "workspace": checkout(self.project, self.run_id),
+                "status": self.shown(), "workspace": checkout(self.project, self.run_id),
                 "plugins": described.get(self.project, {}).get("plugins", []),
                 "items": live_items(self.project, self.run_id) if self.exit is None and self.kind != "shell" else []}
 
@@ -611,11 +615,12 @@ class Chat(Session):
             return None
         return self.state if self.ready else "starting"
 
-    def json(self):
+    def shown(self):
         status = self.status()
-        if status == "idle" and self.tasks:  # its turn is over, but what it started in the background runs on
-            status = "working"
-        return {**super().json(), "status": status, "title": self.title, "activity": self.activity, "said": self.said,
+        return "working" if status == "idle" and self.tasks else status  # what it started in the background runs on
+
+    def json(self):
+        return {**super().json(), "title": self.title, "activity": self.activity, "said": self.said,
                 "agent": self.info.get("agent"), "model": self.info.get("model"), "cost": self.cost,
                 "context": self.context, "waiting": len(self.waiting), "todos": self.todos}
 
@@ -637,6 +642,48 @@ def describe(project, keep=False):
     described[project] = found
     autostart(project, found)
     return found
+
+
+SAY = {"idle": "idle, waiting for its next task", "question": "needs you"}  # what a webhook is told, and when
+
+
+def notify(last):
+    """Posts to each project's webhooks (web_notify) for every session whose status, as the page
+    shows it, turned idle or question since `last` (id → status, updated here): once per change,
+    not for a session first seen (this server just started) nor for the boot that ends in idle."""
+    posts = []
+    with lock:
+        for s in sessions.values():
+            status, before = s.shown(), last.get(s.id, "unseen")
+            last[s.id] = status
+            hooks = described.get(s.project, {}).get("notify") or []
+            if status in SAY and before not in ("unseen", "starting", status) and hooks:
+                page = f"{page_origin}/{'chat' if s.ui == 'chat' else 'session'}#{s.id}" if page_origin else ""
+                name = Path(s.project).name
+                text = f"{name} ({s.run_id}): {SAY[status]}" if s.run_id else f"{name}: {SAY[status]}"
+                text += f"\n{page}" if page else ""  # a bare URL: Slack, Discord and Google Chat all link it
+                body = {"text": text, "content": text, "project": name, "run_id": s.run_id or "", "status": status, "url": page}
+                posts += [(h.get("url"), {"text": text} if h.get("type") == "google-chat" else body)  # Google refuses more
+                          for h in hooks if isinstance(h, dict)]
+        for gone in last.keys() - sessions.keys():
+            del last[gone]
+    for url, body in posts:
+        threading.Thread(target=post_hook, args=(url, body), daemon=True).start()
+
+
+def post_hook(url, body):
+    try:
+        req = urllib.request.Request(url, json.dumps(body).encode(), {"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10).close()
+    except (OSError, ValueError) as e:  # urllib's errors are OSErrors; a bad URL a ValueError
+        print(f"  webhook {url.split('?')[0] if isinstance(url, str) else url!r} failed: {e}", file=sys.stderr, flush=True)
+
+
+def notifier():
+    last = {}
+    while True:
+        notify(last)
+        time.sleep(1)
 
 
 IDLE_POLL = 300  # seconds between descriptions of a project none of whose plugins asked for any
@@ -1081,18 +1128,16 @@ def plugin_server(plugin):
 scoped = []
 
 
-def hold(folder, mode, argv, cwd, url=None):
+def hold(folder, mode, argv, cwd):
     """Starts a session's process under src/server/holder.py, which outlives this server. Under systemd
-    it goes into a scope of its own: restarting this server's unit stops everything in its cgroup.
-    `url`, the session's page, goes to it as SANDBOX_SESSION_URL; none is passed on from this server's own."""
+    it goes into a scope of its own: restarting this server's unit stops everything in its cgroup."""
     if not scoped:
         unit = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--"]
         ok = os.environ.get("INVOCATION_ID") and shutil.which("systemd-run") and subprocess.run(
             unit + ["true"], capture_output=True).returncode == 0
         scoped.append(unit if ok else [])
-    env = {k: v for k, v in os.environ.items() if k != "SANDBOX_SESSION_URL"} | ({"SANDBOX_SESSION_URL": url} if url else {})
     with open(folder / "log", "ab") as log:  # what the holder itself says, should it fail
-        subprocess.Popen(scoped[0] + [sys.executable, str(HOLDER), str(folder), mode, "--", *argv], cwd=cwd, env=env,
+        subprocess.Popen(scoped[0] + [sys.executable, str(HOLDER), str(folder), mode, "--", *argv], cwd=cwd,
                          start_new_session=True, stdin=subprocess.DEVNULL, stdout=log, stderr=log)
 
 
@@ -1531,6 +1576,7 @@ if __name__ == "__main__":
         os.environ["SANDBOX_WEB_NAME"] = args.bind  # a name resolved to its address: links may keep the name
     restore()
     threading.Thread(target=poller, args=(args.projects,), daemon=True).start()
+    threading.Thread(target=notifier, daemon=True).start()
     server = serve(args.port, args.projects, args.bind, args.allow_host)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # so `finally` cleans up on a plain kill too
     print(f"Sandboxes: http://127.0.0.1:{server.server_address[1]}  (projects: {args.projects})",

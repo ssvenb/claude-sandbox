@@ -61,13 +61,13 @@ if "--chat" not in args:
 BOOT = float(os.environ.get("STUB_BOOT", "0.05"))
 PACE = float(os.environ.get("STUB_PACE", "0"))
 run_id, resumed = args[1], args[0] == "--resume"
+if os.environ.get("SANDBOX_SESSION_URL"):  # the page the web UI says this session is at
+    print(f"🔗 {os.environ['SANDBOX_SESSION_URL']}", flush=True)
 for line in ("🤖 Agent: claude", "🔌 Plugins: github-auth git-workspace", "#1 [internal] load build definition",
              "#2 [5/9] RUN npm install -g @anthropic-ai/claude-code", "#3 exporting to image", "🔐 gh auth login",
              f"📥 Cloning into /workspace on claude-code/20261113-{run_id}"):
     print(line, flush=True)
     time.sleep(BOOT)
-if os.environ.get("SANDBOX_SESSION_URL"):  # the page the web UI says this session is at
-    print(f"🔗 {os.environ['SANDBOX_SESSION_URL']}", flush=True)
 while (HERE / "hold").exists():  # a test holds the boot here, to act while the sandbox still starts
     time.sleep(0.02)
 if os.environ.get("STUB_BOOT_FAILS"):

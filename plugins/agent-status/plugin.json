@@ -13,10 +13,18 @@
       "key": "webhook",
       "type": "string",
       "label": "Webhook",
-      "description": "URL that gets a JSON POST ({text, content, project, run_id, status}) when the agent goes idle or needs you; Slack, Mattermost and Discord show its text. The agent can read it.",
+      "description": "URL that gets a JSON POST when the agent goes idle or needs you; the format is the webhook type's. The agent can read it.",
       "placeholder": "https://hooks.slack.com/services/…",
       "pattern": "https?://\\S+",
       "monospace": true
+    },
+    {
+      "key": "webhookType",
+      "type": "enum",
+      "choices": ["generic", "google-chat"],
+      "label": "Webhook type",
+      "description": "generic: {text, content, project, run_id, status}, which Slack, Mattermost and Discord show. google-chat: {text} alone, for a Google Chat space's incoming webhook.",
+      "default": "generic"
     }
   ]
 }

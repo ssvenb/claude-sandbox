@@ -8,7 +8,7 @@ run with pipes for stdio, so it is written to the terminal of the nearest ancest
 the agent's own, which root-init.sh handed to this user.
 
 With AGENT_STATUS_WEBHOOK set (host.sh, from the project's config), it also POSTs to that URL when
-the state turns idle or question, once per change: the last state is kept in a file, as each hook
+the state turns idle or question, once per change, in the shape AGENT_STATUS_WEBHOOK_TYPE names: the last state is kept in a file, as each hook
 is a process of its own. The POST runs in a detached child, so a slow endpoint never holds up the agent.
 
 Never in the way: whatever goes wrong, it prints nothing and exits 0.
@@ -82,6 +82,8 @@ def notify(state):
         project, run = os.environ.get("AGENT_STATUS_PROJECT") or "sandbox", os.environ.get("RUN_ID", "")
         text = f"{project} ({run}): {SAY[state]}" if run else f"{project}: {SAY[state]}"
         body = {"text": text, "content": text, "project": project, "run_id": run, "status": state}
+        if os.environ.get("AGENT_STATUS_WEBHOOK_TYPE") == "google-chat":
+            body = {"text": text}  # Google's API refuses fields it does not know
         req = urllib.request.Request(url, json.dumps(body).encode(), {"Content-Type": "application/json"})
         urllib.request.urlopen(req, timeout=10).close()
     finally:

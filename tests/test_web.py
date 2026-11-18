@@ -512,8 +512,10 @@ def test_the_agent_status_hook_writes_its_state_to_the_agents_terminal(event, sa
     assert got.endswith(b"rc=0\r\n")
 
 
-def test_the_agent_status_hook_posts_to_the_webhook_once_per_idle_or_question(tmp_path):
-    """Only idle and question are told, once per change of state, with the project and run."""
+@pytest.mark.parametrize("kind", ["generic", "google-chat"])
+def test_the_agent_status_hook_posts_to_the_webhook_once_per_idle_or_question(tmp_path, kind):
+    """Only idle and question are told, once per change of state, with the project and run; to
+    Google Chat as its text alone."""
     import http.server
     got = []
 
@@ -529,7 +531,7 @@ def test_the_agent_status_hook_posts_to_the_webhook_once_per_idle_or_question(tm
     server = http.server.HTTPServer(("127.0.0.1", 0), Hook)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     env = {**os.environ, "TMPDIR": str(tmp_path), "RUN_ID": "0a1b2c", "AGENT_STATUS_PROJECT": "demo",
-           "AGENT_STATUS_WEBHOOK": f"http://127.0.0.1:{server.server_port}/"}
+           "AGENT_STATUS_WEBHOOK": f"http://127.0.0.1:{server.server_port}/", "AGENT_STATUS_WEBHOOK_TYPE": kind}
     hook = REPO / "plugins/agent-status/bin/agent-status.py"
     try:
         # Each event with the number of POSTs there should be by then.
@@ -545,9 +547,12 @@ def test_the_agent_status_hook_posts_to_the_webhook_once_per_idle_or_question(tm
                 time.sleep(0.1)
     finally:
         server.shutdown()
-    assert [(g["status"], g["text"]) for g in got] == [
-        ("idle", "demo (0a1b2c): idle, waiting for its next task"), ("question", "demo (0a1b2c): needs you")]
-    assert got[0]["content"] == got[0]["text"] and got[0]["project"] == "demo" and got[0]["run_id"] == "0a1b2c"
+    texts = ["demo (0a1b2c): idle, waiting for its next task", "demo (0a1b2c): needs you"]
+    if kind == "google-chat":
+        assert got == [{"text": t} for t in texts]
+    else:
+        assert got == [{"text": t, "content": t, "project": "demo", "run_id": "0a1b2c", "status": s}
+                       for t, s in zip(texts, ["idle", "question"])]
 
 
 def test_deleting_tidies_up_only_what_a_plugin_offered_for_that_run(tmp_path, monkeypatch):

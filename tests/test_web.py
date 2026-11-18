@@ -512,6 +512,44 @@ def test_the_agent_status_hook_writes_its_state_to_the_agents_terminal(event, sa
     assert got.endswith(b"rc=0\r\n")
 
 
+def test_the_agent_status_hook_posts_to_the_webhook_once_per_idle_or_question(tmp_path):
+    """Only idle and question are told, once per change of state, with the project and run."""
+    import http.server
+    got = []
+
+    class Hook(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            got.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            self.send_response(204)
+            self.end_headers()
+
+        def log_message(self, *_):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Hook)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    env = {**os.environ, "TMPDIR": str(tmp_path), "RUN_ID": "0a1b2c", "AGENT_STATUS_PROJECT": "demo",
+           "AGENT_STATUS_WEBHOOK": f"http://127.0.0.1:{server.server_port}/"}
+    hook = REPO / "plugins/agent-status/bin/agent-status.py"
+    try:
+        # Each event with the number of POSTs there should be by then.
+        for event, posts in [({"hook_event_name": "Stop"}, 1),
+                             ({"hook_event_name": "Notification", "notification_type": "idle_prompt"}, 1),
+                             ({"hook_event_name": "PreToolUse", "tool_name": "Bash"}, 1),
+                             ({"hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion"}, 2)]:
+            done = subprocess.run([str(hook)], input=json.dumps(event), text=True, env=env, capture_output=True)
+            assert (done.returncode, done.stdout) == (0, "")
+            for _ in range(50):  # the POST runs detached
+                if len(got) >= posts:
+                    break
+                time.sleep(0.1)
+    finally:
+        server.shutdown()
+    assert [(g["status"], g["text"]) for g in got] == [
+        ("idle", "demo (0a1b2c): idle, waiting for its next task"), ("question", "demo (0a1b2c): needs you")]
+    assert got[0]["content"] == got[0]["text"] and got[0]["project"] == "demo" and got[0]["run_id"] == "0a1b2c"
+
+
 def test_deleting_tidies_up_only_what_a_plugin_offered_for_that_run(tmp_path, monkeypatch):
     """offers(): the run's items with an on_delete, none while another session of the run is
     listed; tidy(): runs `run.sh --web-action` for those of them the page's user said yes to."""

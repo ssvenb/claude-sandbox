@@ -678,6 +678,7 @@ def test_model_and_effort_picked_while_the_sandbox_starts_reach_the_agent_before
     later = chat()  # the next chat of the project offers them from the start
     assert later.status() == "starting" and [m["id"] for m in later.info["models"]][0] == "fable"
     assert later.info["efforts"] == ["low", "medium", "high"] and later.info["commands"]
+    assert web.agent_offers()[str(chat.tmp)]["efforts"] == ["low", "medium", "high"]  # in a file: a restarted server has it
 
 
 def test_a_chat_keeps_the_conversation_for_a_page_opened_later(chat):

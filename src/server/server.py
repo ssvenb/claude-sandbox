@@ -49,11 +49,7 @@ STATE = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") /
 META = ("id", "project", "kind", "run_id", "started", "ui")
 SAVED = ("exit", "events", "info", "todos", "tasks", "ready", "state", "waiting", "pending", "title", "activity",
          "said", "cost", "context", "sent", "offset")  # of a chat
-# What a project's agent last said it offers (models, efforts, commands): a new chat shows it while
-# its sandbox still starts. shortcut: per project and in memory, so the first chat after a restart,
-# or one whose run settings pick another agent, waits for its own `ready`; persist it if that matters.
-OFFERS = ("models", "efforts", "commands")
-last_offered = {}
+OFFERS = ("models", "efforts", "commands")  # what an agent offers on `ready`; see agent_offers()
 RUN_SH = ROOT / "run.sh"
 PLUGINS = ROOT / "plugins"
 AGENTS = ROOT / "agents"
@@ -390,7 +386,7 @@ class Chat(Session):
         self.listeners, self.events = [], []
         self.tasks = []  # what its agent runs in the background right now
         self.ready, self.state, self.waiting = False, "idle", []  # (event, command) of prompts typed before `ready`
-        self.info, self.todos = dict(last_offered.get(self.project, {})), []
+        self.info, self.todos = agent_offers().get(self.project, {}), []
         self.pending = {}  # model and effort picked before `ready`, sent ahead of the waiting prompts
         self.title = self.activity = self.said = ""
         self.cost, self.context, self.sent = None, None, 0
@@ -499,7 +495,7 @@ class Chat(Session):
             return self._leave()
         if kind == "ready":
             self.info = {**self.info, **{k: v for k, v in e.items() if k != "type" and v is not None}}
-            last_offered[self.project] = {k: self.info[k] for k in OFFERS if k in self.info}
+            agent_offers({k: self.info[k] for k in OFFERS if k in self.info}, self.project)
             for command in self.pending.values():  # the pick shows until the agent says it took it
                 self.info[command["type"]] = command.get("id", command.get("level"))
             first, self.ready = not self.ready, True
@@ -653,6 +649,27 @@ def poller(projects_file):
                 poll = describe(project, keep=True).get("poll")
                 due[project] = time.time() + (max(10, poll) if isinstance(poll, (int, float)) else IDLE_POLL)
         time.sleep(5)
+
+
+def agent_offers(offer=None, project=None):
+    """What each project's agent last offered on `ready` (models, efforts, commands), kept in a file
+    so a new chat shows it while its sandbox still starts, after a restart too. With `offer`, this
+    is now the project's. shortcut: per project, so a run whose settings pick another agent shows
+    the project's usual agent's offer until its own `ready`."""
+    file = STATE.parent / "offers.json"
+    try:
+        known = json.loads(file.read_text())
+        known = known if isinstance(known, dict) else {}
+    except (OSError, ValueError):
+        known = {}
+    if offer is not None and known.get(project) != offer:
+        known[project] = offer
+        try:
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_text(json.dumps(known))
+        except OSError:
+            pass  # not kept: the next chat waits for its agent's `ready`, as it always did
+    return known
 
 
 def autostart(project, found):

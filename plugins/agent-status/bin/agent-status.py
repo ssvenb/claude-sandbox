@@ -7,9 +7,8 @@ iTerm2/WezTerm convention): terminals that do not know it ignore it, xterm.js am
 run with pipes for stdio, so it is written to the terminal of the nearest ancestor that has one —
 the agent's own, which root-init.sh handed to this user.
 
-With AGENT_STATUS_WEBHOOK set (host.sh, from the project's config), it also POSTs to that URL when
-the state turns idle or question, once per change, in the shape AGENT_STATUS_WEBHOOK_TYPE names: the last state is kept in a file, as each hook
-is a process of its own. The POST runs in a detached child, so a slow endpoint never holds up the agent.
+The webhook is not posted from here: the web server posts it (web.sh), as it alone knows whether
+anything still runs in the background.
 
 Never in the way: whatever goes wrong, it prints nothing and exits 0.
 """
@@ -17,14 +16,9 @@ import base64
 import json
 import os
 import sys
-import tempfile
-import urllib.request
 
 # Tools that stop to ask the user something, and stay open until they answer.
 ASKING = {"AskUserQuestion", "ExitPlanMode"}
-
-# What the webhook says, for the states it is told about.
-SAY = {"idle": "idle, waiting for its next task", "question": "needs you"}
 
 
 def status(event):
@@ -59,44 +53,8 @@ def terminal():
     return None
 
 
-def notify(state):
-    url = os.environ.get("AGENT_STATUS_WEBHOOK")
-    if not url:
-        return
-    last = os.path.join(tempfile.gettempdir(), "agent-status.last")
-    try:
-        with open(last) as f:
-            if f.read() == state:
-                return
-    except OSError:
-        pass
-    with open(last, "w") as f:
-        f.write(state)
-    if state not in SAY or os.fork():
-        return
-    try:  # the child, off the hook's pipes so Claude Code does not wait for it; never returns
-        os.setsid()
-        null = os.open(os.devnull, os.O_RDWR)
-        for fd in (0, 1, 2):
-            os.dup2(null, fd)
-        project, run = os.environ.get("AGENT_STATUS_PROJECT") or "sandbox", os.environ.get("RUN_ID", "")
-        text = f"{project} ({run}): {SAY[state]}" if run else f"{project}: {SAY[state]}"
-        body = {"text": text, "content": text, "project": project, "run_id": run, "status": state}
-        if os.environ.get("AGENT_STATUS_WEBHOOK_TYPE") == "google-chat":
-            body = {"text": text}  # Google's API refuses fields it does not know
-        req = urllib.request.Request(url, json.dumps(body).encode(), {"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=10).close()
-    finally:
-        os._exit(0)
-
-
 def main():
     state = status(json.load(sys.stdin))
-    try:  # a broken webhook must not cost the status dot
-        if state:
-            notify(state)
-    except Exception:
-        pass
     path = state and terminal()
     if not path:
         return

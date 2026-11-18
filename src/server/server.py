@@ -49,6 +49,9 @@ STATE = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") /
 META = ("id", "project", "kind", "run_id", "started", "ui")
 SAVED = ("exit", "events", "info", "todos", "tasks", "ready", "state", "waiting", "pending", "title", "activity",
          "said", "cost", "context", "sent", "offset")  # of a chat
+# Where the page was last opened (http://<Host>), from the last request guard() let in: the address
+# web_on_status is told a session's page by (on_status()).
+page_origin = None
 OFFERS = ("models", "efforts", "commands")  # what an agent offers on `ready`; see agent_offers()
 RUN_SH = ROOT / "run.sh"
 PLUGINS = ROOT / "plugins"
@@ -306,9 +309,13 @@ class Session:
             self.sock.close()
         shutil.rmtree(self.dir, ignore_errors=True)
 
+    def shown(self):
+        """Its status as the page shows it, and web_on_status is told it (on_status)."""
+        return self.status()
+
     def json(self):
         return {**{k: getattr(self, k) for k in ("id", "project", "kind", "run_id", "started", "exit", "ui")},
-                "status": self.status(), "workspace": checkout(self.project, self.run_id),
+                "status": self.shown(), "workspace": checkout(self.project, self.run_id),
                 "plugins": described.get(self.project, {}).get("plugins", []),
                 "items": live_items(self.project, self.run_id) if self.exit is None and self.kind != "shell" else []}
 
@@ -607,11 +614,12 @@ class Chat(Session):
             return None
         return self.state if self.ready else "starting"
 
-    def json(self):
+    def shown(self):
         status = self.status()
-        if status == "idle" and self.tasks:  # its turn is over, but what it started in the background runs on
-            status = "working"
-        return {**super().json(), "status": status, "title": self.title, "activity": self.activity, "said": self.said,
+        return "working" if status == "idle" and self.tasks else status  # what it started in the background runs on
+
+    def json(self):
+        return {**super().json(), "title": self.title, "activity": self.activity, "said": self.said,
                 "agent": self.info.get("agent"), "model": self.info.get("model"), "cost": self.cost,
                 "context": self.context, "waiting": len(self.waiting), "todos": self.todos}
 
@@ -633,6 +641,44 @@ def describe(project, keep=False):
     described[project] = found
     autostart(project, found)
     return found
+
+
+def on_status(last):
+    """Runs each project's plugins' web_on_status commands for every session whose status, as the
+    page shows it, changed since `last` (id → status, updated here); not for one first seen."""
+    runs = []
+    with lock:
+        for s in sessions.values():
+            status, before = s.shown(), last.get(s.id, "unseen")
+            last[s.id] = status
+            commands = described.get(s.project, {}).get("on_status") or {}
+            if before in ("unseen", status) or not isinstance(commands, dict):
+                continue
+            page = f"{page_origin}/{'chat' if s.ui == 'chat' else 'session'}#{s.id}" if page_origin else ""
+            event = json.dumps({"project": s.project, "run_id": s.run_id, "session": s.id, "url": page,
+                                "status": status, "before": before})
+            runs += [(plugin, command, event) for plugin, command in commands.items() if isinstance(command, list)]
+        for gone in last.keys() - sessions.keys():
+            del last[gone]
+    for run in runs:
+        threading.Thread(target=run_on_status, args=run, daemon=True).start()
+
+
+def run_on_status(plugin, command, event):
+    try:
+        done = subprocess.run(command, input=event, capture_output=True, text=True, timeout=60, cwd=Path.home())
+        if done.returncode:
+            print(f"  {plugin}'s web_on_status exited with {done.returncode}: {done.stderr.strip()[-300:]}",
+                  file=sys.stderr, flush=True)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f"  {plugin}'s web_on_status failed: {e}", file=sys.stderr, flush=True)
+
+
+def status_watcher():
+    last = {}
+    while True:
+        on_status(last)
+        time.sleep(1)
 
 
 IDLE_POLL = 300  # seconds between descriptions of a project none of whose plugins asked for any
@@ -1193,6 +1239,8 @@ class Handler(BaseHTTPRequestHandler):
         # published port) may put this server on another, and the name is what rebinding forges.
         host = self.headers.get("Host", "")
         if host.rsplit(":", 1)[0] in self.server.hosts and self.headers.get("Origin", f"http://{host}") == f"http://{host}":
+            global page_origin
+            page_origin = f"http://{host}"
             return True
         print(f"forbidden: Host={host!r} Origin={self.headers.get('Origin')!r} {self.command} {self.path}", file=sys.stderr, flush=True)
         self.reply(403, {"error": "forbidden"})
@@ -1523,6 +1571,7 @@ if __name__ == "__main__":
         os.environ["SANDBOX_WEB_NAME"] = args.bind  # a name resolved to its address: links may keep the name
     restore()
     threading.Thread(target=poller, args=(args.projects,), daemon=True).start()
+    threading.Thread(target=status_watcher, daemon=True).start()
     server = serve(args.port, args.projects, args.bind, args.allow_host)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # so `finally` cleans up on a plain kill too
     print(f"Sandboxes: http://127.0.0.1:{server.server_address[1]}  (projects: {args.projects})",

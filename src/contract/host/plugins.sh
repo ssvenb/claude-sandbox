@@ -137,6 +137,14 @@ web_start() {
   WEB_JSON=$(jq -c --arg plugin "$PLUGIN_NAME" --argjson start "$1" '.starts += [$start + {plugin: $plugin}]' <<<"$WEB_JSON")
 }
 
+# web_on_status <command> [args…]: what the web server runs, on this machine, each time the status
+# of one of the project's sessions changes as the page shows it (idle with background tasks running
+# is working), with {project, run_id, session, url, status, before} as JSON on stdin: `url` is the
+# session's page, `status` and `before` are starting, working, idle, question, or null once it ended.
+web_on_status() {
+  WEB_JSON=$(jq -c --arg plugin "$PLUGIN_NAME" '.on_status[$plugin] = $ARGS.positional' --args "$@" <<<"$WEB_JSON")
+}
+
 # web_note <text>: one line shown with the project, for what kept a plugin from listing anything.
 web_note() { WEB_JSON=$(jq -c --arg note "$1" '.notes += [$note]' <<<"$WEB_JSON"); }
 

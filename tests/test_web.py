@@ -662,6 +662,24 @@ def test_prompts_typed_while_the_sandbox_starts_wait_and_reach_the_agent_in_orde
     assert s.info["model"] == "fable" and [c["name"] for c in s.info["commands"]][0] == "compact"
 
 
+def test_model_and_effort_picked_while_the_sandbox_starts_reach_the_agent_before_the_first_prompt(chat, monkeypatch):
+    monkeypatch.setenv("STUB_BOOT", "0.2")
+    s = chat(task="go")
+    assert "models" not in s.info  # this project's agent has not said yet what it offers
+    s.tell({"type": "model", "id": "haiku"})
+    s.tell({"type": "model", "id": "opus"})  # the last pick wins
+    s.tell({"type": "effort", "level": "high"})
+    assert (s.info["model"], s.info["effort"]) == ("opus", "high")  # a page opened now shows the picks
+    commands = chat.tmp / "commands"
+    chat.until(s, lambda s: s.ready and commands.exists() and len(commands.read_text().splitlines()) == 3)
+    assert [json.loads(line) for line in commands.read_text().splitlines()] == [
+        {"type": "model", "id": "opus"}, {"type": "effort", "level": "high"}, {"type": "prompt", "text": "go"}]
+    chat.until(s, lambda s: s.info["model"] == "opus" and not s.pending)
+    later = chat()  # the next chat of the project offers them from the start
+    assert later.status() == "starting" and [m["id"] for m in later.info["models"]][0] == "fable"
+    assert later.info["efforts"] == ["low", "medium", "high"] and later.info["commands"]
+
+
 def test_a_chat_keeps_the_conversation_for_a_page_opened_later(chat):
     s = chat()
     chat.until(s, lambda s: s.ready)

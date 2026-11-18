@@ -47,8 +47,13 @@ HOLDER = HERE / "holder.py"
 # A session's holder's socket and output, and what this server knew of it when it stopped.
 STATE = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "claude-sandbox/sessions"
 META = ("id", "project", "kind", "run_id", "started", "ui")
-SAVED = ("exit", "events", "info", "todos", "tasks", "ready", "state", "waiting", "title", "activity", "said",
-         "cost", "context", "sent", "offset")  # of a chat
+SAVED = ("exit", "events", "info", "todos", "tasks", "ready", "state", "waiting", "pending", "title", "activity",
+         "said", "cost", "context", "sent", "offset")  # of a chat
+# What a project's agent last said it offers (models, efforts, commands): a new chat shows it while
+# its sandbox still starts. shortcut: per project and in memory, so the first chat after a restart,
+# or one whose run settings pick another agent, waits for its own `ready`; persist it if that matters.
+OFFERS = ("models", "efforts", "commands")
+last_offered = {}
 RUN_SH = ROOT / "run.sh"
 PLUGINS = ROOT / "plugins"
 AGENTS = ROOT / "agents"
@@ -385,7 +390,8 @@ class Chat(Session):
         self.listeners, self.events = [], []
         self.tasks = []  # what its agent runs in the background right now
         self.ready, self.state, self.waiting = False, "idle", []  # (event, command) of prompts typed before `ready`
-        self.info, self.todos = {}, []
+        self.info, self.todos = dict(last_offered.get(self.project, {})), []
+        self.pending = {}  # model and effort picked before `ready`, sent ahead of the waiting prompts
         self.title = self.activity = self.said = ""
         self.cost, self.context, self.sent = None, None, 0
         self.blocks, self.tools, self.boot = {}, {}, None  # where streamed text, results and boot lines go
@@ -493,9 +499,15 @@ class Chat(Session):
             return self._leave()
         if kind == "ready":
             self.info = {**self.info, **{k: v for k, v in e.items() if k != "type" and v is not None}}
+            last_offered[self.project] = {k: self.info[k] for k in OFFERS if k in self.info}
+            for command in self.pending.values():  # the pick shows until the agent says it took it
+                self.info[command["type"]] = command.get("id", command.get("level"))
             first, self.ready = not self.ready, True
             self._tell({"type": "ready", **self.info})
-            if first:  # what was typed while the sandbox started, in the order it was typed
+            if first:  # what was picked and typed while the sandbox started, in that order
+                pending, self.pending = self.pending, {}
+                for command in pending.values():
+                    self._send(command)
                 waiting, self.waiting = self.waiting, []
                 for event, command in waiting:
                     event.pop("queued", None)
@@ -574,6 +586,9 @@ class Chat(Session):
                         ask["answers"] = None if command.get("cancel") else command.get("answers")
             if self.ready and self.exit is None:
                 self._send(command)
+            elif self.exit is None and command.get("type") in ("model", "effort"):  # the last pick wins
+                self.pending[command["type"]] = command
+                self.info[command["type"]] = command.get("id", command.get("level"))
 
     def snapshot(self):
         """Everything a page needs to draw the session from nothing. Caller holds `lock`."""

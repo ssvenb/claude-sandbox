@@ -17,9 +17,15 @@ export function useFollowScroll(scroller: RefObject<HTMLElement | null>, content
     const el = scroller.current;
     if (following.current && el) el.scrollTop = el.scrollHeight;
   }, [scroller]);
+  const lastTop = useRef(0);
   const onScroll = useCallback(() => {
     const el = scroller.current;
-    if (el) following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (!el) return;
+    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    // Any step up lets go, however small: else the next streamed line snaps a slow scroll back.
+    // Still at the very end means the content shrank under us, not that the reader moved.
+    following.current = el.scrollTop < lastTop.current ? gap < 1 : gap < 80;
+    lastTop.current = el.scrollTop;
   }, [scroller]);
   const follow = useCallback(() => {
     following.current = true;

@@ -1182,47 +1182,55 @@ def sync(bind="127.0.0.1"):
     return {"restarting": True}
 
 
-login = None  # the `claude auth login` under way, waiting for its code
-login_lock = threading.Lock()
+signing_in = {}  # agent → its sign-in command under way, waiting for its code
+sign_in_lock = threading.Lock()
 
 
-def claude_login():
-    """Starts `claude auth login` for the host's ~/.claude (what claude-home mounts), dropping any
-    earlier one, and gives the claude.com page it asks you to open: that page shows the code to paste back."""
-    global login
-    with login_lock:
-        if login and login.poll() is None:
-            login.kill()
+def sign_in(agent):
+    """Starts the sign-in command an agent declares (`signIn` in its agent.json), dropping one of it
+    still under way, and gives the link it prints: the page to sign in at, which ends on a code."""
+    meta = _manifest(AGENTS / agent / "agent.json") if re.fullmatch(r"[\w-]+", agent or "") else None
+    command = (meta or {}).get("signIn")
+    if not (isinstance(command, list) and command and all(isinstance(c, str) for c in command)):
+        raise ValueError(f"agent {agent!r} has no sign-in")
+    # Installers put CLIs in ~/.local/bin, which a service's PATH may lack.
+    exe = shutil.which(command[0]) or shutil.which(command[0], path=str(Path.home() / ".local/bin"))
+    if not exe:
+        raise ValueError(f"{command[0]} is not installed on the server (not on its PATH, nor in ~/.local/bin)")
+    with sign_in_lock:
+        if (old := signing_in.pop(agent, None)) and old.poll() is None:
+            old.kill()
         try:
-            login = subprocess.Popen(["claude", "auth", "login"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                     stderr=subprocess.STDOUT, text=True, env={**os.environ, "BROWSER": "true"})
+            proc = subprocess.Popen([exe, *command[1:]], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True, env={**os.environ, "BROWSER": "true"})
         except OSError as e:
-            raise ValueError(f"cannot run claude: {e}")
+            raise ValueError(f"cannot run {command[0]}: {e}")
+        signing_in[agent] = proc
         out = ""
-        while line := login.stdout.readline():  # the link, wrapped in an OSC 8 hyperlink
+        # shortcut: waits for as long as it prints no link and does not exit; add a timeout if one ever hangs.
+        while line := proc.stdout.readline():  # the link may be wrapped in an OSC 8 hyperlink
             out += line
-            if m := re.search(r"https://[^\s\x07\x1b]+", line):
+            if m := re.search(r"https?://[^\s\x07\x1b]+", line):
                 return m[0]
-        login.wait()
-        raise ValueError(f"claude auth login gave no link:\n{out[-2000:]}")
+        proc.wait()
+        raise ValueError(f"{' '.join(command)} gave no link:\n{out[-2000:]}")
 
 
-def claude_login_code(code):
-    """Hands the running `claude auth login` the code its page showed; it signs in with it, or says why not."""
-    global login
+def sign_in_code(agent, code):
+    """Hands an agent's sign-in under way the code its page showed; it signs in with it, or says why not."""
     if not isinstance(code, str) or not code.strip():
         raise ValueError("no code")
-    with login_lock:
-        proc, login = login, None
+    with sign_in_lock:
+        proc = signing_in.pop(agent, None)
     if proc is None or proc.poll() is not None:
         raise ValueError("no sign-in under way: start it again")
     try:
         out, _ = proc.communicate(code.strip() + "\n", timeout=60)
     except subprocess.TimeoutExpired:
         proc.kill()
-        raise ValueError("claude auth login did not finish")
+        raise ValueError("the sign-in did not finish")
     if proc.returncode:
-        raise ValueError(out.rsplit(">", 1)[-1].strip() or "claude auth login failed")
+        raise ValueError(out.rsplit(">", 1)[-1].strip() or "the sign-in failed")
 
 
 def start(project, kind, run_id, task=None, ui=None, images=None, sets=None, once=False):
@@ -1382,9 +1390,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(200, read_config(query["project"]))
             except ValueError as e:
                 self.reply(400, {"error": str(e)})
-        elif url.path == "/api/claude-login":  # a link to follow: on to claude.com's sign-in
+        elif m := re.fullmatch(r"/api/agents/([\w-]+)/sign-in", url.path):  # a link to follow: on to its sign-in page
             try:
-                target = claude_login()
+                target = sign_in(m[1])
             except ValueError as e:
                 return self.reply(400, {"error": str(e)})
             self.send_response(302)
@@ -1458,8 +1466,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("not a configured project")
                 delete_project(req["name"])
                 self.reply(200, {})
-            elif url.path == "/api/claude-login":
-                claude_login_code(json.loads(body).get("code"))
+            elif m := re.fullmatch(r"/api/agents/([\w-]+)/sign-in", url.path):
+                sign_in_code(m[1], json.loads(body).get("code"))
                 self.reply(200, {})
             elif url.path == "/api/sync":
                 self.reply(200, sync(self.server.bind))

@@ -8,7 +8,7 @@ Runs on the HOST, as you, next to run.sh — a session is `run.sh --project <nam
 come out of run.sh's stdout and go to the page as server-sent events, while prompts come back as
 POSTs. The page is there from the first moment: what is typed while the sandbox still builds and
 boots waits here and is handed to the agent the moment it is ready. The terminal is your
-shell in a pty, in your home folder. Standard library only; the terminal page loads xterm.js from a CDN.
+shell in a pty, in your home folder; the terminal page loads xterm.js from a CDN.
 
     src/server/server.py [--port 8787] [--bind 127.0.0.1] [--allow-host NAME]... [--projects DIR]
 

@@ -17,7 +17,6 @@ The rest of the core, beside it under src/:
     shared/     helpers of more than one of those
 
 Plugins and agents stay shell: their host.sh and web.sh are sourced by one bash process per run.
-Standard library only.
 """
 import sys
 from pathlib import Path

@@ -84,7 +84,7 @@ repo) and deleted (its file only, refused while it has sessions) at once, and yo
 its fields those of its type — or JSON, saved readable by you alone.
 For a project whose
 `origin` is on GitHub it lists the open pull requests, with their CI status, and issues with a token of
-the project's GitHub App (`GH_AUTH`; the host's own `gh` login when it names none; the App then needs read access to issues, checks and commit statuses, and
+the project's GitHub App (`GH_AUTH`; the host's own `gh` login, if any, when it names none; the App then needs read access to issues, checks and commit statuses, and
 write to pull requests to close one), each a link to its GitHub page (one tab per item, brought to the front when it
 is already open); a PR on a per-run branch (`<prefix>/<date>-<RUN_ID>`) gets a **Resume** button,
 which is `run.sh --resume <RUN_ID>`; an ended session in the list has one too. An issue's
@@ -158,7 +158,7 @@ agent's home directory, so it only outlives the container while `claude-home` / 
 mounts it from the host (both on by default); without them a resumed run starts a new conversation
 on the old branch.
 
-The server needs only `python3` on the host (and `gh` for the PR list). The pages are one
+The server needs only `python3` and [uv](https://docs.astral.sh/uv/) on the host; `gh` is not needed. The pages are one
 [React](https://react.dev) app in TypeScript, [web](web), built with [Vite](https://vite.dev)
 (Node 20 or later, with npm) into `web/dist`, which the server hands out: `./install.sh` builds
 it, as does `npm ci && npm run build` in `web`; until it is built the pages answer 503 and say
@@ -918,19 +918,7 @@ The core is grouped by role under `src/`; each folder has one reason to change.
 ## Dependencies
 
 The project is a [uv](https://docs.astral.sh/uv/) project: `uv sync` creates `.venv` from
-`uv.lock`, and `run.sh` and `src/server/serve.sh` run in it. What a library could replace was weighed
-piece by piece, to keep the code that has to be maintained here small:
-
-| Hand-written code | Verdict |
-|---|---|
-| Markdown rendering, terminal loading, component plumbing in the web UI | **replaced** by npm packages (React, `react-markdown`, `@xterm/xterm`), bundled by Vite — see [web/package.json](web/package.json) |
-| `src/server/server.py`'s HTTP layer → FastAPI/Starlette | kept: the server tunnels what plugins serve (VS Code's `code serve-web`) over raw sockets, upgrade requests included, which ASGI does not expose; sessions are ptys and pipes read by threads. A framework would replace the ~80 lines of routing and leave the rest |
-| `.env.example` scanning (`config.py`) → `python-dotenv` | kept: 30 lines; `python-dotenv` reads quotes and comments differently and has no "commented defaults" mode |
-| GitHub App JWT (`mint-gh-token.py`) → `PyJWT` + `cryptography` | kept: ten lines around `openssl dgst`, against a compiled dependency in every environment |
-| Settings validation (`src/server/server.py`) → `pydantic` / `jsonschema` | kept: the types are declared by plugin manifests at run time, so a schema library would need a translation layer as long as the checks |
-| Credential-injecting proxy (`upstream-proxy`), port proxy (`portd.py`) | kept: socket plumbing with a security boundary and their own tests; no library does this job as is |
-| Command line (`main.py`) | kept: 40 lines whose exact refusals the web UI shows |
-
-So the Python side has no runtime dependencies; uv pins the interpreter and the test tools
-(`pytest`, `playwright`). Scripts that run inside the container use the image's system Python and
-stay standard library by necessity.
+`uv.lock`, and `run.sh`, `src/server/serve.sh` and the plugins' host scripts (their `python3`) run in
+it. Add a library with `uv add <package>` where it saves code that would otherwise be maintained
+here — `requests` for the GitHub API (`plugins/github-auth/host/github.py`), say. Scripts that run
+inside the container use the image's system Python, so they stay standard library.

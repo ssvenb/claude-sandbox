@@ -973,3 +973,29 @@ def test_the_files_a_runs_checkout_changed_are_beside_its_chat_or_behind_a_heade
     # The list follows the checkout.
     (board.checkout / "web/src/New.tsx").unlink()
     tab.wait_for_function("document.querySelector('header .files')?.innerText === '3'")
+
+
+def test_the_menus_sign_in_to_claude_opens_its_page_and_takes_the_code_in_a_dialog(board, tmp_path):
+    page = board.base + "/?claude-signin"  # where the stand-in claude sends you to sign in: a page that loads
+    tool(tmp_path / "bin/claude", f"#!/bin/sh\necho 'visit: {page}'\nread c\n[ \"$c\" = good ] || {{ echo 'Bad code'; exit 1; }}\n")
+
+    def sign_in():
+        board.click("button[aria-label='Menu']")
+        with board.context.expect_page() as tab:
+            board.click("#board-menu button[aria-label='Sign in to Claude']")
+        tab.value.wait_for_url(page)  # the server sent the tab on to the page claude printed
+        tab.value.close()
+
+    sign_in()
+    assert not board.is_visible("#board-menu")
+    code = board.get_by_role("textbox", name="Code")
+    code.fill("bad")
+    board.click("dialog button[type=submit]")
+    board.wait_for_selector("dialog .error:text('Bad code')")
+    # A failed code ends that sign-in: cancel, sign in anew, and the right code.
+    board.click("dialog button:text('Cancel')")
+    sign_in()
+    assert board.inner_text("dialog .error") == ""
+    code.fill("good")
+    board.click("dialog button[type=submit]")
+    board.wait_for_selector("dialog[aria-labelledby]", state="hidden")

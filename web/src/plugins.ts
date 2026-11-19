@@ -1,6 +1,7 @@
-// What plugins draw themselves: each one's plugins/<name>/web/index.tsx, bundled with the app at
-// build time. The page knows none of them, only the places they may fill.
-import type { ReactNode } from 'react';
+// What plugins and agents draw themselves: each one's plugins/<name>/web/index.tsx or
+// agents/<name>/web/index.tsx, bundled with the app at build time. The page knows none of them, only
+// the places they may fill.
+import type { ComponentType, ReactNode } from 'react';
 import type { Session } from './api/types';
 
 /** What a plugin adds to a session's chat page. */
@@ -29,5 +30,19 @@ const found = import.meta.glob<{ default: PluginUI }>('../../plugins/*/web/index
 
 /** Every plugin that brings page code, in the order of its name. */
 export const PLUGINS = Object.entries(found)
+  .map(([path, m]) => ({ name: path.split('/').at(-3)!, ...m.default }))
+  .sort((a, b) => a.name.localeCompare(b.name));
+
+/** An agent's page code: the default export of its web/index.tsx. */
+export interface AgentUI {
+  /** Its items in the dashboard's menu (⋯), e.g. signing its CLI on the server in again
+   *  (components/common/SignInButton). `close` closes the menu. */
+  Menu?: ComponentType<{ close: () => void }>;
+}
+
+const agents = import.meta.glob<{ default: AgentUI }>('../../agents/*/web/index.tsx', { eager: true });
+
+/** Every agent that brings page code, in the order of its name. */
+export const AGENTS = Object.entries(agents)
   .map(([path, m]) => ({ name: path.split('/').at(-3)!, ...m.default }))
   .sort((a, b) => a.name.localeCompare(b.name));

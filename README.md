@@ -81,9 +81,10 @@ control for; the next session reads the file.
 The menu (**⋯**, top right) has the sandbox's own **Settings**: the projects, added (a name and its
 repo) and deleted (its file only, refused while it has sessions) at once, and your
 [authentications](#authentications--configclaude-sandboxauthjson) as the same form — an entry each,
-its fields those of its type — or JSON, saved readable by you alone. Its **Sign in to Claude** runs
-`claude auth login` on the server (its `~/.claude`, which `claude-home` mounts): a new tab goes on to
-claude.com's sign-in, and the code that page ends on, pasted back into the dashboard, signs it in.
+its fields those of its type — or JSON, saved readable by you alone. Agents add to the menu too:
+Claude's **Sign in to Claude** runs `claude auth login` on the server (its `~/.claude`, which
+`claude-home` mounts): a new tab goes on to claude.com's sign-in, and the code that page ends on,
+pasted into the dialog on the dashboard, signs it in (see an agent's [`signIn`](#agents)).
 For a project whose
 `origin` is on GitHub it lists the open pull requests, with their CI status, and issues with a token of
 the project's GitHub App (`GH_AUTH`, which the plugin requires; the App needs read access to issues, checks and commit statuses, and
@@ -232,6 +233,7 @@ An agent is a directory under `agents/<name>/`. Only `agent.json` is required; t
 | `host.sh` | you | on the host, **after** every plugin's `host.sh` |
 | `agent-init.sh` | `node` | in the container, before the plugins' agent stage |
 | `launch.sh` | `node` | last: turns `$AGENT_PROMPT` into flags and starts the agent |
+| `web/index.tsx` | your browser | the agent's own part of the web UI, bundled with it when it is built: its items in the dashboard's menu |
 | `chat.mjs` | `node` | in place of the agent's TUI for a web chat (`run.sh --chat`): drives the agent through its SDK and speaks the chat events of [src/services/chat/chat-bridge.mjs](src/services/chat/chat-bridge.mjs) on stdio |
 
 `agent.json` carries `name`, `description`, `managedSettings` — the path the agent reads its
@@ -253,6 +255,14 @@ in its project file.
 
 An optional `settings` list declares the agent's own variables (`CLAUDE_EFFORT`, its token) for
 the web UI's settings form, as a plugin's do: see [Declaring settings](#declaring-settings).
+
+An optional `signIn` is the command that signs the agent's CLI on the host in again, as the web
+server's user: it prints a link to sign in at, then reads the code that page ends on from stdin
+(`["claude", "auth", "login"]`). The server runs it from its PATH or `~/.local/bin`; the dashboard's
+menu offers it when the agent's `web/index.tsx` puts a `SignInButton`
+([web/src/components/common/SignInButton.tsx](web/src/components/common/SignInButton.tsx)) in its
+`Menu` (see [web/src/plugins.ts](web/src/plugins.ts)'s `AgentUI`): `GET /api/agents/<name>/sign-in`
+starts the command and redirects to its link, `POST` with `{"code": …}` hands it the code.
 
 Because `host.sh` runs after the plugin host stage, it can see `AGENT_AUTH_PROVIDED=1` from a
 plugin that supplies credentials itself and skip its own token check:

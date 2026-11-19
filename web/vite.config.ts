@@ -7,8 +7,8 @@ import react from '@vitejs/plugin-react';
 const SERVER = 'http://127.0.0.1:8787';
 const toServer = { target: SERVER, changeOrigin: true, ws: true, headers: { origin: SERVER } };
 
-// The plugins' page code (src/plugins.ts) lives in ../plugins/*/web, outside this package: it reaches
-// the page's own modules as @ui/…, and React from here.
+// The plugins' and agents' page code (src/plugins.ts) lives in ../plugins/*/web and ../agents/*/web,
+// outside this package: it reaches the page's own modules as @ui/…, and React from here.
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -17,6 +17,6 @@ export default defineConfig({
   },
   server: {
     proxy: { '/api': toServer, '/plugins': toServer },
-    fs: { allow: ['.', '../plugins'] },
+    fs: { allow: ['.', '../plugins', '../agents'] },
   },
 });

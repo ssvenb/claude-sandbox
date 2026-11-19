@@ -1062,30 +1062,43 @@ def test_serve_oauth_runs_the_server_behind_the_proxy_and_ends_with_it(tmp_path)
         p.kill()
 
 
-def test_claude_sign_in_gives_the_link_and_takes_back_its_code(tmp_path, monkeypatch):
-    # Prints its link as `claude auth login` does (in an OSC 8 hyperlink), then takes the code from stdin.
-    fake = tmp_path / "claude"
-    fake.write_text("#!/bin/sh\nprintf 'Opening\\nvisit: \\033]8;;https://claude.com/x?a=1\\007https://claude.com/x?a=1\\033]8;;\\007\\n'\n"
-                    "printf 'Paste code here if prompted > '\nread c\n[ \"$c\" = good ] || { echo 'Bad code'; exit 1; }\n")
-    fake.chmod(0o755)
+@pytest.fixture
+def signing_agent(tmp_path, monkeypatch):
+    """An agent whose `signIn` is `cli login`: like `claude auth login`, it prints its link (in an OSC 8
+    hyperlink), then takes the code from stdin. `cli` is put in tmp_path; the caller puts it on a PATH."""
+    agents = tmp_path / "agents"
+    (agents / "a").mkdir(parents=True)
+    (agents / "a/agent.json").write_text(json.dumps({"signIn": ["cli", "login"]}))
+    (agents / "b").mkdir()
+    (agents / "b/agent.json").write_text("{}")
+    monkeypatch.setattr(web, "AGENTS", agents)
+    cli = tmp_path / "cli"
+    cli.write_text("#!/bin/sh\nprintf 'Opening\\nvisit: \\033]8;;https://claude.com/x?a=1\\007https://claude.com/x?a=1\\033]8;;\\007\\n'\n"
+                   "printf 'Paste code here if prompted > '\nread c\n[ \"$c\" = good ] || { echo 'Bad code'; exit 1; }\n")
+    cli.chmod(0o755)
+    return cli
+
+
+def test_an_agents_sign_in_gives_the_link_and_takes_back_its_code(signing_agent, tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
-    assert web.claude_login() == "https://claude.com/x?a=1"
+    assert web.sign_in("a") == "https://claude.com/x?a=1"
     with pytest.raises(ValueError, match="Bad code"):
-        web.claude_login_code("bad")
+        web.sign_in_code("a", "bad")
     with pytest.raises(ValueError, match="no sign-in under way"):
-        web.claude_login_code("good")
-    web.claude_login()
-    web.claude_login_code(" good ")
+        web.sign_in_code("a", "good")
+    web.sign_in("a")
+    web.sign_in_code("a", " good ")
+    for agent in ("b", "nope", "../a"):
+        with pytest.raises(ValueError, match="has no sign-in"):
+            web.sign_in(agent)
 
 
-def test_claude_sign_in_finds_claude_in_local_bin_off_the_path(tmp_path, monkeypatch):
+def test_an_agents_sign_in_finds_its_cli_in_local_bin_off_the_path(signing_agent, tmp_path, monkeypatch):
     (tmp_path / ".local/bin").mkdir(parents=True)
-    fake = tmp_path / ".local/bin/claude"
-    fake.write_text("#!/bin/sh\necho 'visit: https://claude.com/y'\nread c\n")
-    fake.chmod(0o755)
+    signing_agent.rename(tmp_path / ".local/bin/cli")
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     monkeypatch.setenv("HOME", str(tmp_path))
-    assert web.claude_login() == "https://claude.com/y"
+    assert web.sign_in("a") == "https://claude.com/x?a=1"
     monkeypatch.setenv("HOME", str(tmp_path / "none"))
-    with pytest.raises(ValueError, match="not installed on the server"):
-        web.claude_login()
+    with pytest.raises(ValueError, match="cli is not installed on the server"):
+        web.sign_in("a")

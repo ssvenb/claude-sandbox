@@ -931,6 +931,7 @@ def test_a_side_chat_is_asked_beside_the_conversation_and_kept_apart_from_it(cha
     assert back.side(None, "a third") == "3"  # an id is not used twice
     with pytest.raises(ValueError, match="no such side chat"):
         back.side("2", "gone")
+    chat.until(back, lambda s: s.sides["3"]["state"] == "idle")  # the agent has read all it was sent
     commands = [json.loads(line) for line in (chat.tmp / "commands").read_text().splitlines()]
     assert {"type": "side", "id": "2", "close": True} in commands and {"type": "interrupt", "side": "2"} in commands
 

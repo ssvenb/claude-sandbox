@@ -223,13 +223,7 @@ def test_netbird_needs_a_tun_device(sb):
 SA = "sandbox@my-proj.iam.gserviceaccount.com"
 
 
-@pytest.mark.skipif(bool(shutil.which("gcloud")), reason="gcloud is installed on this host")
-def test_gcp_auth_needs_gcloud_on_the_host(sb):
-    sb.plugin("gcp-auth", GCP_SERVICE_ACCOUNT=SA).dies("gcloud is required on the host")
-
-
 def test_gcp_auth_registers_a_token_for_the_service_account(sb):
-    sb.stub("gcloud", "exit 0\n")
     run = sb.bash("ENABLED_PLUGINS=gcp-auth\nplugins_host_stage\nprintf '%s\\n' \"${CREDENTIALS[@]}\"",
                   GCP_SERVICE_ACCOUNT=SA).ok()
     assert run.env == {"GCP_SERVICE_ACCOUNT": SA, "GCP_PROJECT": "my-proj"}
@@ -237,7 +231,6 @@ def test_gcp_auth_registers_a_token_for_the_service_account(sb):
 
 
 def test_gcp_auth_mint_runs_the_minter_with_the_account(sb):
-    sb.stub("gcloud", "exit 0\n")
     fake = sb.tmp / "fake-plugin"
     (fake / "host").mkdir(parents=True)
     (fake / "host/mint-gcp-token.py").write_text('#!/bin/sh\necho "minted for $GCP_SERVICE_ACCOUNT"\n')
@@ -248,7 +241,6 @@ def test_gcp_auth_mint_runs_the_minter_with_the_account(sb):
 
 
 def test_gcp_auth_hands_the_credential_file_to_the_minter(sb):
-    sb.stub("gcloud", "exit 0\n")
     cred = sb.tmp / "wif.json"
     cred.write_text("{}")
     fake = sb.tmp / "fake-plugin"
@@ -262,7 +254,6 @@ def test_gcp_auth_hands_the_credential_file_to_the_minter(sb):
 
 
 def test_gcp_auth_unreadable_credential_file_fails(sb):
-    sb.stub("gcloud", "exit 0\n")
     sb.plugin("gcp-auth", GCP_SERVICE_ACCOUNT=SA, GCP_CREDENTIAL_FILE="/nope.json").dies("not readable")
 
 
@@ -273,7 +264,6 @@ def test_gcp_auth_unreadable_credential_file_fails(sb):
     (SA, "override", "override"),
 ])
 def test_gcp_auth_account_and_project(sb, account, project, outcome):
-    sb.stub("gcloud", "exit 0\n")
     run = sb.plugin("gcp-auth", GCP_SERVICE_ACCOUNT=account, GCP_PROJECT=project)
     if outcome in ("explicit", "override"):
         assert run.ok().env["GCP_PROJECT"] == outcome

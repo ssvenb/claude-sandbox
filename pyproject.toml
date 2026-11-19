@@ -5,6 +5,8 @@ description = "A Docker sandbox for running CLI coding agents autonomously, with
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
+    "google-auth[requests]>=2.50.0",
+    "pyjwt[crypto]>=2.15.1",
     "requests>=2.32.5",
 ]
 

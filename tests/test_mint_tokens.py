@@ -1,18 +1,21 @@
 """The host-side credential minters: github-auth's mint-gh-token.py and gcp-auth's mint-gcp-token.py.
 
-Both are run in-process with urlopen replaced by a fake API, so the requests they make can be
-checked without the network. openssl (GitHub's JWT) and the gcloud stub run for real.
+Both are run in-process against a fake API (urlopen for GitHub, requests for google-auth), so the
+requests they make can be checked without the network; PyJWT and google-auth run for real.
 """
-import base64
 import io
 import json
 import os
 import runpy
-import subprocess
 import urllib.error
+import urllib.parse
 import urllib.request
 
+import jwt as pyjwt
 import pytest
+import requests
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 from conftest import REPO
 
@@ -42,9 +45,11 @@ def run(script):
 @pytest.fixture(scope="module")
 def app_key(tmp_path_factory):
     d = tmp_path_factory.mktemp("key")
-    subprocess.run(["openssl", "genrsa", "-out", d / "key.pem", "2048"], check=True, capture_output=True)
-    subprocess.run(["openssl", "rsa", "-in", d / "key.pem", "-pubout", "-out", d / "pub.pem"],
-                   check=True, capture_output=True)
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    (d / "key.pem").write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL,
+                                                  serialization.NoEncryption()))
+    (d / "pub.pem").write_bytes(key.public_key().public_bytes(serialization.Encoding.PEM,
+                                                              serialization.PublicFormat.SubjectPublicKeyInfo))
     return d
 
 
@@ -54,10 +59,6 @@ def gh_env(monkeypatch, app_key):
     monkeypatch.setenv("GH_PRIVATE_KEY_FILE", str(app_key / "key.pem"))
     monkeypatch.delenv("GH_HOST", raising=False)
     monkeypatch.delenv("REPO_URL", raising=False)
-
-
-def b64decode(part: str) -> bytes:
-    return base64.urlsafe_b64decode(part + "=" * (-len(part) % 4))
 
 
 API = "https://api.github.com"
@@ -81,22 +82,17 @@ def test_github_token_comes_from_the_installation_owning_the_repo(gh_env, monkey
     assert [r.get_method() for r in api.requests] == ["GET", "POST"]
 
 
-def test_github_jwt_is_signed_by_the_app_key(gh_env, monkeypatch, app_key, tmp_path):
+def test_github_jwt_is_signed_by_the_app_key(gh_env, monkeypatch, app_key):
     api = FakeAPI(monkeypatch, {
         ("GET", f"{API}/app/installations"): (200, [{"id": 3}]),
         ("POST", f"{API}/app/installations/3/access_tokens"): (201, {"token": "t"}),
     })
     run(GH_MINT)
     jwt = api.requests[0].get_header("Authorization").removeprefix("Bearer ")
-    header, payload, signature = jwt.split(".")
-    assert json.loads(b64decode(header)) == {"alg": "RS256", "typ": "JWT"}
-    claims = json.loads(b64decode(payload))
+    assert pyjwt.get_unverified_header(jwt)["alg"] == "RS256"
+    claims = pyjwt.decode(jwt, (app_key / "pub.pem").read_bytes(), algorithms=["RS256"])  # checks the signature
     assert claims["iss"] == "4242"
     assert claims["exp"] - claims["iat"] == 360  # backdated a minute, valid for five
-    (tmp_path / "sig").write_bytes(b64decode(signature))
-    (tmp_path / "input").write_text(f"{header}.{payload}")
-    subprocess.run(["openssl", "dgst", "-sha256", "-verify", app_key / "pub.pem",
-                    "-signature", tmp_path / "sig", tmp_path / "input"], check=True, capture_output=True)
 
 
 def test_github_without_repo_url_takes_the_first_installation(gh_env, monkeypatch, capsys):
@@ -141,85 +137,105 @@ def test_github_app_not_installed_on_the_repo(gh_env, monkeypatch):
 
 SA = "sandbox@proj.iam.gserviceaccount.com"
 IAM = f"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{SA}:generateAccessToken"
+OAUTH = "https://oauth2.googleapis.com/token"
+STS = "https://sts.googleapis.com/v1/token"
+SA_TOKEN = {"accessToken": "sa-token", "expireTime": "2099-01-01T00:00:00Z"}
 
 
 @pytest.fixture
-def gcloud(monkeypatch, tmp_path):
-    def make(script):
-        path = tmp_path / "gcloud"
-        path.write_text("#!/bin/sh\n" + script)
-        path.chmod(0o755)
-        monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
+def google(monkeypatch, tmp_path):
+    """google-auth's HTTP faked: set .responses {(method, url): (status, body)}; read .requests
+    (method, url, headers, body). No login of the host's, no GCE metadata server."""
+    def request(session, method, url, data=None, headers=None, **kw):
+        if (method, url) not in fake.responses:  # the GCE metadata server, say: not on this host
+            raise requests.ConnectionError(f"{method} {url}: nothing here")
+        fake.requests.append((method, url, headers or {}, data))
+        status, body = fake.responses[(method, url)]
+        r = requests.Response()
+        r.status_code, r._content, r.headers["Content-Type"] = status, json.dumps(body).encode(), "application/json"
+        return r
+    fake = type("Google", (), {"responses": {}, "requests": []})()
+    monkeypatch.setattr(requests.Session, "request", request)
     monkeypatch.setenv("GCP_SERVICE_ACCOUNT", SA)
-    return make
+    monkeypatch.setenv("CLOUDSDK_CONFIG", str(tmp_path / "no-gcloud"))
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    monkeypatch.delenv("GCP_CREDENTIAL_FILE", raising=False)
+    return fake
 
 
-def test_gcp_token_is_minted_for_the_service_account_with_the_host_login(gcloud, monkeypatch, capsys):
-    gcloud('[ "$*" = "auth print-access-token --quiet" ] && echo host-user-token')
-    api = FakeAPI(monkeypatch, {("POST", IAM): (200, {"accessToken": "sa-token"})})
+@pytest.fixture
+def adc(monkeypatch, tmp_path):
+    """The host's application default credentials: a user login (gcloud auth application-default login)."""
+    path = tmp_path / "adc.json"
+    path.write_text(json.dumps({"type": "authorized_user", "client_id": "c", "client_secret": "s", "refresh_token": "r"}))
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(path))
+
+
+def body(data):
+    return json.loads(data) if data and data[:1] in ("{", b"{") else dict(urllib.parse.parse_qsl(data.decode() if isinstance(data, bytes) else data))
+
+
+def test_gcp_token_is_minted_for_the_service_account_with_the_host_login(google, adc, capsys):
+    google.responses = {("POST", OAUTH): (200, {"access_token": "host-user-token", "expires_in": 3600}),
+                        ("POST", IAM): (200, SA_TOKEN)}
     run(GCP_MINT)
     assert capsys.readouterr().out == "sa-token\n"
-    [req] = api.requests
-    assert req.get_header("Authorization") == "Bearer host-user-token"
-    assert json.loads(req.data) == {"scope": ["https://www.googleapis.com/auth/cloud-platform"],
-                                    "lifetime": "3600s"}
+    _, (method, url, headers, data) = google.requests
+    assert headers["authorization"] == "Bearer host-user-token"
+    assert {k: v for k, v in body(data).items() if k != "delegates"} == {
+        "scope": ["https://www.googleapis.com/auth/cloud-platform"], "lifetime": "3600s"}
 
 
-def test_gcp_without_a_host_login_says_how_to_log_in(gcloud):
-    gcloud("echo 'not logged in' >&2; exit 1")
+def test_gcp_without_a_host_login_says_how_to_log_in(google):
     with pytest.raises(SystemExit) as exc:
         run(GCP_MINT)
-    assert "gcloud auth login" in exc.value.code and "not logged in" in exc.value.code
+    assert "gcloud auth application-default login" in exc.value.code
+    assert google.requests == []
 
 
-def test_gcp_credential_file_mints_through_gcloud_without_iam(gcloud, monkeypatch, capsys):
-    gcloud('[ "$*" = "auth print-access-token --quiet" ] && echo "fed-$CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"')
-    monkeypatch.setenv("GCP_CREDENTIAL_FILE", "/etc/wif.json")
-    api = FakeAPI(monkeypatch, {})
+def test_gcp_credential_file_federates_and_impersonates_the_account_it_names(google, capsys, monkeypatch, tmp_path):
+    (tmp_path / "subject").write_text("host-identity")
+    cred = tmp_path / "wif.json"
+    cred.write_text(json.dumps({
+        "type": "external_account", "audience": "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/x",
+        "subject_token_type": "urn:ietf:params:oauth:token-type:jwt", "token_url": STS,
+        "credential_source": {"file": str(tmp_path / "subject")}, "service_account_impersonation_url": IAM}))
+    monkeypatch.setenv("GCP_CREDENTIAL_FILE", str(cred))
+    google.responses = {("POST", STS): (200, {"access_token": "federated", "token_type": "Bearer", "expires_in": 3600,
+                                             "issued_token_type": "urn:ietf:params:oauth:token-type:access_token"}),
+                        ("POST", IAM): (200, SA_TOKEN)}
     run(GCP_MINT)
-    assert capsys.readouterr().out == "fed-/etc/wif.json\n"
-    assert api.requests == []
+    assert capsys.readouterr().out == "sa-token\n"
+    (_, _, _, sts), (_, _, headers, _) = google.requests  # a fresh exchange every mint: nothing cached
+    assert body(sts)["subject_token"] == "host-identity"
+    assert headers["authorization"] == "Bearer federated"
 
 
-def test_gcp_credential_file_never_reuses_gclouds_cached_token(gcloud, monkeypatch, capsys, tmp_path):
-    # gcloud hands back a cached federated token until its last 5 minutes; the metadata server
-    # would then promise an hour for a token about to die (issue #56).
-    user = tmp_path / "user-gcloud"
-    (user / "configurations").mkdir(parents=True)
-    (user / "access_tokens.db").write_text("cached")
-    monkeypatch.setenv("CLOUDSDK_CONFIG", str(user))
-    monkeypatch.setenv("GCP_CREDENTIAL_FILE", "/etc/wif.json")
-    gcloud('[ -d "$CLOUDSDK_CONFIG/configurations" ] && [ ! -e "$CLOUDSDK_CONFIG/access_tokens.db" ] '
-           '&& echo fresh')
-    run(GCP_MINT)
-    assert capsys.readouterr().out == "fresh\n"
-    assert (user / "access_tokens.db").read_text() == "cached"
-
-
-def test_gcp_credential_file_failure_names_the_file(gcloud, monkeypatch):
-    gcloud("echo 'mTLS handshake failed' >&2; exit 1")
-    monkeypatch.setenv("GCP_CREDENTIAL_FILE", "/etc/wif.json")
+def test_gcp_credential_file_failure_names_the_file(google, monkeypatch, tmp_path):
+    cred = tmp_path / "wif.json"
+    cred.write_text("{}")
+    monkeypatch.setenv("GCP_CREDENTIAL_FILE", str(cred))
     with pytest.raises(SystemExit) as exc:
         run(GCP_MINT)
-    assert "/etc/wif.json" in exc.value.code and "mTLS handshake failed" in exc.value.code
+    assert str(cred) in exc.value.code
 
 
-def test_gcp_missing_grant_names_the_role(gcloud, monkeypatch):
-    gcloud("echo t")
-    FakeAPI(monkeypatch, {("POST", IAM): (403, "denied")})
+def test_gcp_missing_grant_names_the_role(google, adc):
+    google.responses = {("POST", OAUTH): (200, {"access_token": "t", "expires_in": 3600}),
+                        ("POST", IAM): (403, {"error": {"message": "denied"}})}
     with pytest.raises(SystemExit) as exc:
         run(GCP_MINT)
-    assert "roles/iam.serviceAccountTokenCreator" in exc.value.code
+    assert "roles/iam.serviceAccountTokenCreator" in exc.value.code and "denied" in exc.value.code
 
 
-def test_github_key_openssl_cannot_use_says_why(gh_env, monkeypatch, tmp_path):
+def test_github_key_that_is_no_key_says_why(gh_env, monkeypatch, tmp_path):
     key = tmp_path / "bad.pem"
     key.write_text("not a key\n")
     monkeypatch.setenv("GH_PRIVATE_KEY_FILE", str(key))
     with pytest.raises(SystemExit) as e:
         run(GH_MINT)
     msg = str(e.value)
-    assert f"openssl could not sign the App's JWT with {key}" in msg
+    assert f"could not sign the App's JWT with {key}" in msg
     assert "PEM private key" in msg
     assert "Traceback" not in msg
 

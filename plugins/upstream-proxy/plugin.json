@@ -72,7 +72,7 @@
                 "type": "auth",
                 "auth": ["api-key", "oauth2-client", "gcp-service-account"],
                 "label": "Credential",
-                "description": "What the proxy authenticates with, from your authentications; nothing: no authentication. An api-key is sent as is, an oauth2-client's token or a gcp-service-account's (minted with your gcloud login) as Authorization: Bearer."
+                "description": "What the proxy authenticates with, from your authentications; nothing: no authentication. An api-key is sent as is, an oauth2-client's token or a gcp-service-account's (minted with your application default credentials) as Authorization: Bearer."
               },
               {
                 "key": "header",

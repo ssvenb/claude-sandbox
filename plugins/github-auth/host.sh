@@ -6,7 +6,6 @@
 [ -f "$GH_PRIVATE_KEY_FILE" ] || die "github-auth: the privateKeyFile of authentication '${GH_AUTH:-}' is not there: $GH_PRIVATE_KEY_FILE"
 # The key is read by your own user (run.sh, and the refresher every 40 min), not by root.
 [ -r "$GH_PRIVATE_KEY_FILE" ] || die "github-auth: the privateKeyFile of authentication '${GH_AUTH:-}' is not readable by $(id -un): $GH_PRIVATE_KEY_FILE ($(ls -l "$GH_PRIVATE_KEY_FILE" 2>/dev/null | awk '{print $1, $3":"$4}')); chown it to you, or add yourself to its group."
-command -v openssl >/dev/null || die "github-auth: openssl is required on the host to sign the App's JWT."
 
 GITHUB_AUTH_DIR=$PLUGIN_DIR
 # Called by the core after every host stage, so git-workspace's REPO_URL is set by then: it picks

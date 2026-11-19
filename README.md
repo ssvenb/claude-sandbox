@@ -575,8 +575,8 @@ real endpoints, real TLS, no emulator variables:
 ```
 
 where `data` is a `gcp-service-account` of your authentications. `run.sh` mints a 1-hour token for
-its account with your own gcloud login (you need
-`roles/iam.serviceAccountTokenCreator` on it) and re-mints it every 40 minutes as the `gcp-token`
+its account with your application default credentials (`gcloud auth application-default login`,
+once; you need `roles/iam.serviceAccountTokenCreator` on it) and re-mints it every 40 minutes as the `gcp-token`
 credential. In the container, `gcloud` reads that file on every call, and a root-owned stand-in
 for the GCE metadata server hands it to the client libraries, which find it through
 `GCE_METADATA_HOST` as they would on a VM. It listens on a free loopback port and answers only the
@@ -594,7 +594,7 @@ and its type says how the proxy authenticates with it:
 |------|---------|
 | `api-key` (a model provider's key, say) | `Authorization: Bearer <key>` (OpenAI and most others), or as it is in the header `auth.header` names (`x-api-key` for Anthropic, `api-key` for Azure OpenAI) |
 | `oauth2-client` | `Authorization: Bearer <token>`, a client-credentials token from its `tokenUrl` (with its `audience`), cached until a minute before it expires |
-| `gcp-service-account` | `Authorization: Bearer <token>`, minted with your gcloud login for its `serviceAccount` (none: your own account), see below |
+| `gcp-service-account` | `Authorization: Bearer <token>`, minted with your application default credentials for its `serviceAccount` (none: your own account), see below |
 
 ```json
 { "name": "azure-openai", "port": 8082, "upstream": "https://my-resource.openai.azure.com",
@@ -610,9 +610,8 @@ route adds none.
 ### Scoped GCP access through `upstream-proxy`
 
 A route whose `auth.credential` is a `gcp-service-account` gives the agent Google Cloud access
-without a single credential entering the container. The host proxy mints the token itself, running
-`gcloud auth print-access-token --impersonate-service-account=<serviceAccount>` on your own
-login, caches it, and re-mints it before it expires, so long runs keep working. Access is narrowed
+without a single credential entering the container. The host proxy mints the token itself, impersonating
+`<serviceAccount>` with your application default credentials (google-auth), caches it, and re-mints it before it expires, so long runs keep working. Access is narrowed
 in three places:
 
 1. **IAM:** a dedicated service account holding only what the sandbox may do, e.g.
@@ -693,7 +692,7 @@ else), each under a name:
 | Type | Named by | Fields |
 |------|----------|--------|
 | `github-app` | `GH_AUTH` (`github-auth`), `.plugins["pr-review"].auth` | `appId`, `privateKeyFile`; optional `host` (GitHub Enterprise Server), `username` (what git and `gh` in the container authenticate as; default: the App's bot) |
-| `gcp-service-account` | `GCP_AUTH` (`gcp-auth`), a route's `auth.credential` (`upstream-proxy`) | `serviceAccount`; optional `project`, `credentialFile` (a workload identity federation config, used instead of your gcloud login) |
+| `gcp-service-account` | `GCP_AUTH` (`gcp-auth`), a route's `auth.credential` (`upstream-proxy`) | `serviceAccount`; optional `project`, `credentialFile` (a workload identity federation config, used instead of your application default credentials) |
 | `api-key` | a route's `auth.credential` (`upstream-proxy`) | `key` |
 | `oauth2-client` | a route's `auth.credential` (`upstream-proxy`) | `tokenUrl`, `clientId`, `clientSecret`; optional `audience` |
 | `netbird-setup-key` | `NB_AUTH` (`netbird`) | `key`; optional `managementUrl` (a self-hosted server) |

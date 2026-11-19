@@ -35,10 +35,10 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import datetime
 import json
 import os
 import socketserver
-import subprocess
 import ssl
 import sys
 import threading
@@ -47,6 +47,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler
+
+import google.auth
+import google.auth.exceptions
+import google.auth.transport.requests
+from google.auth import impersonated_credentials
 
 DEFAULT_MAX_BODY = 8 * 1024 * 1024
 TIMEOUT = 120
@@ -162,7 +167,7 @@ class _Injector:
 
     def _gcp_token(self, entry: dict) -> str:
         """A Google access token for the entry's `serviceAccount` (none: the host's own account),
-        minted by the host's own gcloud login.
+        minted as the host's application default credentials (`gcloud auth application-default login`).
 
         The host identity needs roles/iam.serviceAccountTokenCreator on the service account, which
         in turn holds only the roles the sandbox should have (e.g. storage.objectViewer on one
@@ -174,15 +179,18 @@ class _Injector:
             if self._token and time.time() < self._expires:
                 return self._token
             account = entry.get("serviceAccount", "")
-            cmd = ["gcloud", "auth", "print-access-token", "--quiet"]
-            if account:
-                cmd.append(f"--impersonate-service-account={account}")
-            done = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT)
-            if done.returncode != 0:
-                raise RuntimeError(f"{' '.join(cmd)} failed: {done.stderr.strip()}")
-            token = done.stdout.strip()
-            # gcloud does not report the expiry; its tokens live an hour.
-            lifetime = 3600
+            scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+            try:
+                creds, _ = google.auth.default(scopes=scopes)
+                if account:
+                    creds = impersonated_credentials.Credentials(source_credentials=creds, target_principal=account,
+                                                                 target_scopes=scopes)
+                creds.refresh(google.auth.transport.requests.Request())
+            except google.auth.exceptions.GoogleAuthError as e:
+                raise RuntimeError(f"no Google token{' for ' + account if account else ''} "
+                                   f"(gcloud auth application-default login?): {e}") from e
+            token = creds.token
+            lifetime = int(creds.expiry.replace(tzinfo=datetime.timezone.utc).timestamp() - time.time()) if creds.expiry else 3600
             boundary = self.spec.get("accessBoundary")
             if boundary:
                 form = urllib.parse.urlencode({
@@ -201,9 +209,9 @@ class _Injector:
                 token = body["access_token"]
                 lifetime = int(body.get("expires_in", lifetime))
             self._token = token
-            # Renew well before gcloud's cached token underneath could lapse.
+            # Renew well before the token underneath lapses.
             self._expires = time.time() + max(lifetime - 600, 60)
-            who = account or "the host's gcloud account"
+            who = account or "the host's Google account"
             log(f"minted GCP token for {who}{' (downscoped)' if boundary else ''}")
             return self._token
 

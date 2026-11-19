@@ -127,6 +127,12 @@ def test_a_proxy_may_put_the_page_on_another_port(ui):
     assert ui("/", Host="127.0.0.1:45319").status == 200  # e.g. a sandbox's published port
 
 
+def test_a_tls_proxy_puts_the_page_on_https(ui):
+    # serve-oauth.sh: oauth2-proxy terminates TLS and passes the Host through.
+    assert ui("/api/state", Host="127.0.0.1", Origin="https://127.0.0.1").status == 200
+    assert ui("/api/state", Host="127.0.0.1", Origin="https://evil.example").status == 403
+
+
 @pytest.mark.parametrize("body, headers, status", [
     ({"project": "/etc", "kind": "run"}, {}, 400),                         # not a configured project
     ({"kind": "resume", "run_id": "x; rm -rf"}, {}, 400),                  # not a run id
@@ -1016,3 +1022,40 @@ def test_a_plugin_starts_a_session_once_per_key_and_it_goes_when_its_agent_has_f
     assert s.id in web.sessions and s.exit is None  # its turn failed: it stays
     s.stop()
     chat.until(s, lambda s: s.exit is not None)
+
+
+def test_serve_oauth_runs_the_server_behind_the_proxy_and_ends_with_it(tmp_path):
+    # A stand-in oauth2-proxy: says how it was started, then answers until killed.
+    stub = tmp_path / "bin/oauth2-proxy"
+    stub.parent.mkdir()
+    stub.write_text(f'#!/bin/sh\necho $$ > {tmp_path}/pid; echo "$@" > {tmp_path}/args\nexec sleep 60\n')
+    stub.chmod(0o755)
+    port = socket.socket()
+    port.bind(("127.0.0.1", 0))
+    upstream = port.getsockname()[1]
+    port.close()
+    env = {**os.environ, "PATH": f"{stub.parent}:{os.environ['PATH']}", "SANDBOX_WEB_UPSTREAM_PORT": str(upstream),
+           "OAUTH2_PROXY_CLIENT_ID": "x", "OAUTH2_PROXY_CLIENT_SECRET": "s", "OAUTH2_PROXY_COOKIE_SECRET": "c" * 32}
+    script = [str(REPO / "src/server/serve-oauth.sh"), "--host", "box.example.com"]
+    missing = {k: v for k, v in env.items() if k != "OAUTH2_PROXY_COOKIE_SECRET"}
+    assert subprocess.run(script, env=missing, capture_output=True).returncode == 2
+    p = subprocess.Popen([*script, "--", "--extra"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        for _ in range(100):  # the server answers on loopback to the public name, as the proxy passes it
+            try:
+                urllib.request.urlopen(urllib.request.Request(
+                    f"http://127.0.0.1:{upstream}/api/state", headers={"Host": "box.example.com"}), timeout=1)
+                break
+            except OSError:
+                time.sleep(0.1)
+        else:
+            pytest.fail("the server did not come up")
+        args = (tmp_path / "args").read_text()
+        assert "--email-domain=levatioai.com" in args and f"--upstream=http://127.0.0.1:{upstream}/" in args
+        assert args.rstrip().endswith("--extra")
+        os.kill(int((tmp_path / "pid").read_text()), 15)  # the proxy ending ends the server too
+        p.wait(timeout=10)
+        with pytest.raises(OSError):
+            urllib.request.urlopen(f"http://127.0.0.1:{upstream}/api/state", timeout=1)
+    finally:
+        p.kill()

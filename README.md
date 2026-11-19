@@ -44,6 +44,24 @@ claude-sandbox-web        # http://127.0.0.1:8787  (--port N, --projects DIR, --
 The projects are the `<name>.json` files in `~/.config/claude-sandbox/projects`. `claude-sandbox-web` is
 `src/server/serve.sh`, the server (`src/server/server.py`) in the uv environment.
 
+The server has no login of its own. To open it beyond this machine, put Google sign-in in front of
+it with `src/server/serve-oauth.sh`, which runs the server on `127.0.0.1:8786` (`SANDBOX_WEB_UPSTREAM_PORT`)
+and [oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/) (installed separately) on `0.0.0.0:4180`.
+Only accounts of one email domain get through:
+
+```bash
+export OAUTH2_PROXY_CLIENT_ID=... OAUTH2_PROXY_CLIENT_SECRET=... \
+       OAUTH2_PROXY_COOKIE_SECRET=$(openssl rand -hex 16)
+src/server/serve-oauth.sh --host box.example.com [--port 4180] [--domain levatioai.com] [-- oauth2-proxy flag...]
+```
+
+The OAuth client is a Google Cloud *Web application* client with the redirect URI
+`https://<host>/oauth2/callback`. Create it in the Console (Google Auth Platform → Clients): Google has
+no API, and so no Terraform resource, for these clients. A consent screen of type **Internal** also
+keeps out every account outside the Workspace. oauth2-proxy sets its cookie `Secure`, so serve it over
+HTTPS: run it behind a TLS proxy, or pass `-- --https-address=:443 --tls-cert-file=... --tls-key-file=...`.
+Ports that sessions publish (see [Published ports](#published-ports)) do not go through the proxy.
+
 The home page is a dashboard of all your sandboxes. On top is a box to start a session by writing
 its first message, with the project it is for beside it. Under it, on the left, is what is
 **running now**, grouped by project: a **window** per running session (the ones waiting on your
@@ -891,7 +909,7 @@ The core is grouped by role under `src/`; each folder has one reason to change.
 | [src/services/settings/](src/services/settings) | the agent's managed policy: `merge-settings.py` deep-merges plugin fragments into `settings-base.json` |
 | [src/services/chat/](src/services/chat) | `chat-bridge.mjs`: the chat events the agents' `chat.mjs` speak and the web UI draws |
 | [src/shared/](src/shared) | `peer_owner.py`: who is on the other end of a socket, for root-side helpers |
-| [src/server/](src/server) | **the web UI's server** over `run.sh`: `server.py` (sessions, PRs and issues, a tunnel to `code serve-web`, the pages), `holder.py` (what keeps a session running through a restart of the server), `serve.sh` (starts it in the uv environment) |
+| [src/server/](src/server) | **the web UI's server** over `run.sh`: `server.py` (sessions, PRs and issues, a tunnel to `code serve-web`, the pages), `holder.py` (what keeps a session running through a restart of the server), `serve.sh` (starts it in the uv environment), `serve-oauth.sh` (the same behind Google sign-in) |
 | [web/](web) | the web UI's pages — a React app (Vite, TypeScript): the dashboard, a session's chat, a terminal (`src/pages`), their components by feature (`src/components`), `src/hooks`, `src/api`, `src/lib`, `src/styles` |
 | [agents/](agents) | the agents themselves |
 | [plugins/](plugins) | the plugins themselves |

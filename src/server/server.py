@@ -1238,9 +1238,11 @@ class Handler(BaseHTTPRequestHandler):
         # rebinding, the Origin check stops cross-site requests. Any port: a proxy (a sandbox's
         # published port) may put this server on another, and the name is what rebinding forges.
         host = self.headers.get("Host", "")
-        if host.rsplit(":", 1)[0] in self.server.hosts and self.headers.get("Origin", f"http://{host}") == f"http://{host}":
+        origin = self.headers.get("Origin")
+        # https too: behind a TLS proxy (serve-oauth.sh) the page is https://<Host>, the same site.
+        if host.rsplit(":", 1)[0] in self.server.hosts and origin in (None, f"http://{host}", f"https://{host}"):
             global page_origin
-            page_origin = f"http://{host}"
+            page_origin = origin or f"{self.headers.get('X-Forwarded-Proto', 'http')}://{host}"
             return True
         print(f"forbidden: Host={host!r} Origin={self.headers.get('Origin')!r} {self.command} {self.path}", file=sys.stderr, flush=True)
         self.reply(403, {"error": "forbidden"})

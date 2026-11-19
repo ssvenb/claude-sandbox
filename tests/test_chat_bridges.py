@@ -92,6 +92,13 @@ CLAUDE_TURN = [
 ]
 
 
+def test_claude_starts_on_the_projects_model_named_as_the_picker_names_it(tmp_path):
+    b = Bridge("claude", tmp_path, CLAUDE_TURN, CLAUDE_MODEL="claude-test-1")
+    ready = b.until(lambda e: e["type"] == "ready")
+    assert b.calls()[0]["options"]["model"] == "claude-test-1"
+    assert ready["model"] == "test"
+
+
 def test_claude_is_started_as_the_terminal_would_and_its_messages_become_chat_events(tmp_path):
     b = Bridge("claude", tmp_path, CLAUDE_TURN, AGENT_PROMPT="Brief.", CLAUDE_EFFORT="high")
     ready = b.until(lambda e: e["type"] == "ready")

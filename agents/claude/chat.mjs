@@ -159,6 +159,7 @@ const q = query({
     includePartialMessages: true,
     agentProgressSummaries: true,
     effort: EFFORTS.includes(process.env.CLAUDE_EFFORT) ? process.env.CLAUDE_EFFORT : 'medium',
+    ...(process.env.CLAUDE_MODEL && { model: process.env.CLAUDE_MODEL }),
     systemPrompt: { type: 'preset', preset: 'claude_code', ...(briefing && { append: briefing }) },
     ...(resumed ? { resume: session } : { sessionId: session }),
     stderr: text => process.stderr.write(text),
@@ -184,7 +185,7 @@ async function describe(version) {
   const init = await q.initializationResult();
   rows = init.models || [];
   emit({
-    type: 'ready', agent: 'claude', version: version || init.claude_code_version, model: alias(model ?? 'default'),
+    type: 'ready', agent: 'claude', version: version || init.claude_code_version, model: alias(model ?? (process.env.CLAUDE_MODEL || 'default')),
     effort: EFFORTS.includes(process.env.CLAUDE_EFFORT) ? process.env.CLAUDE_EFFORT : 'medium', efforts: EFFORTS,
     account: init.account?.email || init.account?.organization || '',
     models: rows.filter(m => m.value !== 'default').map(m => ({ id: m.value, name: m.displayName, description: m.description })),

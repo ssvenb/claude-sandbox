@@ -924,6 +924,7 @@ def test_a_side_chat_is_asked_beside_the_conversation_and_kept_apart_from_it(cha
     told = []
     while not heard.empty():
         told.append(heard.get())
+    told = [e for e in told if e != {"type": "status", "state": "idle"}]  # the agent's own, said as it got ready
     assert told[0] == {"type": "user", "side": "1", "text": "why main?"} and all(e.get("side") in ("1", "2") for e in told)
     back = restart()[s.id]  # kept through a restart of the server
     assert [c["title"] for c in back.snapshot()["sides"]] == ["why main?", "wait long"]

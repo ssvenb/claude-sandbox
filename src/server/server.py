@@ -1182,6 +1182,49 @@ def sync(bind="127.0.0.1"):
     return {"restarting": True}
 
 
+login = None  # the `claude auth login` under way, waiting for its code
+login_lock = threading.Lock()
+
+
+def claude_login():
+    """Starts `claude auth login` for the host's ~/.claude (what claude-home mounts), dropping any
+    earlier one, and gives the claude.com page it asks you to open: that page shows the code to paste back."""
+    global login
+    with login_lock:
+        if login and login.poll() is None:
+            login.kill()
+        try:
+            login = subprocess.Popen(["claude", "auth", "login"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT, text=True, env={**os.environ, "BROWSER": "true"})
+        except OSError as e:
+            raise ValueError(f"cannot run claude: {e}")
+        out = ""
+        while line := login.stdout.readline():  # the link, wrapped in an OSC 8 hyperlink
+            out += line
+            if m := re.search(r"https://[^\s\x07\x1b]+", line):
+                return m[0]
+        login.wait()
+        raise ValueError(f"claude auth login gave no link:\n{out[-2000:]}")
+
+
+def claude_login_code(code):
+    """Hands the running `claude auth login` the code its page showed; it signs in with it, or says why not."""
+    global login
+    if not isinstance(code, str) or not code.strip():
+        raise ValueError("no code")
+    with login_lock:
+        proc, login = login, None
+    if proc is None or proc.poll() is not None:
+        raise ValueError("no sign-in under way: start it again")
+    try:
+        out, _ = proc.communicate(code.strip() + "\n", timeout=60)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        raise ValueError("claude auth login did not finish")
+    if proc.returncode:
+        raise ValueError(out.rsplit(">", 1)[-1].strip() or "claude auth login failed")
+
+
 def start(project, kind, run_id, task=None, ui=None, images=None, sets=None, once=False):
     """A new session, or the live one it would double. An agent's session is a chat unless
     `ui` is "terminal" (its own TUI in a pty, as `run.sh` in your terminal); a shell is a terminal."""
@@ -1339,6 +1382,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(200, read_config(query["project"]))
             except ValueError as e:
                 self.reply(400, {"error": str(e)})
+        elif url.path == "/api/claude-login":  # a link to follow: on to claude.com's sign-in
+            try:
+                target = claude_login()
+            except ValueError as e:
+                return self.reply(400, {"error": str(e)})
+            self.send_response(302)
+            self.send_header("Location", target)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
         elif url.path == "/api/auth":
             try:
                 self.reply(200, read_auth())
@@ -1405,6 +1457,9 @@ class Handler(BaseHTTPRequestHandler):
                 if req.get("name") not in projects(self.server.projects_file):
                     raise ValueError("not a configured project")
                 delete_project(req["name"])
+                self.reply(200, {})
+            elif url.path == "/api/claude-login":
+                claude_login_code(json.loads(body).get("code"))
                 self.reply(200, {})
             elif url.path == "/api/sync":
                 self.reply(200, sync(self.server.bind))

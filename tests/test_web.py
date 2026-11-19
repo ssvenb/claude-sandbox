@@ -1060,3 +1060,19 @@ def test_serve_oauth_runs_the_server_behind_the_proxy_and_ends_with_it(tmp_path)
             urllib.request.urlopen(f"http://127.0.0.1:{upstream}/api/state", timeout=1)
     finally:
         p.kill()
+
+
+def test_claude_sign_in_gives_the_link_and_takes_back_its_code(tmp_path, monkeypatch):
+    # Prints its link as `claude auth login` does (in an OSC 8 hyperlink), then takes the code from stdin.
+    fake = tmp_path / "claude"
+    fake.write_text("#!/bin/sh\nprintf 'Opening\\nvisit: \\033]8;;https://claude.com/x?a=1\\007https://claude.com/x?a=1\\033]8;;\\007\\n'\n"
+                    "printf 'Paste code here if prompted > '\nread c\n[ \"$c\" = good ] || { echo 'Bad code'; exit 1; }\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
+    assert web.claude_login() == "https://claude.com/x?a=1"
+    with pytest.raises(ValueError, match="Bad code"):
+        web.claude_login_code("bad")
+    with pytest.raises(ValueError, match="no sign-in under way"):
+        web.claude_login_code("good")
+    web.claude_login()
+    web.claude_login_code(" good ")

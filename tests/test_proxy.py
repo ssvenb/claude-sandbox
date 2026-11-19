@@ -159,6 +159,7 @@ def route(**cfg):
     ({"upstream": "api.example.com"}, "absolute http"),
     ({"allowMethods": []}, "allowMethods is empty"),
     ({"allowPaths": []}, "allowPaths is empty"),
+    ({"auth": {"type": "bearer", "valueEnv": "DEEPSEEK_API_KEY"}}, r"auth.type, auth.valueEnv is not read"),
 ])
 def test_route_validation(cfg, message):
     with pytest.raises(ValueError, match=message):
@@ -336,6 +337,13 @@ def test_credentials_are_injected_and_the_clients_are_dropped(start, upstream):
     assert "X-Api-Key" not in seen["headers"]
     assert seen["headers"]["X-Trace"] == "kept"
     assert seen["headers"]["Host"] == upstream.url.removeprefix("http://")
+
+
+def test_a_route_without_a_credential_still_drops_the_clients_placeholder(start, upstream):
+    p = start([api_route(upstream, auth={})])
+    p.request("POST", "/chat/completions", body=b"{}", headers={"Authorization": "Bearer sk-via-proxy"})
+    [seen] = upstream.seen
+    assert "Authorization" not in seen["headers"]
 
 
 def test_urls_are_rewritten_both_ways(start, upstream):

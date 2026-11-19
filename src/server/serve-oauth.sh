@@ -30,4 +30,5 @@ oauth2-proxy --provider=google --email-domain="$domain" --skip-provider-button \
 trap 'kill $(jobs -p) 2>/dev/null' EXIT
 trap 'exit 0' INT TERM
 # Either one ending ends both, so a supervisor (systemd's Restart=) sees it and starts them again.
+# A system unit run as a user (User=) gets no systemd scope for its sessions: give it KillMode=process, or a restart stops them.
 wait -n

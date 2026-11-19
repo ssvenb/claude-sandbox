@@ -888,6 +888,18 @@ def test_a_resumed_chat_replays_what_was_said_before(chat):
     assert list(web.sessions) == [again.id] and again.title == "Fix the board"
 
 
+def test_a_session_under_a_system_unit_goes_into_a_system_scope(tmp_path, monkeypatch):
+    """A system unit has no user manager to ask: its sessions must not stay in its cgroup, a restart stops that."""
+    spawned = []
+    monkeypatch.setattr(web, "scoped", [])
+    monkeypatch.setenv("INVOCATION_ID", "x")
+    monkeypatch.setattr(web.shutil, "which", lambda _: "/usr/bin/systemd-run")
+    monkeypatch.setattr(web.subprocess, "run", lambda cmd, **_: subprocess.CompletedProcess(cmd, int("--user" in cmd)))
+    monkeypatch.setattr(web.subprocess, "Popen", lambda cmd, **_: spawned.append(cmd))
+    web.hold(tmp_path, "pty", ["true"], tmp_path)
+    assert spawned[0][:2] == ["systemd-run", "--scope"]
+
+
 def test_sync_pulls_installs_and_restarts_only_under_systemd(monkeypatch):
     ran, spawned = [], []
     monkeypatch.setattr(web.subprocess, "run", lambda step, **_: ran.append(step) or subprocess.CompletedProcess(step, 0, "", ""))

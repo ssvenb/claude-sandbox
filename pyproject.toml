@@ -4,9 +4,11 @@ version = "0.1.0"
 description = "A Docker sandbox for running CLI coding agents autonomously, with a web UI."
 readme = "README.md"
 requires-python = ">=3.9"
-# The host side (src/orchestrator, src/services, src/server) is standard library only, on
-# purpose: see "Dependencies" in the README for what was weighed and left out.
-dependencies = []
+dependencies = [
+    "google-auth[requests]>=2.50.0",
+    "pyjwt[crypto]>=2.15.1",
+    "requests>=2.32.5",
+]
 
 [dependency-groups]
 dev = [

@@ -15,6 +15,7 @@ import json
 import os
 import select
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,7 +38,9 @@ class Report:
 def environ(env: dict, *, config, agent_dir, enabled, resume) -> dict:
     """The stage's environment: everything resolved so far, for the host.sh scripts to read. The
     ones run.sh never exported are unexported again by the stage (stage.sh)."""
-    return {**env, "PROJECT_CONFIG_JSON": json.dumps(config, separators=(",", ":")) if config is not None else "",
+    # The host scripts' python3 is this one, in the checkout's uv environment, with its packages.
+    path = os.pathsep.join(filter(None, [str(Path(sys.executable).parent), env.get("PATH")]))
+    return {**env, "PATH": path, "PROJECT_CONFIG_JSON": json.dumps(config, separators=(",", ":")) if config is not None else "",
             "AGENT_DIR": str(agent_dir), "ENABLED_PLUGINS": " ".join(enabled), "RESUME": resume}
 
 

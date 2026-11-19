@@ -1,4 +1,5 @@
 """plugins/upstream-proxy/host/proxy.py: the credential-injecting reverse proxy on the host."""
+import datetime
 import http.client
 import io
 import json
@@ -13,6 +14,8 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import google.auth.exceptions
+import google.auth.impersonated_credentials
 import pytest
 
 from conftest import REPO, load
@@ -109,13 +112,24 @@ def test_oauth2_token_renews_a_minute_before_expiry(auth, monkeypatch):
     assert 535 < inj._expires - time.time() <= 540
 
 
+class FakeCreds:
+    """google-auth credentials: the host's login, or one impersonating target_principal."""
+    def __init__(self, log, target_principal=None, **kw):
+        self.log, self.who, self.token, self.expiry = log, target_principal, None, None
+
+    def refresh(self, request):
+        self.log.append(self.who)
+        self.token = "host-token"
+        self.expiry = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) + datetime.timedelta(hours=1)
+
+
 @pytest.fixture
-def gcloud(tmp_path, monkeypatch):
-    log = tmp_path / "gcloud.args"
-    path = tmp_path / "gcloud"
-    path.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\necho host-token\n')
-    path.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+def gcloud(monkeypatch):
+    """The host's application default credentials, faked; the accounts tokens were minted for."""
+    log = []
+    monkeypatch.setattr(google.auth, "default", lambda scopes: (FakeCreds(log), None))
+    monkeypatch.setattr(google.auth.impersonated_credentials, "Credentials",
+                        lambda source_credentials, **kw: FakeCreds(log, **kw))
     return log
 
 
@@ -124,12 +138,11 @@ def test_gcp_token_impersonates_the_service_account(gcloud, auth):
     inj = proxy._Injector({"credential": "gcs"})
     assert inj.headers() == {"Authorization": "Bearer host-token"}
     assert inj.headers() == {"Authorization": "Bearer host-token"}
-    assert gcloud.read_text() == ("auth print-access-token --quiet "
-                                  "--impersonate-service-account=reader@p.iam.gserviceaccount.com\n")
+    assert gcloud == ["reader@p.iam.gserviceaccount.com"]  # minted once, for the service account
 
 
 def test_gcp_access_boundary_downscopes_through_sts(gcloud, auth, monkeypatch):
-    auth({"me": {"type": "gcp-service-account"}})  # no serviceAccount: the host's own gcloud account
+    auth({"me": {"type": "gcp-service-account"}})  # no serviceAccount: the host's own account
     calls = fake_urlopen(monkeypatch, {"access_token": "downscoped", "expires_in": 1800})
     boundary = {"accessBoundaryRules": [{"availableResource": "//storage.googleapis.com/projects/_/buckets/b"}]}
     inj = proxy._Injector({"credential": "me", "accessBoundary": boundary})
@@ -142,12 +155,13 @@ def test_gcp_access_boundary_downscopes_through_sts(gcloud, auth, monkeypatch):
     assert 1195 < inj._expires - time.time() <= 1200
 
 
-def test_gcp_route_fails_at_startup_without_a_host_login(tmp_path, auth, monkeypatch):
+def test_gcp_route_fails_at_startup_without_a_host_login(auth, monkeypatch):
     auth({"gcs": {"type": "gcp-service-account"}})
-    (tmp_path / "gcloud").write_text("#!/bin/sh\necho 'please log in' >&2\nexit 1\n")
-    (tmp_path / "gcloud").chmod(0o755)
-    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
-    with pytest.raises(RuntimeError, match="please log in"):
+
+    def no_login(scopes):
+        raise google.auth.exceptions.DefaultCredentialsError("please log in")
+    monkeypatch.setattr(google.auth, "default", no_login)
+    with pytest.raises(RuntimeError, match="application-default login.*please log in"):
         proxy._Route({"name": "gcs", "upstream": "https://storage.googleapis.com", "auth": {"credential": "gcs"}})
 
 

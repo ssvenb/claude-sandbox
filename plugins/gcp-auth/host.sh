@@ -1,9 +1,8 @@
 # shellcheck shell=bash
-# Host stage. Your gcloud login stays on this machine: it mints 1-hour tokens for the service
+# Host stage. Your Google login (application default credentials) stays on this machine: it mints 1-hour tokens for the service
 # account, and the container only ever sees the current one, as /run/credentials/gcp-token. What
 # the agent can do is exactly what that service account's IAM roles allow — scope it accordingly.
 
-command -v gcloud >/dev/null || die "gcp-auth: gcloud is required on the host to mint tokens for $GCP_SERVICE_ACCOUNT."
 [[ $GCP_SERVICE_ACCOUNT =~ ^[^@[:space:]]+@[^@[:space:]]+\.gserviceaccount\.com$ ]] \
   || die "gcp-auth: the serviceAccount of authentication '${GCP_AUTH:-}' must be a service account email (…@….iam.gserviceaccount.com), got '$GCP_SERVICE_ACCOUNT'."
 

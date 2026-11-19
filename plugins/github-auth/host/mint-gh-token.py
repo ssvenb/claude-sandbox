@@ -5,23 +5,19 @@ Runs on the HOST: reads the App key from $GH_PRIVATE_KEY_FILE, which never enter
 container. Installation tokens are hard-capped at 1h by GitHub, so run.sh's credential
 refresher (src/services/credentials/credentials.sh) calls this at startup and again every 40 minutes.
 """
-import base64
 import json
 import os
 import re
-import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
 
+import jwt as pyjwt
+
 # GitHub Enterprise Server puts the REST API under /api/v3; github.com uses api.github.com.
 GH_HOST = os.environ.get("GH_HOST") or "github.com"
 API = "https://api.github.com" if GH_HOST == "github.com" else f"https://{GH_HOST}/api/v3"
-
-
-def b64url(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
 
 def api(path: str, jwt: str, method: str = "GET"):
@@ -46,28 +42,19 @@ def api(path: str, jwt: str, method: str = "GET"):
         sys.exit(f"mint-gh-token: {method} {path} failed: HTTP {e.code} {detail}{hint}")
 
 
-# Build the RS256-signed JWT. openssl does the signing so the host needs no Python crypto package.
-now = int(time.time())
-header = b64url(json.dumps({"alg": "RS256", "typ": "JWT"}).encode())
-payload = b64url(json.dumps(
-    {"iat": now - 60, "exp": now + 300, "iss": os.environ["GH_APP_ID"]}).encode())
-signing_input = f"{header}.{payload}".encode()
-
+# The App's JWT, RS256-signed with its key; backdated a minute against clock skew.
 key_file = os.environ["GH_PRIVATE_KEY_FILE"]
-signed = subprocess.run(["openssl", "dgst", "-sha256", "-sign", key_file],
-                        input=signing_input, capture_output=True)
-if signed.returncode != 0:
-    detail = signed.stderr.decode(errors="replace").strip()
-    if not os.access(key_file, os.R_OK):
-        hint = (f"{key_file} is not readable by this user (uid {os.getuid()}); run.sh signs with "
-                "your own account, so make the key readable by it (e.g. chown it to you, mode 600).")
-    else:
-        hint = ("GH_PRIVATE_KEY_FILE must be the App's PEM private key, as downloaded from the "
-                "App's settings page (\"-----BEGIN RSA PRIVATE KEY-----\"), without a passphrase.")
-    sys.exit(f"mint-gh-token: openssl could not sign the App's JWT with {key_file}:\n"
-             f"{detail}\n{hint}")
-sig = signed.stdout
-jwt = f"{signing_input.decode()}.{b64url(sig)}"
+if not os.access(key_file, os.R_OK):
+    sys.exit(f"mint-gh-token: {key_file} is not readable by this user (uid {os.getuid()}); run.sh signs with "
+             "your own account, so make the key readable by it (e.g. chown it to you, mode 600).")
+now = int(time.time())
+try:
+    with open(key_file, "rb") as f:
+        jwt = pyjwt.encode({"iat": now - 60, "exp": now + 300, "iss": os.environ["GH_APP_ID"]}, f.read(), algorithm="RS256")
+except (ValueError, TypeError, pyjwt.PyJWTError) as e:
+    sys.exit(f"mint-gh-token: could not sign the App's JWT with {key_file}: {e}\n"
+             "GH_PRIVATE_KEY_FILE must be the App's PEM private key, as downloaded from the "
+             "App's settings page (\"-----BEGIN RSA PRIVATE KEY-----\"), without a passphrase.")
 
 # The App may be installed on several orgs; a token from the wrong one sees REPO_URL as "not found".
 repo = re.search(r"[/:]([^/:]+)/([^/]+?)(?:\.git)?/?$", os.environ.get("REPO_URL", ""))

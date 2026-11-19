@@ -84,7 +84,7 @@ repo) and deleted (its file only, refused while it has sessions) at once, and yo
 its fields those of its type — or JSON, saved readable by you alone.
 For a project whose
 `origin` is on GitHub it lists the open pull requests, with their CI status, and issues with a token of
-the project's GitHub App (`GH_AUTH`; the host's own `gh` login when it names none; the App then needs read access to issues, checks and commit statuses, and
+the project's GitHub App (`GH_AUTH`, which the plugin requires; the App needs read access to issues, checks and commit statuses, and
 write to pull requests to close one), each a link to its GitHub page (one tab per item, brought to the front when it
 is already open); a PR on a per-run branch (`<prefix>/<date>-<RUN_ID>`) gets a **Resume** button,
 which is `run.sh --resume <RUN_ID>`; an ended session in the list has one too. An issue's
@@ -158,7 +158,7 @@ agent's home directory, so it only outlives the container while `claude-home` / 
 mounts it from the host (both on by default); without them a resumed run starts a new conversation
 on the old branch.
 
-The server needs only `python3` on the host (and `gh` for the PR list). The pages are one
+The server needs only `python3` and [uv](https://docs.astral.sh/uv/) on the host; `gh` is not needed. The pages are one
 [React](https://react.dev) app in TypeScript, [web](web), built with [Vite](https://vite.dev)
 (Node 20 or later, with npm) into `web/dist`, which the server hands out: `./install.sh` builds
 it, as does `npm ci && npm run build` in `web`; until it is built the pages answer 503 and say
@@ -575,8 +575,8 @@ real endpoints, real TLS, no emulator variables:
 ```
 
 where `data` is a `gcp-service-account` of your authentications. `run.sh` mints a 1-hour token for
-its account with your own gcloud login (you need
-`roles/iam.serviceAccountTokenCreator` on it) and re-mints it every 40 minutes as the `gcp-token`
+its account with your application default credentials (`gcloud auth application-default login`,
+once; you need `roles/iam.serviceAccountTokenCreator` on it) and re-mints it every 40 minutes as the `gcp-token`
 credential. In the container, `gcloud` reads that file on every call, and a root-owned stand-in
 for the GCE metadata server hands it to the client libraries, which find it through
 `GCE_METADATA_HOST` as they would on a VM. It listens on a free loopback port and answers only the
@@ -594,7 +594,7 @@ and its type says how the proxy authenticates with it:
 |------|---------|
 | `api-key` (a model provider's key, say) | `Authorization: Bearer <key>` (OpenAI and most others), or as it is in the header `auth.header` names (`x-api-key` for Anthropic, `api-key` for Azure OpenAI) |
 | `oauth2-client` | `Authorization: Bearer <token>`, a client-credentials token from its `tokenUrl` (with its `audience`), cached until a minute before it expires |
-| `gcp-service-account` | `Authorization: Bearer <token>`, minted with your gcloud login for its `serviceAccount` (none: your own account), see below |
+| `gcp-service-account` | `Authorization: Bearer <token>`, minted with your application default credentials for its `serviceAccount` (none: your own account), see below |
 
 ```json
 { "name": "azure-openai", "port": 8082, "upstream": "https://my-resource.openai.azure.com",
@@ -610,9 +610,8 @@ route adds none.
 ### Scoped GCP access through `upstream-proxy`
 
 A route whose `auth.credential` is a `gcp-service-account` gives the agent Google Cloud access
-without a single credential entering the container. The host proxy mints the token itself, running
-`gcloud auth print-access-token --impersonate-service-account=<serviceAccount>` on your own
-login, caches it, and re-mints it before it expires, so long runs keep working. Access is narrowed
+without a single credential entering the container. The host proxy mints the token itself, impersonating
+`<serviceAccount>` with your application default credentials (google-auth), caches it, and re-mints it before it expires, so long runs keep working. Access is narrowed
 in three places:
 
 1. **IAM:** a dedicated service account holding only what the sandbox may do, e.g.
@@ -692,8 +691,8 @@ else), each under a name:
 
 | Type | Named by | Fields |
 |------|----------|--------|
-| `github-app` | `GH_AUTH` (`github-auth`), `.plugins["pr-review"].auth` | `appId`, `privateKeyFile`; optional `host` (GitHub Enterprise Server), `username` (what git and `gh` authenticate as, and the host `gh` login the page lists pull requests as; default: the App's bot) |
-| `gcp-service-account` | `GCP_AUTH` (`gcp-auth`), a route's `auth.credential` (`upstream-proxy`) | `serviceAccount`; optional `project`, `credentialFile` (a workload identity federation config, used instead of your gcloud login) |
+| `github-app` | `GH_AUTH` (`github-auth`), `.plugins["pr-review"].auth` | `appId`, `privateKeyFile`; optional `host` (GitHub Enterprise Server), `username` (what git and `gh` in the container authenticate as; default: the App's bot) |
+| `gcp-service-account` | `GCP_AUTH` (`gcp-auth`), a route's `auth.credential` (`upstream-proxy`) | `serviceAccount`; optional `project`, `credentialFile` (a workload identity federation config, used instead of your application default credentials) |
 | `api-key` | a route's `auth.credential` (`upstream-proxy`) | `key` |
 | `oauth2-client` | a route's `auth.credential` (`upstream-proxy`) | `tokenUrl`, `clientId`, `clientSecret`; optional `audience` |
 | `netbird-setup-key` | `NB_AUTH` (`netbird`) | `key`; optional `managementUrl` (a self-hosted server) |
@@ -918,19 +917,7 @@ The core is grouped by role under `src/`; each folder has one reason to change.
 ## Dependencies
 
 The project is a [uv](https://docs.astral.sh/uv/) project: `uv sync` creates `.venv` from
-`uv.lock`, and `run.sh` and `src/server/serve.sh` run in it. What a library could replace was weighed
-piece by piece, to keep the code that has to be maintained here small:
-
-| Hand-written code | Verdict |
-|---|---|
-| Markdown rendering, terminal loading, component plumbing in the web UI | **replaced** by npm packages (React, `react-markdown`, `@xterm/xterm`), bundled by Vite — see [web/package.json](web/package.json) |
-| `src/server/server.py`'s HTTP layer → FastAPI/Starlette | kept: the server tunnels what plugins serve (VS Code's `code serve-web`) over raw sockets, upgrade requests included, which ASGI does not expose; sessions are ptys and pipes read by threads. A framework would replace the ~80 lines of routing and leave the rest |
-| `.env.example` scanning (`config.py`) → `python-dotenv` | kept: 30 lines; `python-dotenv` reads quotes and comments differently and has no "commented defaults" mode |
-| GitHub App JWT (`mint-gh-token.py`) → `PyJWT` + `cryptography` | kept: ten lines around `openssl dgst`, against a compiled dependency in every environment |
-| Settings validation (`src/server/server.py`) → `pydantic` / `jsonschema` | kept: the types are declared by plugin manifests at run time, so a schema library would need a translation layer as long as the checks |
-| Credential-injecting proxy (`upstream-proxy`), port proxy (`portd.py`) | kept: socket plumbing with a security boundary and their own tests; no library does this job as is |
-| Command line (`main.py`) | kept: 40 lines whose exact refusals the web UI shows |
-
-So the Python side has no runtime dependencies; uv pins the interpreter and the test tools
-(`pytest`, `playwright`). Scripts that run inside the container use the image's system Python and
-stay standard library by necessity.
+`uv.lock`, and `run.sh`, `src/server/serve.sh` and the plugins' host scripts (their `python3`) run in
+it. Add a library with `uv add <package>` where it saves code that would otherwise be maintained
+here — `requests` for the GitHub API (`plugins/github-auth/host/github.py`), say. Scripts that run
+inside the container use the image's system Python, so they stay standard library.

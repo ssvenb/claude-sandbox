@@ -541,6 +541,7 @@ def test_on_status_tells_each_change_of_the_status_the_page_shows(chat, monkeypa
     web.on_status(last)  # first seen: starting
     chat.until(s, lambda s: s.ready)
     web.on_status(last)
+    changes(1)  # told before the next change is, or the two threads may write in either order
     s.prompt("run it in the background")
     chat.until(s, lambda s: s.status() == "working")
     web.on_status(last)

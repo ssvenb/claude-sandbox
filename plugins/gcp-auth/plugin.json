@@ -1,6 +1,6 @@
 {
   "name": "gcp-auth",
-  "description": "Mints short-lived access tokens for a Google Cloud service account on the host, with your own gcloud login, and hands the container only those: gcloud and the Google client libraries use them as if running on GCE.",
+  "description": "Mints short-lived access tokens for a Google Cloud service account on the host, with your own Google login (`gcloud auth application-default login`), and hands the container only those: gcloud and the Google client libraries use them as if running on GCE.",
   "priority": 10,
   "defaultEnabled": false,
   "provides": ["gcp-credentials"],
@@ -13,7 +13,7 @@
       "type": "auth",
       "auth": "gcp-service-account",
       "label": "Service account",
-      "description": "The gcp-service-account the sandbox acts as. Your gcloud login (or its credentialFile) needs roles/iam.serviceAccountTokenCreator on it.",
+      "description": "The gcp-service-account the sandbox acts as. Your application default credentials (or its credentialFile) needs roles/iam.serviceAccountTokenCreator on it.",
       "fills": {
         "serviceAccount": "GCP_SERVICE_ACCOUNT",
         "project": "GCP_PROJECT",

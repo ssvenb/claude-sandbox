@@ -887,7 +887,11 @@ only required while that agent or plugin is in use.
 | `CLAUDE_HOME_DIR` | claude-home | Host dir mounted as the agent's `~/.claude` (default `$HOME/.claude`) |
 | `COPILOT_HOME_DIR` | copilot-home | Host dir mounted as the agent's `~/.copilot` (default `$HOME/.copilot`) |
 
-Volume mounts are contributed by plugins via `pass_mount`; the core `docker run` has none.
+Volume mounts are contributed by plugins via `pass_mount`; the core `docker run` has none. The agent's
+user, `node`, takes the uid of whoever runs `run.sh` (`HOST_UID`, set by the boot in
+`src/boot/entrypoint.sh`), so what is mounted from the host is the agent's own and what the agent
+writes in `/workspace` is yours: a web server running as a service user, not uid 1000, still hands
+its sessions a `~/.claude` they can read, and can delete a run's mirror afterwards.
 
 ## Security model
 

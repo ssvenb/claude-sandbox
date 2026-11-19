@@ -1125,12 +1125,16 @@ scoped = []
 
 def hold(folder, mode, argv, cwd):
     """Starts a session's process under src/server/holder.py, which outlives this server. Under systemd
-    it goes into a scope of its own: restarting this server's unit stops everything in its cgroup."""
+    it goes into a scope of its own: restarting this server's unit stops everything in its cgroup.
+    The scope comes from the manager this server runs under: the user's, or the system's for a system unit."""
     if not scoped:
-        unit = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--"]
-        ok = os.environ.get("INVOCATION_ID") and shutil.which("systemd-run") and subprocess.run(
-            unit + ["true"], capture_output=True).returncode == 0
-        scoped.append(unit if ok else [])
+        units = [["systemd-run", *user, "--scope", "--quiet", "--collect", "--"] for user in (["--user"], [])]
+        under = os.environ.get("INVOCATION_ID") and shutil.which("systemd-run")
+        ok = next((u for u in units if under and subprocess.run(u + ["true"], capture_output=True).returncode == 0), [])
+        if under and not ok:
+            print("  no systemd scope for sessions: a restart of this unit stops them all"
+                  " (give its unit KillMode=process)", file=sys.stderr, flush=True)
+        scoped.append(ok)
     with open(folder / "log", "ab") as log:  # what the holder itself says, should it fail
         subprocess.Popen(scoped[0] + [sys.executable, str(HOLDER), str(folder), mode, "--", *argv], cwd=cwd,
                          start_new_session=True, stdin=subprocess.DEVNULL, stdout=log, stderr=log)

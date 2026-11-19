@@ -58,8 +58,9 @@ def test_the_host_pipeline_builds_and_runs_the_image(sb, run_sh):
                      "--build-arg", "AGENT_VERSION=1.2.3", "--build-arg", f"ENABLED_PLUGINS={plugins}", "."]
     run_id = re.fullmatch(r"RUN_ID=([0-9a-f]{6})", run[4])[1]
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
-    assert run[:13] == ["run", "-it", "--rm", "-e", f"RUN_ID={run_id}", "-e", f"RUN_DATE={today}",
-                        "-e", "RESUME=0", "-e", "AGENT=claude", "-e", f"ENABLED_PLUGINS={plugins}"]
+    assert run[:15] == ["run", "-it", "--rm", "-e", f"RUN_ID={run_id}", "-e", f"RUN_DATE={today}",
+                        "-e", "RESUME=0", "-e", "AGENT=claude", "-e", f"HOST_UID={os.getuid()}",
+                        "-e", f"ENABLED_PLUGINS={plugins}"]
     assert run[-1] == "claude-agent:claude"
     tail = " ".join(run[13:])
     assert "--network" not in run  # a network of its own: ports reach the host through the proxy

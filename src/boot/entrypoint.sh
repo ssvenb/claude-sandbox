@@ -1,6 +1,17 @@
 #!/bin/sh
 set -e
 
+# The agent's user takes the uid of the host user who started the sandbox, so what the plugins
+# mount from the host is its own: claude-home's ~/.claude holds a .credentials.json only its owner
+# may read, and a web server running as a service user (not uid 1000) signs that one in. -xdev: the
+# image's files only, never the mounts. Root (rootless docker maps it to the host user) keeps node.
+old=$(id -u node)
+if [ -n "${HOST_UID:-}" ] && [ "$HOST_UID" != 0 ] && [ "$HOST_UID" != "$old" ]; then
+  sed -i "s/^node:\([^:]*\):$old:/node:\1:$HOST_UID:/" /etc/passwd  # not usermod: it re-owns the mounts too
+  find /home/node /ms-playwright -xdev -user "$old" -exec chown -h node {} +
+fi
+unset old
+
 # Own the project files for the unprivileged agent user. Skip character devices: those are the
 # read-only /dev/null masks cwd-workspace lays over secret files, and chowning them fails.
 skip=""

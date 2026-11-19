@@ -20,6 +20,8 @@ export interface AgentInfo {
   models?: Model[];
   efforts?: string[];
   commands?: Command[];
+  /** It can be asked about the conversation beside it (side chats). */
+  sides?: boolean;
 }
 
 export interface PlanItem {
@@ -56,7 +58,16 @@ export interface AskEvent {
   answers?: Answers;
 }
 
-export type ChatEvent =
+/** A side chat as the server keeps it: a conversation of its own about the session's. */
+export interface SideChat {
+  id: string;
+  title: string;
+  state: SessionStatus;
+  events: ChatEvent[];
+}
+
+/** An event with `side` is of that side chat, not of the session's conversation. */
+export type ChatEvent = { side?: string } & (
   | { type: 'boot'; text: string }
   | { type: 'hello'; agent: string }
   | ({ type: 'ready' } & AgentInfo)
@@ -75,7 +86,8 @@ export type ChatEvent =
   | { type: 'effort'; level: string }
   | { type: 'todos'; items: PlanItem[] | null }
   | { type: 'tasks'; items?: BackgroundTask[] }
-  | { type: 'exit'; code: number };
+  | { type: 'side-closed' }
+  | { type: 'exit'; code: number });
 
 export interface Snapshot {
   type: 'snapshot';
@@ -83,6 +95,7 @@ export interface Snapshot {
   info: AgentInfo;
   todos: PlanItem[] | null;
   tasks?: BackgroundTask[];
+  sides?: SideChat[];
   ready: boolean;
   status: SessionStatus;
   session: Session;

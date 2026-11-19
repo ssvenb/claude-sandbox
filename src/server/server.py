@@ -48,7 +48,7 @@ HOLDER = HERE / "holder.py"
 STATE = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "claude-sandbox/sessions"
 META = ("id", "project", "kind", "run_id", "started", "ui")
 SAVED = ("exit", "events", "info", "todos", "tasks", "ready", "state", "waiting", "pending", "title", "activity",
-         "said", "cost", "context", "sent", "offset")  # of a chat
+         "said", "cost", "context", "sent", "offset", "sides", "sided")  # of a chat
 # Where the page was last opened (http://<Host>), from the last request guard() let in: the address
 # web_on_status is told a session's page by (on_status()).
 page_origin = None
@@ -374,6 +374,29 @@ def tool_label(name, given):
     return name
 
 
+def fold(e, events, blocks, tools):
+    """A streamed event into the one it belongs to in `events`: text into its block, a tool call's
+    input and its result into the call. Returns that event (none for a result without its call)."""
+    kind = e["type"]
+    if kind in ("delta", "text"):
+        block = blocks.get(e.get("id"))
+        if block is None:
+            block = blocks[e.get("id")] = {**e, "type": "text", "text": ""}
+            events.append(block)
+        block["text"] = block["text"] + e.get("text", "") if kind == "delta" else e.get("text", "")
+        return block
+    tool = tools.get(e.get("id"))
+    if kind == "tool":
+        if tool is None:
+            tool = tools[e.get("id")] = dict(e)
+            events.append(tool)
+        else:
+            tool.update(e)
+    elif tool is not None:  # its result
+        tool.update(output=e.get("output", ""), error=bool(e.get("error")), done=not e.get("partial"))
+    return tool
+
+
 class Chat(Session):
     """An agent behind its chat bridge: `run.sh --chat` on pipes. Its stdout is boot output until
     the bridge speaks, then chat events (src/services/chat/chat-bridge.mjs), each line led by RS. Every
@@ -400,6 +423,9 @@ class Chat(Session):
         self.blocks, self.tools, self.boot = {}, {}, None  # where streamed text, results and boot lines go
         self.offset, self.partial = 0, b""  # how much of its output `events` has taken in, and the line it is in
         self.finished = False  # its last turn ended, and well: when a session started `once` goes
+        # Its side chats, where the run's conversation is asked about beside it: id → {id, title,
+        # state, events}, the ids counted up (`sided`), and where each one's streamed text and results go.
+        self.sides, self.sided, self.side_maps = {}, 0, {}
 
     def saved(self):
         return {k: getattr(self, k) for k in SAVED}
@@ -415,6 +441,9 @@ class Chat(Session):
         self.boot = self.events[-1] if self.events and self.events[-1]["type"] == "boot" else None
         users = {e.get("id"): e for e in self.events if e["type"] == "user"}
         self.waiting = [(users.get(e.get("id"), e), command) for e, command in self.waiting]
+        self.side_maps = {sid: ({e.get("id"): e for e in side["events"] if e["type"] == "text"},
+                                {e.get("id"): e for e in side["events"] if e["type"] == "tool"})
+                          for sid, side in self.sides.items()}
 
     def _resume_from(self):
         return self.offset
@@ -448,6 +477,8 @@ class Chat(Session):
             self._line(self.partial)
             self.partial = b""
         self.exit, self.tasks = code, []
+        for side in self.sides.values():
+            side["state"] = "idle"
         self._tell({"type": "exit", "code": code}, keep=True)
         for q in self.listeners:
             q.put(None)
@@ -463,35 +494,20 @@ class Chat(Session):
     def _take(self, e):
         """One event from the bridge (or a line of boot output). Caller holds `lock`."""
         kind = e["type"]
+        if e.get("side") is not None:
+            return self._side(e)
         if kind == "boot":  # one growing entry, so the log is not a line per build step
             if self.boot is None or self.events[-1:] != [self.boot]:
                 self.boot = {"type": "boot", "text": ""}
                 self.events.append(self.boot)
             self.boot["text"] = "\n".join((self.boot["text"] + "\n" + e["text"]).lstrip("\n").splitlines()[-BOOT_LINES:])
             return self._tell(e)
-        if kind in ("delta", "text"):
-            block = self.blocks.get(e.get("id"))
-            if block is None:
-                block = self.blocks[e.get("id")] = {**e, "type": "text", "text": ""}
-                self.events.append(block)
-            block["text"] = block["text"] + e.get("text", "") if kind == "delta" else e.get("text", "")
-            if block.get("kind") != "thinking" and not block.get("parent"):
-                self.said = block["text"].strip()[-400:]
-            return self._tell(e)
-        if kind == "tool":
-            tool = self.tools.get(e.get("id"))
-            if tool is None:
-                tool = self.tools[e.get("id")] = dict(e)
-                self.events.append(tool)
-            else:
-                tool.update(e)
-            if not e.get("parent"):
+        if kind in ("delta", "text", "tool", "result"):
+            into = fold(e, self.events, self.blocks, self.tools)
+            if kind == "tool" and not e.get("parent"):
                 self.activity = tool_label(str(e.get("name")), e.get("input"))
-            return self._tell(e)
-        if kind == "result":
-            tool = self.tools.get(e.get("id"))
-            if tool is not None:
-                tool.update(output=e.get("output", ""), error=bool(e.get("error")), done=not e.get("partial"))
+            elif kind in ("delta", "text") and into.get("kind") != "thinking" and not into.get("parent"):
+                self.said = into["text"].strip()[-400:]
             return self._tell(e)
         if kind == "status":
             if e.get("state") in STATES:
@@ -546,6 +562,55 @@ class Chat(Session):
         self._tell(e, keep=True)  # user, ask, turn, notice, and whatever a bridge adds
         self._leave()
 
+    def _side(self, e):
+        """One event of a side chat: kept with that chat, apart from the run's conversation, which
+        (its state, what the dashboard shows of it) knows nothing of it. Caller holds `lock`."""
+        sid, kind = str(e["side"]), e["type"]
+        if sid not in self.sides:  # one a resumed run still has, replayed by its bridge
+            if not sid.isdigit() or kind == "status":
+                return
+            self.sides[sid] = {"id": sid, "title": "", "state": "idle", "events": []}
+            self.sided = max(self.sided, int(sid))
+        side = self.sides[sid]
+        if kind in ("delta", "text", "tool", "result"):
+            fold(e, side["events"], *self.side_maps.setdefault(sid, ({}, {})))
+        elif kind == "status":
+            side["state"] = e["state"] if e.get("state") in STATES else "idle"
+        elif kind != "progress":
+            if kind == "user":
+                side["title"] = side["title"] or " ".join(str(e.get("text")).split())[:80]
+            side["events"].append(e)
+            del side["events"][:-EVENTS]
+        self._tell(e)
+
+    def side(self, sid, text, close=False):
+        """A question for a side chat (a new one without `sid`), or the end of one. Says which."""
+        with lock:
+            if close:
+                if self.sides.pop(str(sid), None) is None:
+                    raise ValueError("no such side chat")
+                self.side_maps.pop(str(sid), None)
+                if self.ready and self.exit is None:
+                    self._send({"type": "side", "id": str(sid), "close": True})
+                self._tell({"type": "side-closed", "side": str(sid)})
+                return str(sid)
+            if self.exit is not None:
+                raise ValueError("this session has ended: resume it to go on")
+            if not (self.ready and self.info.get("sides")):
+                raise ValueError("this agent takes no side chats" if self.ready else "the agent is not ready yet")
+            if not isinstance(text, str) or not text.strip():
+                raise ValueError("a question is text")
+            if sid is None:
+                self.sided += 1
+                sid = self.sided
+            elif str(sid) not in self.sides:
+                raise ValueError("no such side chat")
+            sid = str(sid)
+            self._side({"type": "user", "side": sid, "text": text})
+            self._side({"type": "status", "side": sid, "state": "working"})
+            self._send({"type": "side", "id": sid, "text": text})
+            return sid
+
     def _leave(self):
         """A session a plugin started (`once`) goes when its agent has finished: its turn over,
         nothing of it running in the background, nothing asked. Caller holds `lock`."""
@@ -596,7 +661,7 @@ class Chat(Session):
     def snapshot(self):
         """Everything a page needs to draw the session from nothing. Caller holds `lock`."""
         return {"type": "snapshot", "events": self.events, "info": self.info, "todos": self.todos, "tasks": self.tasks,
-                "ready": self.ready, "status": self.status(), "session": self.json()}
+                "sides": list(self.sides.values()), "ready": self.ready, "status": self.status(), "session": self.json()}
 
     def write(self, data):
         raise ValueError("a chat takes prompts, not keystrokes")
@@ -1475,7 +1540,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(200, {})
             elif url.path == "/api/sync":
                 self.reply(200, sync(self.server.bind))
-            elif m := re.fullmatch(r"/api/sessions/(\w+)/(prompt|interrupt|answer|model|effort|task)", url.path):
+            elif m := re.fullmatch(r"/api/sessions/(\w+)/(prompt|interrupt|answer|model|effort|task|side)", url.path):
                 s = self.session(m[1])
                 if s is None:
                     return
@@ -1484,10 +1549,12 @@ class Handler(BaseHTTPRequestHandler):
                 req = json.loads(body) if body.strip() else {}
                 if not isinstance(req, dict):
                     raise ValueError("the request must be a JSON object")
+                if m[2] == "side":
+                    return self.reply(200, {"id": s.side(req.get("id"), req.get("text"), bool(req.get("close")))})
                 if m[2] == "prompt":
                     s.prompt(req.get("text"), req.get("images"), req.get("files"))
                 else:  # only the fields a bridge reads, under the name the path gave
-                    s.tell({"type": m[2], **{k: req[k] for k in ("id", "answers", "cancel", "level") if k in req}})
+                    s.tell({"type": m[2], **{k: req[k] for k in ("id", "answers", "cancel", "level", "side") if k in req}})
                 self.reply(200, {})
             elif m := re.fullmatch(r"/api/sessions/(\w+)/(input|resize|stop|delete)", url.path):
                 s = self.session(m[1])

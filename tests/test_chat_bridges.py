@@ -278,6 +278,61 @@ def test_a_resumed_claude_run_replays_its_transcript_and_resumes_the_conversatio
     fresh.close()
 
 
+def test_a_side_chat_is_a_second_claude_that_only_reads_and_is_told_what_the_run_said(tmp_path):
+    main, side = "5a4db0c0-0000-4000-8000-0000000a1b2c", "5a4db0c0-0000-4000-8001-0000020a1b2c"
+    history = [
+        {"type": "user", "parent_tool_use_id": None, "message": {"content": "Fix the bug"}},
+        {"type": "assistant", "parent_tool_use_id": None, "message": {"content": [
+            {"type": "text", "text": "Looking."}, {"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": "a"}}]}},
+        {"type": "user", "parent_tool_use_id": None, "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": "contents", "is_error": False}]}},
+        {"type": "assistant", "parent_tool_use_id": "t1", "message": {"content": [{"type": "text", "text": "a subagent's"}]}}]
+    b = Bridge("claude", tmp_path, CLAUDE_TURN[-7:-1], FAKE_HISTORY=json.dumps(history))
+    assert b.until(lambda e: e["type"] == "ready")["sides"] is True  # it says it can
+    b.say(type="side", id="2", text="Why that file?")
+    b.until(lambda e: e == {"type": "status", "state": "idle", "side": "2"})
+    mine = [e for e in b.events if e.get("side") == "2"]
+    assert mine == [e for e in b.events if e["type"] not in ("hello", "ready", "model")]  # the run's own conversation heard nothing of it
+    assert [(e["type"], e.get("text")) for e in mine] == [
+        ("delta", "All "), ("delta", "done."), ("text", "All done."), ("turn", None), ("status", None)]
+    options = [c["options"] for c in b.calls() if "options" in c][-1]
+    assert options["sessionId"] == side and options["tools"] == ["Read", "Grep", "Glob"]  # a conversation of its own, which only reads
+    assert "permissionMode" not in options and "main conversation" in options["systemPrompt"]["append"]
+    said, question = b.calls()[-1]["prompt"]  # what the run said, apart from the question
+    assert question == {"type": "text", "text": "Why that file?"}
+    assert said["text"] == ("<main-conversation>\nUser: Fix the bug\n\nAgent: Looking.\n\n"
+                            'Agent ran Read: {"file_path":"a"}\n\nResult: contents\n</main-conversation>')
+    assert {"history": main, "dir": str(tmp_path / "work")} in b.calls()
+
+    b.say(type="side", id="2", text="And now?")  # nothing new was said: the question alone
+    b.until(lambda e: e["type"] == "status" and len(of(b.events, "turn")) == 2)
+    assert b.calls()[-1] == {"prompt": [{"type": "text", "text": "And now?"}]}
+    b.say(type="interrupt", side="2")
+    b.say(type="side", id="2", close=True)  # closed: its turn is stopped where it is, its transcript goes
+    b.close()
+    assert b.calls()[-2:] == [{"interrupt": True}, {"deleted": side}]
+
+
+def test_a_resumed_claude_run_has_its_side_chats_again(tmp_path):
+    transcripts = tmp_path / ".claude/projects" / str(tmp_path / "work").replace("/", "-").replace("_", "-").replace(".", "-")
+    transcripts.mkdir(parents=True)
+    for name in ("5a4db0c0-0000-4000-8000-0000000a1b2c", "5a4db0c0-0000-4000-8001-0000030a1b2c", "5a4db0c0-0000-4000-8001-000003ffffff"):
+        (transcripts / f"{name}.jsonl").write_text("{}\n")  # the run's, a side chat of it, one of another run
+    history = [
+        {"type": "user", "parent_tool_use_id": None, "message": {"content": [
+            {"type": "text", "text": "<main-conversation>\nUser: Fix the bug\n</main-conversation>"}, {"type": "text", "text": "Why?"}]}},
+        {"type": "assistant", "parent_tool_use_id": None, "message": {"content": [{"type": "text", "text": "Because."}]}}]
+    b = Bridge("claude", tmp_path, CLAUDE_TURN[-7:-1], RESUME="1", FAKE_HISTORY=json.dumps(history))
+    b.until(lambda e: e.get("text") == "Because.")
+    b.until(lambda e: e["type"] == "model")  # the run's own conversation is up
+    assert [(e["type"], e["text"]) for e in b.events if e.get("side") == "3"] == [("user", "Why?"), ("text", "Because.")]
+    assert {e.get("side") for e in b.events if e["type"] != "ready"} == {None, "3"}
+    b.say(type="side", id="3", text="Go on")  # and it goes on where it was
+    b.until(lambda e: e == {"type": "status", "state": "idle", "side": "3"})
+    assert [c["options"] for c in b.calls() if "options" in c][-1]["resume"] == "5a4db0c0-0000-4000-8001-0000030a1b2c"
+    b.close()
+
+
 COPILOT_TURN = [
     {"type": "assistant.turn_start", "data": {}},
     {"type": "assistant.reasoning_delta", "data": {"reasoningId": "r1", "deltaContent": "Hm."}},

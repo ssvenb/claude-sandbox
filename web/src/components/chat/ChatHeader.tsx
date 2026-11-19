@@ -20,12 +20,15 @@ interface Props {
   /** What its project's plugins put beside its state, and with its buttons (see plugins.ts). */
   bar: ReactNode;
   actions: ReactNode;
+  /** At its two ends, each on the side of what it shows and hides: the panels' buttons. */
+  start?: ReactNode;
+  end?: ReactNode;
   onStop: () => void;
   onDelete: () => void;
 }
 
 /** Which session this is and how it is doing, with the buttons that end it. */
-export function ChatHeader({ session, gone, info, state, items, bar, actions, onStop, onDelete }: Props) {
+export function ChatHeader({ session, gone, info, state, items, bar, actions, start, end, onStop, onDelete }: Props) {
   // On a phone the chips and the buttons (not the theme switch) drop down in a row of their own, on request.
   const [more, setMore] = useState(false);
   if (gone) {
@@ -40,6 +43,7 @@ export function ChatHeader({ session, gone, info, state, items, bar, actions, on
   const agent = info.agent && (info.model ? `${info.agent}, ${info.model}` : info.agent);
   return (
     <header id="bar" className={more ? 'open' : ''}>
+      {start}
       <HomeLink />
       <div className="who">
         <b title={session.title || ''}>{titled(session)}</b>
@@ -59,6 +63,7 @@ export function ChatHeader({ session, gone, info, state, items, bar, actions, on
         <button className="icon" onClick={onDelete} aria-label="Delete session" title="Delete"><Icon name="trash" /></button>
         <ThemeSwitch />
       </div>
+      {end}
       <button className="icon more" onClick={() => setMore(!more)} aria-expanded={more} aria-label="More" title="More"><Icon name="down" /></button>
     </header>
   );

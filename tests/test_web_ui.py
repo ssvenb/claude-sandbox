@@ -949,7 +949,7 @@ def test_the_files_a_runs_checkout_changed_are_beside_its_chat_or_behind_a_heade
     tab = board.context.new_page()
     tab.set_viewport_size({"width": 1400, "height": 800})
     tab.goto(f"{board.base}/chat#{s['id']}")
-    # On a desk: a column of its own beside the chat, the button not needed.
+    # On a desk: a column of its own left of the chat, the button not needed.
     tab.wait_for_selector("#changes .file:has-text('app.py')")
     # A tree of folders, each with the lines changed below it; a folder holding only a folder is one line with it.
     rows = lambda: [" ".join(t.split()) for t in tab.locator("#changes .file:visible, #changes summary:visible").all_inner_texts()]  # noqa: E731
@@ -960,7 +960,7 @@ def test_the_files_a_runs_checkout_changed_are_beside_its_chat_or_behind_a_heade
     assert rows() == ["docs/guide +1", "A intro.md +1", "web +3", "lib +2", "A util.ts +2", "src +1", "A New.tsx +1", "M app.py +2 −1"]
     tab.click("#changes summary:has-text('web')")  # closed again: its folders and files go, its own line stays
     assert tab.is_hidden("#changes .file:has-text('util.ts')") and tab.is_visible("#changes summary:has-text('web')")
-    assert tab.eval_on_selector("#changes", "e => e.getBoundingClientRect().left") > tab.eval_on_selector("#scroll", "e => e.getBoundingClientRect().right") - 1
+    assert tab.eval_on_selector("#changes", "e => e.getBoundingClientRect().right") < tab.eval_on_selector("#scroll", "e => e.getBoundingClientRect().left") + 1
     assert tab.is_hidden("header .files")
     # Narrower: a button in the header, its count on it, that opens the list over the chat.
     tab.set_viewport_size({"width": 400, "height": 800})
@@ -999,3 +999,77 @@ def test_the_menus_sign_in_to_claude_opens_its_page_and_takes_the_code_in_a_dial
     code.fill("good")
     board.click("dialog button[type=submit]")
     board.wait_for_selector("dialog[aria-labelledby]", state="hidden")
+
+
+def test_side_chats_are_asked_beside_the_chat_and_the_panels_are_dragged_and_put_away(board):
+    subprocess.run(["git", "-C", board.checkout, "init", "-q", "-b", "main"], check=True)
+    (board.checkout / "app.py").write_text("a\n")
+    s = board.resume()
+    tab = board.context.new_page()
+    tab.set_viewport_size({"width": 1400, "height": 800})
+    tab.goto(f"{board.base}/chat#{s['id']}")
+    tab.wait_for_selector("#changes .file:has-text('app.py')")
+    ends = lambda sel: tab.eval_on_selector(sel, "e => { const r = e.getBoundingClientRect(); return [r.left, r.right]; }")  # noqa: E731
+    width = lambda sel: round(ends(sel)[1] - ends(sel)[0])  # noqa: E731
+    # Three columns on a desk: the changed files, the chat, its side chats.
+    tab.wait_for_selector("#sidechat .say:has-text('An earlier side answer.')")  # the one the resumed run kept
+    assert ends("#changes")[1] <= ends("#scroll")[0] and ends("#scroll")[1] <= ends("#sidechat")[0]
+    assert tab.inner_text("#sidechat .tab.on") == "What was asked beside it"
+    # A question there is answered there: the conversation hears nothing of it.
+    tab.fill("#sidechat textarea", "why main?")
+    tab.keyboard.press("Enter")
+    tab.wait_for_selector("#sidechat .say:has-text('About “why main?”')")
+    assert "why main?" not in tab.inner_text("#log") and tab.inner_text("header .state") == "Idle"
+    # Another one, a tab of its own, lit while it is answered; Esc in its field stops its turn only.
+    tab.click("#sidechat button[aria-label='New side chat']")
+    assert tab.inner_text("#sidechat .tab.on") == "New question" and tab.is_visible("#sidechat .none")
+    tab.keyboard.type("wait long")
+    tab.keyboard.press("Enter")
+    tab.wait_for_selector("#sidechat .tab.on:has-text('wait long') .lamp.working")
+    tab.keyboard.press("Escape")
+    tab.wait_for_selector("#sidechat .say:has-text('About “wait long”')")
+    assert {"type": "interrupt", "side": "2"} in [json.loads(line) for line in board.commands.read_text().splitlines()]
+    tab.click("#sidechat [role=tab]:has-text('What was asked')")  # back to the first, with all that was said in it
+    assert tab.locator("#sidechat .you").all_inner_texts() == ["What was asked beside it", "why main?"]
+    tab.keyboard.press("ArrowRight")  # the arrows walk the tabs
+    assert tab.inner_text("#sidechat .tab.on") == "wait long"
+    tab.click("#sidechat .tab.on button[aria-label^='Close']")
+    tab.wait_for_function("document.querySelectorAll('#sidechat .tab').length === 1")
+    tab.reload()  # they are the session's, not the page's
+    tab.wait_for_selector("#sidechat .say:has-text('About “why main?”')")
+    assert tab.locator("#sidechat .tab").count() == 1
+    tab.wait_for_selector("#changes .file")
+
+    # A panel is as wide as its edge is dragged, or moved with the arrow keys; a double click undoes it.
+    assert (width("#pane-right"), width("#pane-left")) == (380, 300)
+    edge = tab.locator("#pane-right [role=separator]")
+    x = ends("#pane-right")[0]
+    tab.mouse.move(x, 400)
+    tab.mouse.down()
+    tab.mouse.move(x - 100, 400, steps=4)
+    tab.mouse.up()
+    assert width("#pane-right") == 480 and edge.get_attribute("aria-valuenow") == "480"
+    edge.press("ArrowRight")
+    assert width("#pane-right") == 464
+    tab.locator("#pane-left [role=separator]").press("Home")
+    assert width("#pane-left") == 200
+    edge.dblclick()
+    assert width("#pane-right") == 380
+    # Put away from the header, each from its own end of it, the chat takes its room; the browser keeps both.
+    before = width("#scroll")
+    tab.click("header button[aria-label='Hide side chats']")
+    assert tab.is_hidden("#sidechat") and width("#scroll") == before + 380
+    tab.reload()
+    tab.wait_for_selector("#changes .file")
+    assert tab.is_hidden("#sidechat") and width("#pane-left") == 200
+    tab.click("header button[aria-label='Hide changed files']")
+    assert tab.is_hidden("#changes") and width("#scroll") == 1400
+    tab.click("header button[aria-label='Show side chats']")
+    tab.wait_for_selector("#sidechat .say:has-text('About “why main?”')")
+    # Narrower: no panels, the side chats open over the chat from their button in the header.
+    tab.set_viewport_size({"width": 400, "height": 800})
+    assert tab.is_hidden("#sidechat") and tab.is_hidden("header .pane-toggle")
+    tab.click("header button[aria-label='Side chats']")
+    tab.wait_for_selector("#sidechat .say:has-text('About “why main?”')")
+    tab.keyboard.press("Escape")
+    tab.wait_for_selector("#sidechat", state="hidden")

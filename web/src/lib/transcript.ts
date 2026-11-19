@@ -69,6 +69,10 @@ export class Transcript {
   /** Something came that the reader should see (their own message, a question): the column
    *  follows its newest line again, wherever it was scrolled to. */
   wantsFollow = false;
+  /** Its side chats, by id: each a conversation of its own, about this one. */
+  sides = new Map<string, Transcript>();
+  /** What it was first asked: a side chat is called that. */
+  title = '';
 
   private blocks = new Map<string, Block>();
   private tools = new Map<string, ToolRecord>();
@@ -95,9 +99,31 @@ export class Transcript {
     this.todos = snap.todos;
     this.tasks = snap.tasks ?? [];
     this.wantsFollow = true;
+    this.sides.clear();
+    for (const s of snap.sides ?? []) {
+      const side = this.side(s.id);
+      for (const e of s.events) side.handle({ ...e, side: undefined });
+      side.settleBlocks();
+      side.status = s.state;
+    }
+  }
+
+  private side(id: string): Transcript {
+    let side = this.sides.get(id);
+    if (!side) {
+      side = new Transcript();
+      side.status = 'idle';
+      this.sides.set(id, side);
+    }
+    return side;
   }
 
   handle(e: ChatEvent): void {
+    if (e.side !== undefined) {
+      if (e.type === 'side-closed') this.sides.delete(e.side);
+      else this.side(e.side).handle({ ...e, side: undefined });
+      return;
+    }
     switch (e.type) {
       case 'boot': this.bootLine(e.text); break;
       case 'hello': this.info.agent = e.agent; break;
@@ -118,7 +144,13 @@ export class Transcript {
       case 'effort': this.info.effort = e.level; delete this.chosen.effort; break;
       case 'todos': this.todos = e.items; break;
       case 'tasks': this.tasks = e.items ?? []; break;
-      case 'exit': this.tasks = []; this.settleBlocks(); this.ended(e.code); break;
+      case 'side-closed': break;
+      case 'exit':
+        this.tasks = [];
+        this.settleBlocks();
+        this.ended(e.code);
+        for (const side of this.sides.values()) { side.status = 'idle'; side.settleBlocks(); side.finish(true); }
+        break;
     }
   }
 
@@ -153,7 +185,8 @@ export class Transcript {
     const r = this.place(this.record<YouRecord>('you', { text: e.text, images: e.images, files: e.files, queued: !!e.queued }));
     if (e.id) this.users.set(e.id, r);
     // It is called what it was first asked.
-    if (this.session && !this.session.title) this.session.title = e.text.replace(/\s+/g, ' ').slice(0, 140) || (e.files?.length ? 'File' : 'Image');
+    this.title ||= e.text.replace(/\s+/g, ' ').slice(0, 140) || (e.files?.length ? 'File' : 'Image');
+    if (this.session && !this.session.title) this.session.title = this.title;
     this.wantsFollow = true;
   }
 

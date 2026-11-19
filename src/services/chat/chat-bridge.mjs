@@ -25,6 +25,12 @@
 //   model      {id}, effort {level}              what the next turn runs on
 //   notice     {level, text}                     info, warning or error
 //
+// A bridge whose agent can be asked about the run's conversation beside it says so (`sides: true` in
+// `ready`). A side chat's events are the ones above (text, delta, tool, result, turn, notice, status,
+// and user on a resumed run), each with `side: <id>`: the id the host gave the chat, digits. Its
+// commands: side {id, text} asks it (the first one starts it), side {id, close: true} ends it and
+// forgets it, interrupt {side: <id>} stops its turn.
+//
 // and the commands: prompt {text, images: [{type, data}], files: [{name, data}]}, interrupt {}, answer {id, answers |
 // cancel}, model {id}, effort {level}, task {id} (stop that background task). An image is its
 // media type and its bytes in base64; a file, its name and its bytes in base64.

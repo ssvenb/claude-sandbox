@@ -1,6 +1,8 @@
 // A session's conversation: the header says which and how it is doing, the column is what was said
 // and done, the dock at the bottom is where the next message is written. The dock is there from the
-// first moment, while the sandbox still starts.
+// first moment, while the sandbox still starts. On a desk the chat has a panel on either side: on
+// the left what the project's plugins show (the files the run changed), on the right its side
+// chats; each as wide as the reader makes it, and put away from its button in the header.
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { BackgroundTasks } from '../components/chat/BackgroundTasks';
 import { Boot } from '../components/chat/Boot';
@@ -8,10 +10,14 @@ import { ChatContext, type ChatActions } from '../components/chat/ChatContext';
 import { ChatHeader } from '../components/chat/ChatHeader';
 import { Composer } from '../components/chat/Composer';
 import { Entries } from '../components/chat/Entries';
+import { Pane, PaneToggle } from '../components/chat/Pane';
 import { Plan } from '../components/chat/Plan';
+import { SideChats } from '../components/chat/SideChats';
+import { Icon } from '../components/common/Icon';
 import { Gone } from '../components/common/Gone';
 import { useChatSession } from '../hooks/useChatSession';
 import { useFollowScroll } from '../hooks/useFollowScroll';
+import { usePane } from '../hooks/usePane';
 import { useTabIdentity } from '../hooks/useTabIdentity';
 import { here } from '../lib/items';
 import { projectName, sessionIdFromLocation, titled } from '../lib/session';
@@ -68,10 +74,24 @@ export default function Chat() {
   const actions = useMemo<ChatActions>(() => ({ answer, resume, stopTask }), [answer, resume, stopTask]);
   const chips = [...chat.items, ...(session?.items ?? []).map(here)];
 
+  const left = usePane('left', 300, 200, 560), right = usePane('right', 380, 280, 720);
+  // Side chats are there from the first moment, like the dock; gone once the agent says it takes none.
+  const sided = !!session && !gone && !(ready && !info.sides);
+  const asking = [...t.sides.values()].filter(s => s.status === 'working').length;
+
   return (
     <ChatContext value={actions}>
       <ChatHeader session={session} gone={gone} info={info} state={state} items={chips}
-        bar={slot('bar')} actions={slot('actions')} onStop={chat.stop} onDelete={chat.remove} />
+        bar={slot('bar')} actions={slot('actions')} onStop={chat.stop} onDelete={chat.remove}
+        start={<PaneToggle side="left" what="changed files" pane={left} />}
+        end={sided && (
+          <>
+            <button className="icon side-toggle" popoverTarget="sidechat" aria-label="Side chats" title="Side chats">
+              <Icon name="aside" />{asking > 0 && <span className="lamp working" />}
+            </button>
+            <PaneToggle side="right" what="side chats" pane={right} />
+          </>
+        )} />
       <Gone id="gone" hidden={!gone} />
       <main id="scroll" hidden={gone} ref={scroller} onScroll={onScroll}>
         <div className="column">
@@ -90,7 +110,13 @@ export default function Chat() {
             onSend={chat.send} onInterrupt={interrupt} onModel={m => chat.choose('model', m)} onEffort={l => chat.choose('effort', l)} />
         </div>
       </footer>
-      {slot('aside')}
+      <Pane side="left" what="changed files" pane={left}>{slot('aside')}</Pane>
+      {sided && (
+        <Pane side="right" what="side chats" pane={right}>
+          <SideChats sides={t.sides} ready={ready} ended={over !== null}
+            onAsk={chat.askSide} onClose={chat.closeSide} onInterrupt={chat.interruptSide} />
+        </Pane>
+      )}
     </ChatContext>
   );
 }

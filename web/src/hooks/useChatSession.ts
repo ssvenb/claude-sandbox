@@ -32,6 +32,10 @@ export interface ChatSession {
   send: (text: string, images: Picture[], files: Upload[]) => Promise<unknown>;
   choose: (what: 'model' | 'effort', value: string) => void;
   stopTask: (task: string) => Promise<unknown>;
+  /** Asks in a side chat (a new one for null) and says which it was; throws when it could not be sent. */
+  askSide: (side: string | null, text: string) => Promise<string>;
+  closeSide: (side: string) => void;
+  interruptSide: (side: string) => void;
 }
 
 export function useChatSession(id: string): ChatSession {
@@ -135,6 +139,9 @@ export function useChatSession(id: string): ChatSession {
       });
     },
     stopTask: (task: string) => server.stopTask(id, task),
+    askSide: (side: string | null, text: string) => server.askSide(id, side, text),
+    closeSide: (side: string) => void server.closeSide(id, side).catch(e => alert(message(e))),
+    interruptSide: (side: string) => void server.interruptSession(id, side).catch(e => alert(message(e))),
   }), [id, transcript, poll, leave]);
 
   return { transcript, version, items, gone, halting, interrupt, ...actions };

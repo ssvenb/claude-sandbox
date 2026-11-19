@@ -213,18 +213,69 @@
   #gone b { display: block; color: var(--ink); font-size: 22px; font-weight: 650; margin-bottom: 6px; }
   #gone[hidden] { display: none; }
 
-  /* A plugin's side panel (plugins.ts, ChatParts.aside): a popover under the header's button;
-     beside the chat on a desk. shortcut: one column for one panel, a second would sit on the first. */
+  /* The panels beside the chat (components/chat/Pane): on the left what the project's plugins show
+     (plugins.ts, ChatParts.aside), on the right the side chats. What a panel holds is an
+     aside.side: a popover under the header's button, and on a desk the panel itself, as wide as the
+     reader drags its edge and put away from its button in the header.
+     shortcut: the left panel is one column for one plugin's aside, a second would sit beside the first. */
+  .pane { display: contents; }
+  .splitter, header .pane-toggle { display: none; }
   aside.side { inset: auto; top: 58px; right: 10px; margin: 0; width: min(420px, calc(100vw - 20px)); max-height: 70dvh;
                padding: 0; color: var(--ink); border: 1px solid var(--rule); border-radius: 14px;
                background: var(--panel); box-shadow: var(--shadow); flex-direction: column; }
   aside.side:popover-open { display: flex; animation: drop .15s ease-out; }
+  header .side-toggle .lamp { margin-left: -2px; }
   @media (min-width: 1200px) {
-    body:has(aside.side) { display: grid; grid-template: auto minmax(0, 1fr) auto / minmax(0, 1fr) 320px; }
-    body:has(aside.side) header { grid-column: 1 / -1; }
-    aside.side { display: flex; position: static; grid-column: 2; grid-row: 2 / 4; width: auto; height: auto; max-height: none; overflow: hidden;
-                 border: 0; border-left: 1px solid var(--rule); border-radius: 0; box-shadow: none; background: var(--page); }
+    body { display: grid; grid-template: auto minmax(0, 1fr) auto / auto minmax(0, 1fr) auto; }
+    header, #gone { grid-column: 1 / -1; }
+    #scroll, #dock { grid-column: 2; }
+    .pane { display: flex; position: relative; grid-row: 2 / 4; width: var(--pane); max-width: 40vw; min-width: 0; background: var(--page); }
+    .pane.left { grid-column: 1; border-right: 1px solid var(--rule); }
+    .pane.right { grid-column: 3; border-left: 1px solid var(--rule); }
+    .pane.shut, .pane:not(:has(aside)) { display: none; }
+    aside.side { display: flex; position: static; flex: 1; min-width: 0; width: auto; height: auto; max-height: none; overflow: hidden;
+                 border: 0; border-radius: 0; box-shadow: none; background: none; }
+    /* The edge that is dragged: wider to aim at than the line it shows, which lights up under the
+       pointer, the keyboard's focus and the drag. */
+    .splitter { display: block; position: absolute; top: 0; bottom: 0; width: 11px; z-index: 2; cursor: col-resize; touch-action: none; outline: 0; }
+    .pane.left .splitter { right: -6px; }
+    .pane.right .splitter { left: -6px; }
+    .splitter::after { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 3px; background: var(--lamp-fill);
+                       opacity: 0; transition: opacity .12s .08s; }
+    .splitter:hover::after, .splitter:focus-visible::after, :root.resizing .splitter:focus::after { opacity: 1; }
+    :root.resizing, :root.resizing * { cursor: col-resize !important; user-select: none; }
+    header .pane-toggle { display: inline-flex; }
+    header .pane-toggle.left { order: -3; }
+    header .pane-toggle[aria-expanded=true] { color: var(--ink); }
+    body:not(:has(.pane.left aside)) header .pane-toggle.left { display: none; }
     header .side-toggle { display: none; }
+  }
+
+  /* The side chats: a row of tabs, each a window lit while its question is answered; the one in
+     view below it, set a size smaller than the conversation it is about; a field for the next question. */
+  #sidechat { font-size: 14px; }
+  #sidechat .head { display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 8px 0 6px; border-bottom: 1px solid var(--rule); }
+  #sidechat .head > b { flex: 1; padding-left: 8px; font-weight: 600; }
+  #sidechat .tabs { flex: 1; min-width: 0; display: flex; align-self: stretch; overflow-x: auto; scrollbar-width: none; }
+  #sidechat .tab { display: flex; align-items: center; flex: 0 1 auto; min-width: 72px; max-width: 190px;
+                   box-shadow: inset 0 -2px 0 transparent; color: var(--muted); }
+  #sidechat .tab.on { box-shadow: inset 0 -2px 0 var(--lamp-fill); color: var(--ink); }
+  #sidechat .tab button { border: 0; border-radius: 7px; color: inherit; }
+  #sidechat .tab [role=tab] { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; padding: 6px 2px 6px 8px; font-size: 13.5px; }
+  #sidechat .tab.on [role=tab] { font-weight: 600; }
+  #sidechat .tab [role=tab] span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #sidechat .tab .shut { flex: none; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; opacity: 0; }
+  #sidechat .tab .shut svg { width: 11px; height: 11px; }
+  #sidechat .tab:is(.on, :hover, :focus-within) .shut { opacity: 1; }
+  #sidechat .tab button:hover { background: var(--sunk); color: var(--ink); }
+  #sidechat .thread { flex: 1; min-height: 120px; overflow-y: auto; overscroll-behavior: contain; }
+  #sidechat .log { display: flex; flex-direction: column; gap: 12px; padding: 14px; }
+  #sidechat .none { margin: 0; color: var(--muted); max-width: 44ch; }
+  #sidechat .you { max-width: 92%; }
+  #sidechat .composer { margin: 0 10px 12px; border-radius: 14px; }
+  #sidechat .composer textarea { min-height: 40px; padding: 10px 13px 2px; font-size: 14px; }
+  @media (min-width: 1200px) {
+    #sidechat .composer { margin-bottom: max(14px, env(safe-area-inset-bottom)); }
   }
 
   @media (max-width: 720px) {
@@ -239,7 +290,7 @@
     .you { max-width: 94%; }
     .tool .body { padding-left: 12px; }
     .composer .bar select { max-width: 120px; }
-    .composer textarea { font-size: 16px; }  /* smaller, and a phone zooms in on focus */
+    .composer textarea, #sidechat .composer textarea { font-size: 16px; }  /* smaller, and a phone zooms in on focus */
     #log { padding-top: 14px; gap: 12px; }
     .ask { padding: 12px; }
     .code .lang { display: none; }
@@ -253,5 +304,5 @@
     .composer .bar button.halt + button.round { margin-left: 0; }
     .tool > summary { padding: 9px 12px; }
   }
-  @media (prefers-reduced-motion: reduce) { .say.streaming > :last-child::after, header.open .extra, #changes:popover-open { animation: none; } #changes .folder svg { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .say.streaming > :last-child::after, header.open .extra, aside.side:popover-open { animation: none; } #changes .folder svg, .splitter::after { transition: none; } }
 }

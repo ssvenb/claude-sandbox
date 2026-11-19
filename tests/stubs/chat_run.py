@@ -13,6 +13,9 @@ that thinks, runs tools and answers. What the prompt says picks the turn:
     "long"  it keeps working until interrupted
     "background"  it leaves two tasks running in the background, until each is stopped
     "exit"  the sandbox goes away with status 3
+
+It takes side chats: a question there is answered in a line ("long": once interrupted), and a
+resumed run has one from before.
 """
 import base64
 import json
@@ -76,7 +79,9 @@ time.sleep(BOOT)
 if resumed:
     emit(type="user", text="What was said before the resume")
     emit(type="text", id="h1", kind="text", text="An earlier answer.")
-emit(type="ready", agent="claude", version="9.9.9", model="fable", effort="medium", efforts=["low", "medium", "high"],
+    emit(type="user", side="1", text="What was asked beside it")
+    emit(type="text", side="1", id="sh1", kind="text", text="An earlier side answer.")
+emit(type="ready", agent="claude", sides=True, version="9.9.9", model="fable", effort="medium", efforts=["low", "medium", "high"],
      models=[{"id": "fable", "name": "Fable", "description": "Fable 5.2 · Most capable"},
              {"id": "opus", "name": "Opus", "description": "Opus 5.5 · Everyday work"}],
      commands=[{"name": "compact", "description": "Summarise the conversation so far", "hint": "[instructions]"},
@@ -153,6 +158,23 @@ def turn(text):
     emit(type="status", state="idle")
 
 
+asides = {}  # side chat → set to interrupt its turn
+
+
+def aside(sid, text):
+    global turns
+    turns += 1
+    block = f"side{turns}"
+    if "long" in text:
+        asides.setdefault(sid, threading.Event()).wait()
+        asides[sid].clear()
+    for word in f"About “{text}”: it changed `main()`.".split(" "):
+        emit(type="delta", side=sid, id=block, kind="text", text=word + " ")
+        time.sleep(PACE)
+    emit(type="turn", side=sid, duration=800, cost=0.01)
+    emit(type="status", side=sid, state="idle")
+
+
 # One turn at a time, as an agent takes them: a prompt sent meanwhile waits for its own.
 prompts = queue.Queue()
 threading.Thread(target=lambda: [turn(text) for text in iter(prompts.get, None)], daemon=True).start()
@@ -166,6 +188,11 @@ for line in sys.stdin:
         f.write(json.dumps(command) + "\n")
     if command["type"] == "prompt":
         prompts.put(command["text"])
+    elif command["type"] == "side":
+        if not command.get("close"):
+            threading.Thread(target=aside, args=(command["id"], command["text"]), daemon=True).start()
+    elif command["type"] == "interrupt" and "side" in command:
+        asides.setdefault(command["side"], threading.Event()).set()
     elif command["type"] == "interrupt":
         stop.set()
     elif command["type"] == "answer":

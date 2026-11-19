@@ -99,7 +99,7 @@ in every session's briefing (`github-auth`), not in the task.
 What a project shows beyond its sessions comes from its enabled plugins, not from the web UI: the
 page draws what `run.sh --web` prints for the project, which is what each enabled plugin's `web.sh`
 described. `github-auth` lists the pull requests and issues, `git-workspace` recognises its per-run
-branches among them and lists the files a run changed (beside its chat on a wide screen, behind a
+branches among them and lists the files a run changed (left of its chat on a wide screen, behind a
 button in its header on a narrow one), `agent-workspace` says where a run's checkout is — switch one off for a
 project and its part of the page goes with it.
 
@@ -110,6 +110,16 @@ its own calls inside. Its plan sits above the composer, a question it asks you i
 choices, and the composer offers the agent's own slash commands and skills as you type `/`, its
 models and effort levels, and a stop button (or **Esc**) to interrupt it. Clicking a session whose
 tab is already open brings that tab to the front instead of opening a second one.
+
+Right of the chat are its **side chats**: questions about the conversation, asked while the agent
+works on, which it never hears of. Each is a tab with a conversation of its own (ask again in it,
+or open another): with every question it is given what the run's conversation said since its last
+one, it may read the files, and it changes nothing. They are kept with the session and come back
+with a resumed run. An agent's bridge says whether it takes them — Claude's does, Copilot's not
+yet. On a wide screen the changed files and the side chats are panels on either side of the chat:
+drag a panel's edge (or focus it and use the arrow keys) to size it, double-click the edge for its
+first width, and put it away with the button at its end of the header; the browser remembers both.
+On a narrow one each opens over the chat from its button.
 
 The chat is there from the first moment. While the image builds and the sandbox boots, the page
 shows what the boot prints, and whatever you write is kept by the server and handed to the agent,

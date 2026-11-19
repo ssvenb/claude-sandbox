@@ -48,11 +48,6 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler
 
-import google.auth
-import google.auth.exceptions
-import google.auth.transport.requests
-from google.auth import impersonated_credentials
-
 DEFAULT_MAX_BODY = 8 * 1024 * 1024
 TIMEOUT = 120
 
@@ -178,6 +173,11 @@ class _Injector:
         with self._lock:
             if self._token and time.time() < self._expires:
                 return self._token
+            # Imported here: only GCP routes need it (tests/e2e runs this file on the image's own python).
+            import google.auth
+            import google.auth.exceptions
+            import google.auth.transport.requests
+            from google.auth import impersonated_credentials
             account = entry.get("serviceAccount", "")
             scopes = ["https://www.googleapis.com/auth/cloud-platform"]
             try:

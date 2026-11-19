@@ -14,6 +14,8 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import google.auth.exceptions
+import google.auth.impersonated_credentials
 import pytest
 
 from conftest import REPO, load
@@ -125,8 +127,8 @@ class FakeCreds:
 def gcloud(monkeypatch):
     """The host's application default credentials, faked; the accounts tokens were minted for."""
     log = []
-    monkeypatch.setattr(proxy.google.auth, "default", lambda scopes: (FakeCreds(log), None))
-    monkeypatch.setattr(proxy.impersonated_credentials, "Credentials",
+    monkeypatch.setattr(google.auth, "default", lambda scopes: (FakeCreds(log), None))
+    monkeypatch.setattr(google.auth.impersonated_credentials, "Credentials",
                         lambda source_credentials, **kw: FakeCreds(log, **kw))
     return log
 
@@ -157,8 +159,8 @@ def test_gcp_route_fails_at_startup_without_a_host_login(auth, monkeypatch):
     auth({"gcs": {"type": "gcp-service-account"}})
 
     def no_login(scopes):
-        raise proxy.google.auth.exceptions.DefaultCredentialsError("please log in")
-    monkeypatch.setattr(proxy.google.auth, "default", no_login)
+        raise google.auth.exceptions.DefaultCredentialsError("please log in")
+    monkeypatch.setattr(google.auth, "default", no_login)
     with pytest.raises(RuntimeError, match="application-default login.*please log in"):
         proxy._Route({"name": "gcs", "upstream": "https://storage.googleapis.com", "auth": {"credential": "gcs"}})
 

@@ -1193,8 +1193,12 @@ def claude_login():
     with login_lock:
         if login and login.poll() is None:
             login.kill()
+        # Its installer puts it in ~/.local/bin, which a service's PATH may lack.
+        claude = shutil.which("claude") or shutil.which("claude", path=str(Path.home() / ".local/bin"))
+        if not claude:
+            raise ValueError("claude is not installed on the server (not on its PATH, nor in ~/.local/bin)")
         try:
-            login = subprocess.Popen(["claude", "auth", "login"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            login = subprocess.Popen([claude, "auth", "login"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.STDOUT, text=True, env={**os.environ, "BROWSER": "true"})
         except OSError as e:
             raise ValueError(f"cannot run claude: {e}")

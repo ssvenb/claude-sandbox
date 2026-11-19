@@ -18,6 +18,13 @@
       "default": "medium"
     },
     {
+      "env": "CLAUDE_MODEL",
+      "type": "string",
+      "label": "Model",
+      "description": "Model Claude Code starts on, an alias or a full id; the chat's picker can still change it. Default: Claude Code's own default.",
+      "placeholder": "opus"
+    },
+    {
       "env": "CLAUDE_AUTH",
       "type": "auth",
       "auth": "claude-token",

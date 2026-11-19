@@ -92,12 +92,20 @@ CLAUDE_TURN = [
 ]
 
 
+def test_claude_starts_on_the_projects_model_named_as_the_picker_names_it(tmp_path):
+    b = Bridge("claude", tmp_path, CLAUDE_TURN, CLAUDE_MODEL="claude-test-1")
+    ready = b.until(lambda e: e["type"] == "ready")
+    assert b.calls()[0]["options"]["model"] == "claude-test-1"
+    assert ready["model"] == "test"
+
+
 def test_claude_is_started_as_the_terminal_would_and_its_messages_become_chat_events(tmp_path):
     b = Bridge("claude", tmp_path, CLAUDE_TURN, AGENT_PROMPT="Brief.", CLAUDE_EFFORT="high")
     ready = b.until(lambda e: e["type"] == "ready")
     assert b.events[0] == {"type": "hello", "agent": "claude"}
     assert (ready["version"], ready["effort"], ready["account"]) == ("1.2.3", "high", "someone@example.com")
-    assert ready["models"] == [{"id": "default", "name": "Default", "description": "Test 1 · Everyday"}]
+    assert ready["models"] == [{"id": "test", "name": "Test", "description": "Test 1 · Everyday"}]  # no `default` row
+    assert ready["model"] == "test"  # the default, named by the row that is it
     assert ready["commands"] == [{"name": "compact", "description": "Summarise", "hint": "[instructions]"}]
     options = b.calls()[0]["options"]
     assert options | {"cwd": ""} == {  # every permission granted, the run's own conversation, the briefing appended
@@ -113,7 +121,7 @@ def test_claude_is_started_as_the_terminal_would_and_its_messages_become_chat_ev
     b.until(lambda e: e == {"type": "status", "state": "idle"})
     events = b.events[b.events.index(ready) + 1:]
     assert {"prompt": "do it"} in b.calls()
-    assert of(events, "model") == [{"type": "model", "id": "claude-test-1"}]
+    assert of(events, "model") == [{"type": "model", "id": "test"}]
     thought, said = of(events, "text")
     assert (thought["kind"], thought["text"]) == ("thinking", "Hm.") and (said["kind"], said["text"]) == ("text", "All done.")
     deltas = of(events, "delta")

@@ -52,7 +52,7 @@ SAVED = ("exit", "events", "info", "todos", "tasks", "ready", "state", "waiting"
 # Where the page was last opened (http://<Host>), from the last request guard() let in: the address
 # web_on_status is told a session's page by (on_status()).
 page_origin = None
-OFFERS = ("models", "efforts", "commands")  # what an agent offers on `ready`; see agent_offers()
+OFFERS = ("model", "models", "effort", "efforts", "commands")  # what an agent offers on `ready`; see agent_offers()
 RUN_SH = ROOT / "run.sh"
 PLUGINS = ROOT / "plugins"
 AGENTS = ROOT / "agents"

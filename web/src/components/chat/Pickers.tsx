@@ -30,7 +30,7 @@ interface EffortProps {
 export function EffortPicker({ efforts, effort, onChoose }: EffortProps) {
   return (
     <select id="effort" aria-label="Reasoning effort" hidden={!efforts.length} value={efforts.length ? effort || efforts[0] : ''} onChange={e => onChoose(e.target.value)}>
-      {efforts.map(level => <option key={level} value={level}>{level} effort</option>)}
+      {efforts.map(level => <option key={level} value={level}>{level}</option>)}
     </select>
   );
 }

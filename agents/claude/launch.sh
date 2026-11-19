@@ -25,5 +25,5 @@ else
 fi
 # shellcheck disable=SC2086
 ${AGENT_LAUNCH_CMD:-claude} --dangerously-skip-permissions "$@" \
-  --effort "${CLAUDE_EFFORT:-medium}" ${AGENT_PROMPT:+--append-system-prompt "$AGENT_PROMPT"} \
+  --effort "${CLAUDE_EFFORT:-medium}" ${CLAUDE_MODEL:+--model "$CLAUDE_MODEL"} ${AGENT_PROMPT:+--append-system-prompt "$AGENT_PROMPT"} \
   ${AGENT_TASK:+"$AGENT_TASK"}

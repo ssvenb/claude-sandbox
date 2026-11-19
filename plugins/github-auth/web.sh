@@ -2,8 +2,7 @@
 # Web stage: the project's open pull requests and issues, each linking to its GitHub page. Asked
 # (host/github.py, the API through `requests`) with an installation token of the project's GitHub
 # App (GH_AUTH), so the host needs no gh CLI: what the page does on GitHub (closing a pull request)
-# is done as the App's bot. A project without one borrows the token of the host's own `gh` login
-# when there is one — yours, as its GH_USERNAME when it names one (gh keeps a token per account).
+# is done as the App's bot.
 #
 # Issues get a section. Pull requests show only for the run a later plugin ties them to
 # (git-workspace, by branch): on that run's session row, where they offer to be closed when the
@@ -37,17 +36,9 @@ github_app_token() {
   [ -n "$gh_token" ]
 }
 
+# The plugin requires an App (GH_AUTH): its token is all the page asks with, never a gh login.
 gh_token=
-if [ -n "${GH_APP_ID:-}" ] && [ -n "${GH_PRIVATE_KEY_FILE:-}" ]; then
-  github_app_token || return 0
-elif ! command -v gh >/dev/null; then
-  web_note "no GitHub App set for this project (GH_AUTH)"
-  return 0
-# The project's account, not whichever one gh has active: a host logged in to several picks per project.
-elif ! gh_token=$(gh auth token --hostname "${GH_HOST:-github.com}" ${GH_USERNAME:+--user "$GH_USERNAME"} 2>/dev/null); then
-  web_note "gh is not logged in${GH_USERNAME:+ as $GH_USERNAME} on ${GH_HOST:-github.com} (gh auth login)"
-  return 0
-fi
+github_app_token || return 0
 
 # github <github.py args…>: host/github.py on the project's repo, as its account, its output in
 # github_out; when it fails, its first line of complaint becomes a note. Not in a subshell, or the

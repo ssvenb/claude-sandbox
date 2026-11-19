@@ -84,7 +84,7 @@ repo) and deleted (its file only, refused while it has sessions) at once, and yo
 its fields those of its type — or JSON, saved readable by you alone.
 For a project whose
 `origin` is on GitHub it lists the open pull requests, with their CI status, and issues with a token of
-the project's GitHub App (`GH_AUTH`; the host's own `gh` login, if any, when it names none; the App then needs read access to issues, checks and commit statuses, and
+the project's GitHub App (`GH_AUTH`, which the plugin requires; the App needs read access to issues, checks and commit statuses, and
 write to pull requests to close one), each a link to its GitHub page (one tab per item, brought to the front when it
 is already open); a PR on a per-run branch (`<prefix>/<date>-<RUN_ID>`) gets a **Resume** button,
 which is `run.sh --resume <RUN_ID>`; an ended session in the list has one too. An issue's
@@ -692,7 +692,7 @@ else), each under a name:
 
 | Type | Named by | Fields |
 |------|----------|--------|
-| `github-app` | `GH_AUTH` (`github-auth`), `.plugins["pr-review"].auth` | `appId`, `privateKeyFile`; optional `host` (GitHub Enterprise Server), `username` (what git and `gh` authenticate as, and the host `gh` login the page lists pull requests as; default: the App's bot) |
+| `github-app` | `GH_AUTH` (`github-auth`), `.plugins["pr-review"].auth` | `appId`, `privateKeyFile`; optional `host` (GitHub Enterprise Server), `username` (what git and `gh` in the container authenticate as; default: the App's bot) |
 | `gcp-service-account` | `GCP_AUTH` (`gcp-auth`), a route's `auth.credential` (`upstream-proxy`) | `serviceAccount`; optional `project`, `credentialFile` (a workload identity federation config, used instead of your gcloud login) |
 | `api-key` | a route's `auth.credential` (`upstream-proxy`) | `key` |
 | `oauth2-client` | a route's `auth.credential` (`upstream-proxy`) | `tokenUrl`, `clientId`, `clientSecret`; optional `audience` |

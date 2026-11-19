@@ -574,8 +574,8 @@ GH_ISSUES = [{"number": 7, "title": "i", "url": "u7"}]
 
 @pytest.fixture
 def github(sb):
-    """A fake GitHub API for host/github.py (GITHUB_API_URL), and a host gh login (token "tok")
-    for the project without a GitHub App. Set .open/.merged/.issues (entries as `gh … --json`
+    """A fake GitHub API for host/github.py (GITHUB_API_URL), and a GitHub App whose minter
+    (.mint, in a copy of the plugins) says token "tok". Set .open/.merged/.issues (entries as `gh … --json`
     gives them), .fail (a status to answer with); read .requests: (method, path, token, body)."""
     class Api(http.server.BaseHTTPRequestHandler):
         def do_POST(self):
@@ -605,7 +605,15 @@ def github(sb):
     api = types.SimpleNamespace(open=[], merged=[], issues=[], fail=None, requests=[])
     threading.Thread(target=server.serve_forever, daemon=True).start()
     sb.env["GITHUB_API_URL"] = f"http://127.0.0.1:{server.server_port}"
-    sb.stub("gh", '[ "$1 $2" = "auth token" ] && echo tok\n')
+    plugins = sb.tmp / "plugins"
+    plugins.mkdir()
+    for p in (REPO / "plugins").iterdir():
+        (plugins / p.name).symlink_to(p)
+    (plugins / "github-auth").unlink()
+    shutil.copytree(REPO / "plugins/github-auth", plugins / "github-auth")
+    api.mint = plugins / "github-auth/host/mint-gh-token.py"
+    api.mint.write_text("#!/bin/sh\necho tok\n")
+    sb.env.update(PLUGIN_ROOT=str(plugins), GH_APP_ID="7", GH_PRIVATE_KEY_FILE="/k.pem")
     yield api
     server.shutdown()
 
@@ -627,7 +635,7 @@ def test_github_lists_pull_requests_and_issues_and_git_workspace_ties_them_to_ru
     subprocess.run(["git", "-C", sb.cwd, "remote", "add", "origin", "https://github.com/o/r"], check=True)
     github.open, github.merged, github.issues = GH_OPEN, GH_MERGED, GH_ISSUES
     said = described("github-auth git-workspace")
-    [(method, path, token, body)] = github.requests  # one query for all of it, as the host's gh login
+    [(method, path, token, body)] = github.requests  # one query for all of it, as the App
     assert (method, path, token, body["variables"]) == ("POST", "/graphql", "tok", {"owner": "o", "name": "r"})
     [issues] = said["lists"]  # pull requests are run items: on their run's row, or (open) under the section they name
     close = lambda n, t: {"action": "close-pr", "arg": n, "plugin": "github-auth",  # noqa: E731
@@ -863,33 +871,14 @@ def test_a_pull_requests_ci_status(sb, described, github, rollup, status):
     assert (item.get("status"), item.get("status_text")) == (status or (None, None))
 
 
-def test_github_lists_as_the_projects_gh_username(sb, described, github):
-    subprocess.run(["git", "init", "-q", sb.cwd], check=True)
-    subprocess.run(["git", "-C", sb.cwd, "remote", "add", "origin", "https://github.com/o/r"], check=True)
-    # Two accounts logged in on the host; gh's active one is not the project's.
-    sb.stub("gh", """[ "$1 $2" = "auth token" ] || exit 1
-case "$*" in *"--user alice"*) echo tok-alice ;; *--user*) exit 1 ;; *) echo tok-active ;; esac
-""")
-    described("github-auth")  # no GH_USERNAME: gh's active account
-    # GH_USERNAME is the username of the github-app the project names (auth.json fills it).
-    described("github-auth", GH_USERNAME="alice")
-    assert [r[2] for r in github.requests] == ["tok-active", "tok-alice"]
-    said = described("github-auth", GH_USERNAME="bob")  # not logged in on this host
-    assert said["lists"] == [] and said["notes"] == ["gh is not logged in as bob on github.com (gh auth login)"]
-
 
 def test_github_lists_with_the_projects_app_token_minted_once(sb, described, github):
-    """With a github-app the host needs no gh login: the page asks as the App, with a token kept
-    40 minutes in a directory only this user can read."""
+    """The page asks as the App, with a token kept 40 minutes in a directory only this user can read."""
     subprocess.run(["git", "init", "-q", sb.cwd], check=True)
     subprocess.run(["git", "-C", sb.cwd, "remote", "add", "origin", "https://github.com/o/r"], check=True)
-    plugins = sb.tmp / "plugins"
-    shutil.copytree(REPO / "plugins/github-auth", plugins / "github-auth")
-    mint = plugins / "github-auth/host/mint-gh-token.py"
-    mints = sb.tmp / "mints"
+    mint, mints = github.mint, sb.tmp / "mints"
     mint.write_text(f'#!/bin/sh\necho "$GH_APP_ID $GH_PRIVATE_KEY_FILE $REPO_URL" >>"{mints}"\necho ghs-app\n')
-    sb.stub("gh", "exit 1\n")  # not logged in: the App's token is all there is
-    app = {"PLUGIN_ROOT": plugins, "GH_APP_ID": 7, "GH_PRIVATE_KEY_FILE": "/k.pem", "GH_USERNAME": "alice"}
+    app = {"GH_USERNAME": "alice"}
     for _ in range(2):
         described("github-auth", **app)
     assert [r[2] for r in github.requests] == ["ghs-app", "ghs-app"]

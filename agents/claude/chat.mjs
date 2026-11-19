@@ -171,14 +171,23 @@ const q = query({
 });
 
 // What it can do, for the page's pickers: its commands and skills, its models.
-let model = null;
+let model = null, rows = [];
+// The list names a model by its alias (`opus`), Claude Code by its id or `default`: the alias row
+// that is the same model, so the picker shows the default as what it is.
+const head = m => (m.description || '').split(' · ')[0];
+const alias = id => {
+  const it = rows.find(m => m.value === id || m.resolvedModel === id);
+  const same = it && rows.find(m => m.value !== 'default' && (m.resolvedModel ? m.resolvedModel === it.resolvedModel : head(m) && head(m) === head(it)));
+  return (same || it)?.value ?? id;
+};
 async function describe(version) {
   const init = await q.initializationResult();
+  rows = init.models || [];
   emit({
-    type: 'ready', agent: 'claude', version: version || init.claude_code_version, model,
+    type: 'ready', agent: 'claude', version: version || init.claude_code_version, model: alias(model ?? 'default'),
     effort: EFFORTS.includes(process.env.CLAUDE_EFFORT) ? process.env.CLAUDE_EFFORT : 'medium', efforts: EFFORTS,
     account: init.account?.email || init.account?.organization || '',
-    models: (init.models || []).map(m => ({ id: m.value, name: m.displayName, description: m.description })),
+    models: rows.filter(m => m.value !== 'default').map(m => ({ id: m.value, name: m.displayName, description: m.description })),
     commands: (init.commands || []).map(c => ({ name: c.name, description: c.description, hint: c.argumentHint || '' })),
   });
 }
@@ -280,8 +289,8 @@ try {
       emit({ type: 'progress', id: m.tool_use_id, seconds: Math.round(m.elapsed_time_seconds) });
     else if (m.type === 'system') {
       if (m.subtype === 'init') {
-        if (m.model !== model) emit({ type: 'model', id: model = m.model });
         await described;
+        if (m.model !== model) emit({ type: 'model', id: alias(model = m.model) });
       } else if (m.subtype === 'session_state_changed') {
         stateful = true;
         emit({ type: 'status', state: { idle: 'idle', running: 'working', requires_action: 'question' }[m.state] });

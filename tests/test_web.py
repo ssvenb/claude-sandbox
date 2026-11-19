@@ -1076,3 +1076,16 @@ def test_claude_sign_in_gives_the_link_and_takes_back_its_code(tmp_path, monkeyp
         web.claude_login_code("good")
     web.claude_login()
     web.claude_login_code(" good ")
+
+
+def test_claude_sign_in_finds_claude_in_local_bin_off_the_path(tmp_path, monkeypatch):
+    (tmp_path / ".local/bin").mkdir(parents=True)
+    fake = tmp_path / ".local/bin/claude"
+    fake.write_text("#!/bin/sh\necho 'visit: https://claude.com/y'\nread c\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert web.claude_login() == "https://claude.com/y"
+    monkeypatch.setenv("HOME", str(tmp_path / "none"))
+    with pytest.raises(ValueError, match="not installed on the server"):
+        web.claude_login()

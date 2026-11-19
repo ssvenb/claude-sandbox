@@ -81,7 +81,9 @@ control for; the next session reads the file.
 The menu (**⋯**, top right) has the sandbox's own **Settings**: the projects, added (a name and its
 repo) and deleted (its file only, refused while it has sessions) at once, and your
 [authentications](#authentications--configclaude-sandboxauthjson) as the same form — an entry each,
-its fields those of its type — or JSON, saved readable by you alone.
+its fields those of its type — or JSON, saved readable by you alone. Its **Sign in to Claude** runs
+`claude auth login` on the server (its `~/.claude`, which `claude-home` mounts): a new tab goes on to
+claude.com's sign-in, and the code that page ends on, pasted back into the dashboard, signs it in.
 For a project whose
 `origin` is on GitHub it lists the open pull requests, with their CI status, and issues with a token of
 the project's GitHub App (`GH_AUTH`, which the plugin requires; the App needs read access to issues, checks and commit statuses, and

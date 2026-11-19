@@ -1,4 +1,5 @@
 import { BusyButton } from '../common/BusyButton';
+import { ClaudeLoginButton } from '../common/ClaudeLoginButton';
 import { Icon } from '../common/Icon';
 import { SyncButton } from '../common/SyncButton';
 import { ThemeSwitch } from '../common/ThemeSwitch';
@@ -22,6 +23,7 @@ export function BoardMenu() {
         <BusyButton className="term" onClick={() => { hide(); return configureSandbox(); }} title="Projects and authentications" aria-label="Sandbox settings">
           <Icon name="gear" /><span>Settings</span>
         </BusyButton>
+        <ClaudeLoginButton onClick={hide} />
         <SyncButton />
       </div>
     </>

@@ -169,19 +169,16 @@ def test_data_mounts_without_config_does_nothing(sb):
 
 # --- docker-cli, kvm, libvirt, netbird: host devices and sockets ---------------------------
 
-DOCKER_SOCK = "/var/run/docker.sock"
-
-
-@pytest.mark.skipif(not os.path.exists(DOCKER_SOCK), reason="no Docker socket on this host")
-def test_docker_cli_mounts_the_socket_with_its_group(sb):
+def test_docker_cli_runs_the_sandbox_under_sysbox_without_the_host_socket(sb):
+    sb.stub("docker", "echo 'io.containerd.runc.v2 runc sysbox-runc '")
     run = sb.plugin("docker-cli").ok()
-    assert run.mounts == [f"{DOCKER_SOCK}:{DOCKER_SOCK}"]
-    assert run.env == {"DOCKER_SOCKET_GID": str(os.stat(DOCKER_SOCK).st_gid)}
+    assert run.args == ["--runtime=sysbox-runc"]
 
 
-@pytest.mark.skipif(os.path.exists(DOCKER_SOCK), reason="this host has a Docker socket")
-def test_docker_cli_needs_a_daemon(sb):
-    sb.plugin("docker-cli").dies("/var/run/docker.sock not found")
+@pytest.mark.parametrize("docker", ["echo 'io.containerd.runc.v2 runc '", "exit 1"])
+def test_docker_cli_needs_sysbox(sb, docker):
+    sb.stub("docker", docker)
+    sb.plugin("docker-cli").dies("needs the Sysbox runtime")
 
 
 @pytest.mark.skipif(not os.path.exists("/dev/kvm"), reason="no /dev/kvm on this host")

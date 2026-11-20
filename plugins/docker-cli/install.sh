@@ -1,6 +1,6 @@
 #!/bin/sh
-# Build-time install (root, during docker build). Docker CLI + compose plugin from Docker's
-# official apt repo. Client only: the daemon, if any, is the host's, reached via a mounted socket.
+# Build-time install (root, during docker build). Docker Engine + CLI + compose and buildx from
+# Docker's official apt repo. The daemon runs inside the sandbox, which host.sh starts under Sysbox.
 set -eu
 
 install -m 0755 -d /etc/apt/keyrings
@@ -9,5 +9,9 @@ chmod a+r /etc/apt/keyrings/docker.asc
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" \
     > /etc/apt/sources.list.d/docker.list
 apt-get update
-apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin
+apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io \
+    docker-buildx-plugin docker-compose-plugin
 rm -rf /var/lib/apt/lists/*
+
+# The daemon's socket is root:docker 0660; the agent user drives it through the group.
+usermod -aG docker node

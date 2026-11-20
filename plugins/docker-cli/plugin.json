@@ -1,6 +1,6 @@
 {
   "name": "docker-cli",
-  "description": "Docker CLI + compose plugin, so the agent can drive a Docker daemon (the host's, via a socket mounted onto the container).",
+  "description": "Docker Engine, CLI + compose inside the sandbox, run under the host's Sysbox runtime, so the agent's containers are its own: not the host's, nor another sandbox's.",
   "priority": 5,
   "defaultEnabled": true,
   "provides": ["docker-cli"],

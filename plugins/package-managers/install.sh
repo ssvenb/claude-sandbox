@@ -1,8 +1,6 @@
 #!/bin/sh
-# Build-time install (root, during docker build). sudo only; the rule that lets the agent use it is
-# written at boot by root-init.sh.
+# Build-time install (root, during docker build). No sudo: the agent installs system packages with
+# apt-home, which unpacks them into its own home and never runs anything as root.
 set -eu
 
-apt-get update
-apt-get install -y --no-install-recommends sudo
-rm -rf /var/lib/apt/lists/*
+ln -sf /opt/plugins/package-managers/bin/apt-home /usr/local/bin/apt-home

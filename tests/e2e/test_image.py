@@ -186,10 +186,12 @@ def test_ca_certs_joins_the_trust_store(image):
     assert b.env["NODE_EXTRA_CA_CERTS"] == b.env["SSL_CERT_FILE"] == b.env["REQUESTS_CA_BUNDLE"] == bundle
 
 
-def test_device_and_socket_groups_reach_the_agent(image):
-    b = boot(image, "docker-cli kvm", "id -nG", DOCKER_SOCKET_GID=4242, KVM_DEVICE_GID=100)
-    assert {4242, 100} <= set(b.groups)
-    assert {"docker-host", "users"} <= set(b.out.split())
+def test_docker_and_device_groups_reach_the_agent(image):
+    # No Sysbox here, so the sandbox's own dockerd cannot start: reported, not fatal.
+    b = boot(image, "docker-cli kvm", "id -nG", KVM_DEVICE_GID=100)
+    assert 100 in b.groups
+    assert {"docker", "users"} <= set(b.out.split())
+    assert "Docker daemon did not start" in b.log
 
 
 def test_package_managers(image):

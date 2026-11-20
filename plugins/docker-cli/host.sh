@@ -1,11 +1,8 @@
 # shellcheck shell=bash
-# Host stage: give the container access to a Docker daemon by mounting its socket.
+# Host stage: run the sandbox under Sysbox, so the agent gets a Docker daemon of its own inside it.
+# Never the host's socket: with it the agent could reach every other sandbox and be root on the host.
 
-[ -S /var/run/docker.sock ] \
-  || die "/var/run/docker.sock not found — no Docker daemon to reach (disable the plugin with ENABLE_DOCKER_CLI=0)"
+docker info --format '{{range $name, $_ := .Runtimes}}{{$name}} {{end}}' 2>/dev/null | grep -qw sysbox-runc \
+  || die "docker-cli needs the Sysbox runtime (sysbox-runc) on this host, to give the sandbox a Docker daemon of its own: install it (https://github.com/nestybox/sysbox), or disable the plugin with ENABLE_DOCKER_CLI=0"
 
-pass_mount /var/run/docker.sock /var/run/docker.sock
-
-# A bind mount carries the host's numeric owner through, so the agent user can only reach the
-# socket via a group with that exact gid. root-init.sh needs the number.
-pass_value DOCKER_SOCKET_GID "$(stat -c '%g' /var/run/docker.sock)"
+pass_arg --runtime=sysbox-runc

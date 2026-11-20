@@ -1,4 +1,4 @@
-"""The web UI (web: the dashboard, a session's chat, the terminal) in a real browser: the
+"""The web UI (web: the dashboard, a session's chat, an agent's terminal) in a real browser: the
 dashboard, a session's chat from its first moment, tabs, closing, favicons, CI marks, day and night.
 
 The server runs from a copy of src/server with the built pages (web/dist, built first when
@@ -136,10 +136,10 @@ def board(tmp_path, browser, ui_dist):
 
 
 def terminal(board):
-    """Clicks the menu's Terminal button, opening the menu first unless it is open."""
-    if not board.is_visible("#board-menu"):
-        board.click("button[aria-label='Menu']")
-    board.click("#board-menu button[aria-label='Terminal']")
+    """The terminal tab of a session with its agent's own TUI (the stub's is a shell)."""
+    s = json.load(urllib.request.urlopen(urllib.request.Request(board.base + "/api/sessions", json.dumps(
+        {"project": "proj", "kind": "run", "ui": "terminal"}).encode())))
+    return opens_tab(board, lambda: board.evaluate(f"window.open('/session#{s['id']}')"))
 
 
 def opens_tab(page, click):
@@ -588,29 +588,12 @@ def test_the_pages_follow_the_browsers_day_or_night_unless_one_is_pinned(board):
     tab.click(".theme button[aria-label='Follow the browser']")
     assert tab.evaluate("document.documentElement.dataset.theme") is None
     assert paper(tab) == "rgb(15, 17, 35)"
-    term = opens_tab(board, lambda: terminal(board))
+    term = terminal(board)
     term.emulate_media(color_scheme="light")
     # and so does the terminal (which comes with xterm.js, loaded after the page itself)
     term.wait_for_function("window.term && term.options.theme.background === '#fbfbfe'")
     term.emulate_media(color_scheme="dark")
     term.wait_for_function("term.options.theme.background === '#0f1123'")
-
-
-def test_one_terminal_on_this_machine_at_home(board):
-    term = opens_tab(board, lambda: terminal(board))
-    term.wait_for_selector("header .what:has-text('terminal')")
-    assert term.query_selector("header strong") is None and term.title().startswith("terminal")  # of no project
-    assert not board.is_visible("#board-menu")  # the click closed the menu
-    term.wait_for_function("decodeURIComponent(document.querySelector('link[rel=icon]').href).includes('<path')")
-    term.click(".xterm")
-    term.keyboard.type("test \"$PWD\" = \"$HOME\" && echo home-$((40+2))\n")
-    term.wait_for_selector("text=home-42")  # in your home folder
-    again_opens_nothing(board, lambda: terminal(board))
-    assert board.query_selector(".window") is None and board.is_visible(NOBODY)  # a terminal is not a session
-
-    term.keyboard.type("exit 3\n")
-    term.wait_for_selector("text=exited 3")  # still there to read, not closed under you
-    assert not term.is_closed()
 
 
 def test_one_tab_per_item(board):
@@ -676,12 +659,11 @@ def test_deleting_a_session_closes_its_tabs_and_only_its_own(board):
     assert "/plugins/agent-workspace/?folder=" in code.url
     its_pr = opens_tab(board, lambda: board.click(f"{ROW} a.chip:has-text('#3')"))
     issue = opens_tab(board, lambda: board.click("text=A bug"))
-    term = opens_tab(board, lambda: terminal(board))
 
     delete(board)
     for tab in (session, code, its_pr):
         closes(tab, board)
-    assert not issue.is_closed() and not term.is_closed() and not board.is_closed()
+    assert not issue.is_closed() and not board.is_closed()
 
 
 def test_deleting_a_session_asks_before_closing_its_open_pull_request(board):
@@ -740,7 +722,7 @@ def test_stopping_keeps_the_session_and_its_tab_and_deleting_closes_them(board):
 
 def test_ctrl_c_copies_a_selection_and_interrupts_without_one(board):
     board.context.grant_permissions(["clipboard-read", "clipboard-write"])
-    term = opens_tab(board, lambda: terminal(board))
+    term = terminal(board)
     term.click(".xterm")
     term.keyboard.type("echo copy-me-$((40+2))\n")
     term.wait_for_selector("text=copy-me-42")
@@ -758,7 +740,7 @@ def test_ctrl_c_copies_a_selection_and_interrupts_without_one(board):
 
 
 def test_shift_drag_selects_while_the_program_has_the_mouse(board):
-    term = opens_tab(board, lambda: terminal(board))
+    term = terminal(board)
     term.click(".xterm")
     term.keyboard.type("printf '\\033[?1000h'; echo mouse-taken\n")  # what a TUI does
     term.wait_for_selector("text=mouse-taken")
@@ -785,7 +767,7 @@ def test_resolve_starts_a_session_on_the_items_task(board):
 @pytest.mark.parametrize("keys", ["Control+v", "Control+Shift+v"])
 def test_ctrl_v_pastes(board, keys):
     board.context.grant_permissions(["clipboard-read", "clipboard-write"])
-    term = opens_tab(board, lambda: terminal(board))
+    term = terminal(board)
     term.click(".xterm")
     term.evaluate("navigator.clipboard.writeText('pasted-$((2+3))')")
     term.keyboard.type("echo ")

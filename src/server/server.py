@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Web UI to orchestrate sandboxes: a dashboard of the configured projects with their sessions and
 whatever their enabled plugins have to show (`run.sh --web`: open pull requests and issues, say);
-a chat page per session, each in its own tab; a terminal page for your shell; and what a
+a chat page per session, each in its own tab (a terminal page for one run with its agent's TUI); and what a
 plugin serves itself (web_server: VS Code in the browser, say), on our origin under /plugins/<name>/.
 
 Runs on the HOST, as you, next to run.sh — a session is `run.sh --project <name> --chat`: the agent behind its chat bridge (agents/<name>/chat.mjs), whose events (src/services/chat/chat-bridge.mjs)
 come out of run.sh's stdout and go to the page as server-sent events, while prompts come back as
 POSTs. The page is there from the first moment: what is typed while the sandbox still builds and
-boots waits here and is handed to the agent the moment it is ready. The terminal is your
-shell in a pty, in your home folder; the terminal page loads xterm.js from a CDN.
+boots waits here and is handed to the agent the moment it is ready. There is no shell on this
+machine: every session is a sandbox. The terminal page loads xterm.js from a CDN.
 
     src/server/server.py [--port 8787] [--bind 127.0.0.1] [--allow-host NAME]... [--projects DIR]
 
@@ -114,15 +114,13 @@ def config_file(project):
 
 
 def command(project, kind, run_id, task=None, chat=False, sets=None):
-    if kind == "shell":  # the terminal: your own shell, on this machine
-        return [os.environ.get("SHELL", "/bin/sh")]
     return [str(RUN_SH), "--project", project, "--resume" if kind == "resume" else "--run-id", run_id] \
         + (["--task", task] if task else []) + (["--chat"] if chat else []) \
         + [arg for name, value in (sets or {}).items() for arg in ("--set", f"{name}={value}")]
 
 
 class Session:
-    """A terminal: your shell (of no project), or an agent's own TUI (`"ui": "terminal"`), in a pty, held by
+    """A terminal: an agent's own TUI (`"ui": "terminal"`), in a pty, held by
     src/server/holder.py so it outlives this server."""
     ui, mode = "terminal", "pty"
 
@@ -285,8 +283,6 @@ class Session:
             os.killpg(self.pid, signal.SIGHUP)  # pty.fork made the child a session leader
         except ProcessLookupError:
             pass
-        if self.kind == "shell":
-            return
         # The docker client forwards SIGHUP rather than dying of it, and what the container does
         # with it is the agent's business — so remove the container by the name run.sh gave it.
         # Before `docker run` there is none yet, and this is a no-op.
@@ -296,7 +292,7 @@ class Session:
     def status(self):
         """working, idle or question while it runs (None once it has ended, and for a terminal):
         what the agent last said it is doing, else a guess from whether output is flowing."""
-        if self.exit is not None or self.kind == "shell":
+        if self.exit is not None:
             return None
         quiet = time.time() - self.output
         if self.said == "working" and quiet > STALE:
@@ -317,7 +313,7 @@ class Session:
         return {**{k: getattr(self, k) for k in ("id", "project", "kind", "run_id", "started", "exit", "ui")},
                 "status": self.shown(), "workspace": checkout(self.project, self.run_id),
                 "plugins": described.get(self.project, {}).get("plugins", []),
-                "items": live_items(self.project, self.run_id) if self.exit is None and self.kind != "shell" else []}
+                "items": live_items(self.project, self.run_id) if self.exit is None else []}
 
 
 IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
@@ -1218,6 +1214,8 @@ def restore():
             continue
         with lock:
             sessions[s.id] = s
+        if s.kind == "shell":  # a shell on this machine, from before there were none: ended, not taken back
+            remove(s)
 
 
 def drop(s):
@@ -1304,7 +1302,7 @@ def sign_in_code(agent, code):
 
 def start(project, kind, run_id, task=None, ui=None, images=None, sets=None, once=False):
     """A new session, or the live one it would double. An agent's session is a chat unless
-    `ui` is "terminal" (its own TUI in a pty, as `run.sh` in your terminal); a shell is a terminal."""
+    `ui` is "terminal" (its own TUI in a pty, as `run.sh` in your terminal)."""
     if ui not in (None, "chat", "terminal"):
         raise ValueError("ui must be chat or terminal")
     images = pictures(images)
@@ -1314,24 +1312,21 @@ def start(project, kind, run_id, task=None, ui=None, images=None, sets=None, onc
         raise ValueError("a terminal takes no images")
     if kind == "run":
         run_id = secrets.token_hex(3)
-    elif kind == "shell":
-        run_id = None
     elif kind != "resume" or not RUN_ID.fullmatch(run_id or ""):
-        raise ValueError("kind must be run, shell, or resume with a 6-hex-char run_id")
+        raise ValueError("kind must be run, or resume with a 6-hex-char run_id")
     with lock:
         title = ""
         for s in list(sessions.values()):
-            if (s.project, s.run_id, s.kind == "shell") != (project, run_id, kind == "shell"):
+            if (s.project, s.run_id) != (project, run_id):
                 continue
-            # Two containers on one branch would push over each other, and one terminal is
-            # enough: hand back the live one. An ended one stays (its tab shows how it
-            # ended) until the next one of its run, or the next terminal, replaces it:
+            # Two containers on one branch would push over each other: hand back the live one.
+            # An ended one stays (its tab shows how it ended) until the next one of its run replaces it:
             # a run is one session however often it is resumed, and a resumed chat replays it.
             if s.exit is None:
                 return s
             title = title or getattr(s, "title", "")
             drop(s)
-        s = (Session if kind == "shell" or ui == "terminal" else Chat)(
+        s = (Session if ui == "terminal" else Chat)(
             project, kind, run_id, task, **({"images": images} if images else {}), sets=sets, once=once)
         if isinstance(s, Chat):
             s.title = s.title or title
@@ -1478,8 +1473,7 @@ class Handler(BaseHTTPRequestHandler):
             # Described afresh first: the pull request a run opened a moment ago is offered too,
             # and one closed or merged since is not.
             if s := self.session(m[1]):
-                if s.kind != "shell":
-                    describe(s.project, keep=True)
+                describe(s.project, keep=True)
                 with lock:
                     found = offers(s)
                 self.reply(200, {"offers": [{k: i.get(k) for k in ("url", "ref", "title")}
@@ -1510,9 +1504,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if url.path == "/api/sessions":
                 req = json.loads(body)
-                if req.get("kind") == "shell":  # the terminal is of no project
-                    req["project"] = ""
-                elif req.get("project") not in projects(self.server.projects_file):
+                if req.get("project") not in projects(self.server.projects_file):
                     raise ValueError("not a configured project")
                 self.reply(200, start(req["project"], req.get("kind"), req.get("run_id"), req.get("task"),
                                       req.get("ui"), req.get("images")).json())

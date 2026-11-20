@@ -9,7 +9,6 @@ const GEAR = 'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-
 
 const ICONS = {
   plus: { body: stroke('M10 4v12M4 10h12', 2.2) },
-  prompt: { body: stroke('M4 6l4 4-4 4M10 15h6', 2.2) },
   trash: { body: stroke('M3.5 5.5h13M8 5.5V3.5h4v2M5.5 5.5l.8 11h7.4l.8-11M8.5 8.5v5M11.5 8.5v5') },
   play: { body: <path d="M6 4.2v11.6a.8.8 0 0 0 1.2.7l9.3-5.8a.8.8 0 0 0 0-1.4L7.2 3.5a.8.8 0 0 0-1.2.7z" fill="currentColor" /> },
   stop: { body: <rect x="4.5" y="4.5" width="11" height="11" rx="2" fill="currentColor" /> },

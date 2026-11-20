@@ -7,12 +7,9 @@ export type Plugins = Record<string, ProjectInfo | undefined>;
 
 const URGENCY: Record<SessionStatus, number> = { question: 0, working: 1, starting: 2, idle: 3 };
 
-/** The agents' sessions: terminals are not sessions. */
-const agents = (state: AppState): Session[] => state.sessions.filter(s => s.kind !== 'shell');
-
 /** The one session of a run that carries its items: the live one, else the latest. */
 export function holder(state: AppState, project: string, runId: string): Session | undefined {
-  const of = agents(state).filter(s => s.project === project && s.run_id === runId);
+  const of = state.sessions.filter(s => s.project === project && s.run_id === runId);
   return of.find(s => s.exit === null) ?? of.pop();
 }
 
@@ -28,12 +25,12 @@ export function tiedItems(state: AppState, plugins: Plugins, s: Session): Item[]
 
 /** A project's running sessions, the ones waiting on you first. */
 export const runningIn = (state: AppState, project: string): Session[] =>
-  agents(state).filter(s => s.project === project && s.exit === null)
+  state.sessions.filter(s => s.project === project && s.exit === null)
     .sort((a, b) => URGENCY[a.status ?? 'idle'] - URGENCY[b.status ?? 'idle'] || b.started - a.started);
 
 /** A project's ended sessions, the latest first. */
 export const endedIn = (state: AppState, project: string): Session[] =>
-  agents(state).filter(s => s.project === project && s.exit !== null).reverse();
+  state.sessions.filter(s => s.project === project && s.exit !== null).reverse();
 
 /** What a project's panel lists: its plugins' sections, without the items that are on a session
  *  of their run instead, and without the sections that leaves empty (no open issue). */

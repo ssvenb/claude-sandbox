@@ -5,8 +5,6 @@ import type { Item, NewSession, Session } from '../../api/types';
 export interface DashboardActions {
   /** Starts a session, in a new tab. */
   start: (what: NewSession) => Promise<void>;
-  /** The terminal, a shell on this machine in your home folder: just the one. */
-  openTerminal: () => Promise<void>;
   stop: (s: Session) => Promise<void>;
   remove: (s: Session) => Promise<void>;
   /** A session's page, in its one tab. */

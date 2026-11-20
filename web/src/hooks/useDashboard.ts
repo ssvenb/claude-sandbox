@@ -8,7 +8,7 @@ import type { Plugins } from '../lib/board';
 import { liveItems, runItems } from '../lib/items';
 import { DASHBOARD_TAB, sessionPage, titled } from '../lib/session';
 import { deleteAfterAsking, stopAfterAsking } from '../lib/sessionActions';
-import { announceDeleted, closeTab, isFresh, itemTab, onSessionDeleted, openTab, remember, sessionTab, TERMINAL_TAB } from '../lib/tabs';
+import { announceDeleted, closeTab, isFresh, itemTab, onSessionDeleted, openTab, remember, sessionTab } from '../lib/tabs';
 import { usePolling } from './usePolling';
 
 /** What the page draws from. It is replaced and changed in place; `draw()` draws it again. */
@@ -36,7 +36,6 @@ export interface Dashboard extends Board {
   /** Describes a project again: what its plugins show now. */
   reload: (project: string) => Promise<void>;
   start: (what: NewSession) => Promise<void>;
-  openTerminal: () => Promise<void>;
   stop: (s: Session) => Promise<void>;
   remove: (s: Session) => Promise<void>;
   show: (s: Session) => void;
@@ -96,18 +95,6 @@ export function useDashboard(): Dashboard {
         void refresh();
       } catch (e) {
         w?.close();
-        alert(message(e));
-      }
-    },
-    // Brought to the front when its tab is open; the server hands back the live one when the tab was closed.
-    openTerminal: async () => {
-      const w = openTab(TERMINAL_TAB);
-      if (!w || !isFresh(w)) return;
-      try {
-        const t = await server.startSession({ project: '', kind: 'shell' });
-        w.location.replace(sessionPage(t));
-      } catch (e) {
-        w.close();
         alert(message(e));
       }
     },

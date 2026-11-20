@@ -1,7 +1,7 @@
 // What src/server/server.py says: its sessions, what a project's plugins describe, a project's settings.
 
 export type SessionStatus = 'starting' | 'working' | 'idle' | 'question';
-export type SessionKind = 'run' | 'resume' | 'shell';
+export type SessionKind = 'run' | 'resume';
 
 /** A picture pasted into a message: its media type and its bytes in base64. Held in the tray, it may
  *  be any file attached by hand, then with its name: what is not a picture goes as a file. */

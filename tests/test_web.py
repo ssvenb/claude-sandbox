@@ -96,31 +96,9 @@ def ui(tmp_path, ui_dist):
     proc.wait(5)
 
 
-def test_the_terminal_runs_at_home_streams_and_is_the_only_one(ui):
-    assert json.load(ui("/api/state"))["projects"] == [ui.project]
-    ask = {"kind": "shell"}  # of no project
-    s = json.load(ui("/api/sessions", json.dumps(ask).encode()))
-    assert json.load(ui("/api/sessions", json.dumps(ask).encode()))["id"] == s["id"]  # just the one
-    assert ui(f"/api/sessions/{s['id']}/resize?cols=100&rows=30", b"").status == 200
-    ui(f"/api/sessions/{s['id']}/input", b"test \"$PWD\" = \"$HOME\" && echo home-$((40+2)); exit 3\n")
-    seen, events = b"", ui(f"/api/sessions/{s['id']}/stream")
-    for line in events:
-        if line.startswith(b"data: ") and line != b"data: x\n":
-            seen += base64.b64decode(line[6:])
-        if line.startswith(b"event: exit"):
-            break
-    assert b"home-42" in seen
-    [ended] = json.load(ui("/api/state"))["sessions"]  # kept, so its tab can show how it ended
-    assert (ended["id"], ended["exit"]) == (s["id"], 3)
-    again = json.load(ui("/api/sessions", json.dumps(ask).encode()))  # the next one replaces it
-    assert [x["id"] for x in json.load(ui("/api/state"))["sessions"]] == [again["id"]] != [s["id"]]
-    ui(f"/api/sessions/{again['id']}/stop", b"")  # stops it, and keeps it listed
-    for _ in range(50):
-        if json.load(ui("/api/state"))["sessions"][0]["exit"] is not None:
-            break
-        time.sleep(0.1)
-    assert [x["id"] for x in json.load(ui("/api/state"))["sessions"]] == [again["id"]]
-    ui(f"/api/sessions/{again['id']}/delete", b"")  # and, ended, removes it
+def test_there_is_no_shell_on_this_machine(ui):
+    # The server runs as you: a shell of its own would be your account, to anyone who reaches the page.
+    assert ui("/api/sessions", json.dumps({"kind": "shell"}).encode()).status == 400
     assert json.load(ui("/api/state"))["sessions"] == []
 
 
@@ -137,9 +115,10 @@ def test_a_tls_proxy_puts_the_page_on_https(ui):
 @pytest.mark.parametrize("body, headers, status", [
     ({"project": "/etc", "kind": "run"}, {}, 400),                         # not a configured project
     ({"kind": "resume", "run_id": "x; rm -rf"}, {}, 400),                  # not a run id
-    ({"kind": "shell"}, {"Origin": "http://evil.example"}, 403),           # another site's page
-    ({"kind": "shell"}, {"Host": "evil.example"}, 403),                    # DNS rebinding
-    ({"kind": "shell"}, {"Host": "127.0.0.1:1", "Origin": "http://127.0.0.1:2"}, 403),  # another port's page
+    ({"kind": "shell"}, {}, 400),                                          # no shell on this machine
+    ({"kind": "run"}, {"Origin": "http://evil.example"}, 403),             # another site's page
+    ({"kind": "run"}, {"Host": "evil.example"}, 403),                      # DNS rebinding
+    ({"kind": "run"}, {"Host": "127.0.0.1:1", "Origin": "http://127.0.0.1:2"}, 403),  # another port's page
 ])
 def test_requests_that_must_not_start_anything(ui, body, headers, status):
     body = {"project": ui.project, **body}
@@ -156,7 +135,7 @@ def test_sandbox_sessions_run_run_sh_under_an_id_the_ui_knows():
     assert web.command("app", "run", "0a1b2c", None, True, {"GH_AUTH": "reviewer"})[-3:] == ["--chat", "--set", "GH_AUTH=reviewer"]
     with pytest.raises(ValueError, match="ui must be chat or terminal"):
         web.start("/p", "run", None, None, "tui")
-    for kind, run_id, task in (("shell", None, "x"), ("resume", "0a1b2c", "x"), ("run", None, 7),
+    for kind, run_id, task in (("resume", "0a1b2c", "x"), ("run", None, 7),
                                ("run", None, "  ")):
         with pytest.raises(ValueError, match="a task starts a new run"):
             web.start("/p", kind, run_id, task)
@@ -993,9 +972,9 @@ def test_a_chat_runs_on_through_a_restart_of_the_server(chat):
 
 
 def test_a_terminal_runs_on_through_a_restart_and_says_how_it_ended_while_no_server_listened(tmp_path, monkeypatch):
-    monkeypatch.setenv("SHELL", "/bin/sh")
+    monkeypatch.setattr(web, "command", lambda *_: ["/bin/sh"])
     configured(tmp_path, monkeypatch)
-    s = web.start("proj", "shell", None)
+    s = web.start("proj", "resume", "0a1b2c", ui="terminal")
     try:
         s.write(b"echo be$((40+2))\n")
         for _ in range(100):
@@ -1023,6 +1002,25 @@ def test_a_terminal_runs_on_through_a_restart_and_says_how_it_ended_while_no_ser
                 break
             time.sleep(0.05)
         assert last.exit == 3
+    finally:
+        web.sessions.clear()
+
+
+def test_a_shell_left_from_before_is_ended_not_taken_back(tmp_path, monkeypatch):
+    monkeypatch.setattr(web, "command", lambda *_: ["/bin/sh"])
+    monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
+    (tmp_path / "docker").write_text("#!/bin/sh\n")
+    (tmp_path / "docker").chmod(0o755)
+    s = web.start("", "resume", "0a1b2c", ui="terminal")
+    meta = s.dir / "meta.json"
+    meta.write_text(json.dumps({**json.loads(meta.read_text()), "kind": "shell", "run_id": None}))
+    try:
+        assert s.id not in restart()  # an older server's host shell: never again drivable from the page
+        for _ in range(100):
+            if not s.dir.exists():
+                break
+            time.sleep(0.05)
+        assert not s.dir.exists()  # its holder ended it, and what it held is let go of
     finally:
         web.sessions.clear()
 

@@ -4,7 +4,7 @@ import { useAutoGrow } from '../../hooks/useAutoGrow';
 import { useFollowScroll } from '../../hooks/useFollowScroll';
 import type { Transcript } from '../../lib/transcript';
 import { Icon } from '../common/Icon';
-import { Entries } from './Entries';
+import { Entries, Thinking } from './Entries';
 
 interface Props {
   /** The session's side chats, by id (lib/transcript.ts). */
@@ -31,6 +31,9 @@ export function SideChats({ sides, ready, ended, onAsk, onClose, onInterrupt }: 
   const active = picked === NEW ? null : picked !== null && sides.has(picked) ? picked : ids.at(-1) ?? null;
   const chat = active === null ? null : sides.get(active)!;
   const working = chat?.status === 'working';
+  // Not every answer thinks first: while its turn runs and nothing on the page moves, it says it is at it.
+  const last = chat?.log.at(-1);
+  const moving = last && ('streaming' in last ? last.streaming : last.kind === 'tools' && last.list.some(t => !t.done));
 
   const input = useRef<HTMLTextAreaElement>(null), form = useRef<HTMLFormElement>(null);
   const scroller = useRef<HTMLDivElement>(null), log = useRef<HTMLDivElement>(null);
@@ -112,6 +115,7 @@ export function SideChats({ sides, ready, ended, onAsk, onClose, onInterrupt }: 
         ref={scroller} onScroll={onScroll}>
         <div className="log" aria-live="polite" ref={log}>
           {chat && <Entries list={chat.log} />}
+          {working && !moving && <Thinking streaming />}
         </div>
       </div>
       <form className="composer" ref={form} onSubmit={submit}>

@@ -24,7 +24,7 @@ const AgentMessage = ({ text, streaming }: { text: string; streaming: boolean })
 );
 
 /** That it thought before it spoke: a line, turning while it does. What it thought is not shown. */
-const Thinking = ({ streaming }: { streaming: boolean }) => (
+export const Thinking = ({ streaming }: { streaming: boolean }) => (
   <div className="think">{streaming && <Spin />}{streaming ? 'Thinking' : 'Thought'}</div>
 );
 

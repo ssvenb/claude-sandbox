@@ -270,7 +270,6 @@
   #sidechat .tab button:hover { background: var(--sunk); color: var(--ink); }
   #sidechat .thread { flex: 1; min-height: 120px; overflow-y: auto; overscroll-behavior: contain; }
   #sidechat .log { display: flex; flex-direction: column; gap: 12px; padding: 14px; }
-  #sidechat .none { margin: 0; color: var(--muted); max-width: 44ch; }
   #sidechat .you { max-width: 92%; }
   #sidechat .composer { margin: 0 10px 12px; border-radius: 14px; }
   #sidechat .composer textarea { min-height: 40px; padding: 10px 13px 2px; font-size: 14px; }

@@ -111,12 +111,7 @@ export function SideChats({ sides, ready, ended, onAsk, onClose, onInterrupt }: 
       <div id="side-thread" className="thread" role="tabpanel" aria-labelledby={tabs.length ? `side-tab-${on}` : undefined}
         ref={scroller} onScroll={onScroll}>
         <div className="log" aria-live="polite" ref={log}>
-          {chat ? <Entries list={chat.log} /> : (
-            <p className="none">
-              Ask about this conversation here while the agent keeps working. A side chat sees what was said
-              and can read the files. It changes nothing, and the agent does not hear it.
-            </p>
-          )}
+          {chat && <Entries list={chat.log} />}
         </div>
       </div>
       <form className="composer" ref={form} onSubmit={submit}>

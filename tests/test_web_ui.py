@@ -1022,7 +1022,7 @@ def test_side_chats_are_asked_beside_the_chat_and_the_panels_are_dragged_and_put
     assert "why main?" not in tab.inner_text("#log") and tab.inner_text("header .state") == "Idle"
     # Another one, a tab of its own, lit while it is answered; Esc in its field stops its turn only.
     tab.click("#sidechat button[aria-label='New side chat']")
-    assert tab.inner_text("#sidechat .tab.on") == "New question" and tab.is_visible("#sidechat .none")
+    assert tab.inner_text("#sidechat .tab.on") == "New question" and tab.locator("#sidechat .log > *").count() == 0
     tab.keyboard.type("wait long")
     tab.keyboard.press("Enter")
     tab.wait_for_selector("#sidechat .tab.on:has-text('wait long') .lamp.working")

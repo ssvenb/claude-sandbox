@@ -20,7 +20,12 @@ export const sendPrompt = (id: string, text: string, images?: Picture[], files?:
   post(session(id) + '/prompt', { text, images, files });
 export const sendAnswer = (id: string, ask: string, reply: { answers: Answers } | { cancel: true }) =>
   post(session(id) + '/answer', { id: ask, ...reply });
-export const interruptSession = (id: string) => post(session(id) + '/interrupt');
+/** Stops the agent's turn: the conversation's, or with `side` that side chat's. */
+export const interruptSession = (id: string, side?: string) => post(session(id) + '/interrupt', side ? { side } : undefined);
+/** Asks in a side chat (a new one without `side`); answers with the chat's id. */
+export const askSide = (id: string, side: string | null, text: string) =>
+  post<{ id: string }>(session(id) + '/side', { text, ...(side && { id: side }) }).then(r => r.id);
+export const closeSide = (id: string, side: string) => post(session(id) + '/side', { id: side, close: true });
 export const chooseModel = (id: string, model: string) => post(session(id) + '/model', { id: model });
 export const chooseEffort = (id: string, level: string) => post(session(id) + '/effort', { level });
 export const stopTask = (id: string, task: string) => post(session(id) + '/task', { id: task });

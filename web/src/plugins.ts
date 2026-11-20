@@ -10,8 +10,9 @@ export interface ChatParts {
   bar?: ReactNode;
   /** With the header's buttons, which drop into a row of their own on a phone. */
   actions?: ReactNode;
-  /** Beside the chat on a desk: an `<aside className="side" popover="auto">`, which a smaller
-   *  screen shows as a popover under the header, from a `side-toggle` button in `bar`. */
+  /** Beside the chat on a desk, in the panel on its left (as wide as the reader makes it, put away
+   *  from the header): an `<aside className="side" popover="auto">`, which a smaller screen shows
+   *  as a popover under the header, from a `side-toggle` button in `bar`. */
   aside?: ReactNode;
 }
 

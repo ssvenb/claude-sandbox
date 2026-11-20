@@ -26,6 +26,11 @@ const ICONS = {
   sync: { body: stroke('M16 10a6 6 0 0 1-10.6 3.9M4 10a6 6 0 0 1 10.6-3.9M15 2.5v3.8h-3.8M5 17.5v-3.8h3.8', 1.8) },
   clip: { body: stroke('M15.5 9.5 9.6 15.4a3.5 3.5 0 0 1-5-5l6.4-6.4a2.3 2.3 0 0 1 3.3 3.3L7.9 13.7a1.2 1.2 0 0 1-1.7-1.7L12 6.2', 1.8) },
   send: { body: stroke('M10 16V4M4.5 9.5 10 4l5.5 5.5', 2.2) },
+  close: { body: stroke('M5 5l10 10M15 5 5 15', 2.2) },
+  // A window with one of its sides set off: the panel there.
+  panelLeft: { body: <>{stroke('M4.5 3.5h11a1.5 1.5 0 0 1 1.5 1.5v10a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 15V5a1.5 1.5 0 0 1 1.5-1.5zM7.5 3.5v13', 1.8)}</> },
+  panelRight: { body: <>{stroke('M4.5 3.5h11a1.5 1.5 0 0 1 1.5 1.5v10a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 15V5a1.5 1.5 0 0 1 1.5-1.5zM12.5 3.5v13', 1.8)}</> },
+  aside: { body: stroke('M4.5 4h11A1.5 1.5 0 0 1 17 5.5v7a1.5 1.5 0 0 1-1.5 1.5H9.5l-4 3v-3h-1A1.5 1.5 0 0 1 3 12.5v-7A1.5 1.5 0 0 1 4.5 4z', 1.8) },
   back: { body: stroke('M11.5 4.5 6 10l5.5 5.5', 2.2) },
   down: { body: stroke('M4.5 7.5 10 13l5.5-5.5', 2.2) },
   sun: {

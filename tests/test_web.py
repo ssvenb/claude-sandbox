@@ -3,6 +3,7 @@ may drive it."""
 import base64
 import json
 import os
+import queue
 import re
 import shutil
 import socket
@@ -898,6 +899,50 @@ def test_a_session_under_a_system_unit_goes_into_a_system_scope(tmp_path, monkey
     monkeypatch.setattr(web.subprocess, "Popen", lambda cmd, **_: spawned.append(cmd))
     web.hold(tmp_path, "pty", ["true"], tmp_path)
     assert spawned[0][:2] == ["systemd-run", "--scope"]
+
+
+def test_a_side_chat_is_asked_beside_the_conversation_and_kept_apart_from_it(chat):
+    s = chat()
+    with pytest.raises(ValueError, match="not ready"):
+        s.side(None, "too early")
+    chat.until(s, lambda s: s.ready)
+    heard = queue.Queue()
+    s.listeners.append(heard)
+    first = s.side(None, "why main?")
+    assert first == "1" and s.side(None, "wait long") == "2"  # each a chat of its own
+    chat.until(s, lambda s: s.sides["1"]["state"] == "idle")
+    assert s.sides["2"]["state"] == "working" and s.status() == "idle" and [e["type"] for e in s.events] == ["boot"]  # the run's conversation knows nothing of it
+    s.tell({"type": "interrupt", "side": "2"})
+    chat.until(s, lambda s: s.sides["2"]["state"] == "idle")
+    s.side("1", "and then?")
+    chat.until(s, lambda s: s.sides["1"]["state"] == "idle")
+    snap = json.loads(json.dumps(s.snapshot()))
+    assert [(c["id"], c["title"], c["state"]) for c in snap["sides"]] == [("1", "why main?", "idle"), ("2", "wait long", "idle")]
+    assert [(e["type"], e.get("text")) for e in snap["sides"][0]["events"]] == [  # streamed text folded, as in the conversation
+        ("user", "why main?"), ("text", "About “why main?”: it changed `main()`. "), ("turn", None),
+        ("user", "and then?"), ("text", "About “and then?”: it changed `main()`. "), ("turn", None)]
+    told = []
+    while not heard.empty():
+        told.append(heard.get())
+    told = [e for e in told if e != {"type": "status", "state": "idle"}]  # the agent's own, said as it got ready
+    assert told[0] == {"type": "user", "side": "1", "text": "why main?"} and all(e.get("side") in ("1", "2") for e in told)
+    back = restart()[s.id]  # kept through a restart of the server
+    assert [c["title"] for c in back.snapshot()["sides"]] == ["why main?", "wait long"]
+    assert back.side("2", None, close=True) == "2" and list(back.sides) == ["1"]
+    assert back.side(None, "a third") == "3"  # an id is not used twice
+    with pytest.raises(ValueError, match="no such side chat"):
+        back.side("2", "gone")
+    chat.until(back, lambda s: s.sides["3"]["state"] == "idle")  # the agent has read all it was sent
+    commands = [json.loads(line) for line in (chat.tmp / "commands").read_text().splitlines()]
+    assert {"type": "side", "id": "2", "close": True} in commands and {"type": "interrupt", "side": "2"} in commands
+
+
+def test_a_resumed_chat_has_the_side_chats_its_agent_kept(chat):
+    s = chat("resume", "0a1b2c")
+    chat.until(s, lambda s: s.ready)
+    assert [(c["id"], c["title"], [e["type"] for e in c["events"]]) for c in s.snapshot()["sides"]] == [
+        ("1", "What was asked beside it", ["user", "text"])]
+    assert s.side(None, "another") == "2"  # counted on from the ones it has
 
 
 def test_sync_pulls_installs_and_restarts_only_under_systemd(monkeypatch):

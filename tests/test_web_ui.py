@@ -1022,12 +1022,14 @@ def test_side_chats_are_asked_beside_the_chat_and_the_panels_are_dragged_and_put
     assert "why main?" not in tab.inner_text("#log") and tab.inner_text("header .state") == "Idle"
     # Another one, a tab of its own, lit while it is answered; Esc in its field stops its turn only.
     tab.click("#sidechat button[aria-label='New side chat']")
-    assert tab.inner_text("#sidechat .tab.on") == "New question" and tab.is_visible("#sidechat .none")
+    assert tab.inner_text("#sidechat .tab.on") == "New question" and tab.locator("#sidechat .log > *").count() == 0
     tab.keyboard.type("wait long")
     tab.keyboard.press("Enter")
     tab.wait_for_selector("#sidechat .tab.on:has-text('wait long') .lamp.working")
+    tab.wait_for_selector("#sidechat .think:has-text('Thinking')")  # nothing said yet: it says it is at it
     tab.keyboard.press("Escape")
     tab.wait_for_selector("#sidechat .say:has-text('About “wait long”')")
+    assert not tab.is_visible("#sidechat .think")
     assert {"type": "interrupt", "side": "2"} in [json.loads(line) for line in board.commands.read_text().splitlines()]
     tab.click("#sidechat [role=tab]:has-text('What was asked')")  # back to the first, with all that was said in it
     assert tab.locator("#sidechat .you").all_inner_texts() == ["What was asked beside it", "why main?"]

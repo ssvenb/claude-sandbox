@@ -10,7 +10,9 @@ interface ModelProps {
 const named = (m: Model): string => (m.name === m.id || !m.description ? m.name : `${m.name} (${m.description.split(' · ')[0]})`);
 
 /** The agent's models, once it said which it has. */
-export function ModelPicker({ models, model, onChoose }: ModelProps) {
+export function ModelPicker({ models: offered, model, onChoose }: ModelProps) {
+  // Claude's `default` row, which its bridge drops, may still be in an offer cached before it did.
+  const models = offered.filter(m => m.id !== 'default');
   const known = models.some(m => m.id === model);
   return (
     <select id="model" aria-label="Model" hidden={!models.length} value={models.length ? model || models[0]!.id : ''} onChange={e => onChoose(e.target.value)}>

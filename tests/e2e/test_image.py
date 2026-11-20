@@ -90,7 +90,7 @@ def test_a_chat_boots_into_the_agents_bridge_and_its_sdk(image):
 
 
 def test_the_agent_cli_and_every_plugins_tools_are_installed(image):
-    tools = ["/usr/bin/gh", "docker", "gcloud", "qemu-img", "cloud-localds", "virsh", "ssh", "sudo",
+    tools = ["/usr/bin/gh", "docker", "gcloud", "qemu-img", "cloud-localds", "virsh", "ssh", "apt-home",
              "terraform", "ruff", "chromium", "/usr/local/bin/netbird", AGENT]
     if AGENT == "claude":
         tools.append("playwright-mcp")
@@ -195,10 +195,11 @@ def test_docker_and_device_groups_reach_the_agent(image):
 
 
 def test_package_managers(image):
-    probe = ("sudo -n apt-get --version >/dev/null && echo apt-ok\n"
-             "sudo -n /usr/bin/id >/dev/null 2>&1 || echo id-refused\nnpm config get prefix")
+    probe = ("command -v sudo || echo no-sudo\n"
+             "apt-home ./x.deb 2>&1 | grep -q 'not a package name' && echo refused\n"
+             "apt-home tree >/dev/null && tree --version | cut -d' ' -f1\nnpm config get prefix")
     b = boot(image, "package-managers", probe)
-    assert b.out.splitlines() == ["apt-ok", "id-refused", "/home/node/.npm-global"]
+    assert b.out.splitlines() == ["no-sudo", "refused", "tree", "/home/node/.npm-global"]
     assert b.env["PATH"].startswith("/home/node/.npm-global/bin:/home/node/.local/bin:")
 
 

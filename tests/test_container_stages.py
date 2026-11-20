@@ -178,7 +178,7 @@ def test_kvm_briefing_includes_the_projects_own(sb):
 @pytest.mark.parametrize("plugin, phrase", [
     ("libvirt", "`virsh` talks to the host's system daemon"),
     ("screenshots", "/home/node/Pictures/Screenshots"),
-    ("package-managers", "sudo apt-get update"),
+    ("package-managers", "`apt-home <pkg>...` installs Debian packages"),
 ])
 def test_static_briefings(sb, plugin, phrase):
     assert phrase in stage(sb, plugin).prompt
@@ -196,7 +196,7 @@ def test_package_managers_install_into_the_agents_home(sb):
                 'echo "$NPM_CONFIG_PREFIX $PIP_BREAK_SYSTEM_PACKAGES"; echo "$PATH"').ok()
     prefix, path = run.out.splitlines()
     assert prefix == f"{sb.home}/.npm-global 1"
-    assert path.startswith(f"{sb.home}/.npm-global/bin:{sb.home}/.local/bin:")
+    assert path.startswith(f"{sb.home}/.npm-global/bin:{sb.home}/.local/bin:{sb.home}/.local/usr/bin:")
     assert (sb.home / ".npm-global/bin").is_dir() and (sb.home / ".local/bin").is_dir()
 
 

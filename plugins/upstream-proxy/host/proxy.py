@@ -233,7 +233,14 @@ class _Route:
         self.methods = {m.upper() for m in methods} if methods else None
         self.paths = tuple(cfg.get("allowPaths") or ["/"])
         self.max_body = int(cfg.get("maxBodyBytes", DEFAULT_MAX_BODY))
-        self.injector = _Injector(cfg.get("auth", {}))
+        auth = cfg.get("auth") or {}
+        # A route still in the old shape ({type, valueEnv, …}) would otherwise run with no
+        # credential at all, and the upstream answers the agent's request with a bare 401.
+        stale = sorted(set(auth) - {"credential", "header", "accessBoundary"})
+        if stale:
+            raise ValueError(f"route '{self.name}': auth.{', auth.'.join(stale)} is not read any more; "
+                             "name an authentication in auth.credential instead")
+        self.injector = _Injector(auth)
         # Fail at startup, not on the agent's first request: a bad login or a missing
         # tokenCreator grant should stop run.sh while the user is still watching.
         if self.injector.kind() == "gcp-service-account":

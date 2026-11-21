@@ -265,6 +265,7 @@ def test_ports_the_agent_listens_on_are_offered_to_the_host(image, tmp_path):
     only, shows up as a socket in the directory its host.sh mounts."""
     sockets = tmp_path / "sockets"
     sockets.mkdir()
+    sockets.chmod(0o777)  # as host/lease.py makes it: the agent's to write, whichever uid it has
     probe = ("python3 -m http.server 8123 --bind 127.0.0.1 >/dev/null 2>&1 &\n"
              "python3 -m http.server 8125 --bind 127.0.0.1 >/dev/null 2>&1 & sleep 3")
     b = boot(image, "ports", probe, mounts=[f"{sockets}:/run/ports/sockets"], PORTS="8123 9229")

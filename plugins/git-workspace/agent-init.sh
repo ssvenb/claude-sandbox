@@ -3,9 +3,13 @@
 # (see plugin.json) so the clone and the pushes authenticate.
 
 # A fresh, isolated clone — no bind-mount to the host checkout.
-BASE_BRANCH="${BASE_BRANCH:-main}"
 git clone "$REPO_URL" /workspace
 cd /workspace
+# Unset only for a URL repo with no BASE_BRANCH: the clone's origin/HEAD is the default branch.
+if [ -z "${BASE_BRANCH:-}" ]; then
+  BASE_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null) || BASE_BRANCH=origin/main
+  BASE_BRANCH=${BASE_BRANCH#origin/}
+fi
 
 
 # Prefix and commit identity come from the running agent's manifest, so a copilot run is not signed

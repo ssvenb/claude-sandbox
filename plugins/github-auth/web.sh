@@ -9,14 +9,17 @@
 # session is deleted (WEB_ACTION close-pr, run only once the page's user said yes); and an open
 # one whose run has no session listed, under "Pull requests" on the project's panel, to resume.
 
-git -C "$HOST_CWD" remote get-url origin >/dev/null 2>&1 || return 0
+# The repo: the checkout's origin, or for a project whose repo is a git URL (no checkout, HOST_CWD
+# empty) that URL.
+github_origin=${REPO_URL:-}
+[ -z "$HOST_CWD" ] || github_origin=$(git -C "$HOST_CWD" remote get-url origin 2>/dev/null) || return 0
+[ -n "$github_origin" ] || return 0
 
 # github_app_token: an installation token of the project's App for its origin, in gh_token. The
 # page asks every minute, and minting is two API calls, so one is kept for 40 minutes (tokens last
 # 60) in a directory only this user can read; failing, the minter's complaint becomes a note.
 github_app_token() {
-  local origin dir file err
-  origin=$(git -C "$HOST_CWD" remote get-url origin)
+  local origin=$github_origin dir file err
   dir=${XDG_CACHE_HOME:-$HOME/.cache}/claude-sandbox/github-auth
   file=$dir/$(printf '%s\n' "$GH_APP_ID" "${GH_HOST:-github.com}" "$origin" | cksum | cut -d" " -f1)
   if [ -n "$(find "$file" -mmin -40 2>/dev/null)" ]; then
@@ -46,7 +49,7 @@ github_app_token || return 0
 github() {
   local err rc=0
   err=$(mktemp)
-  github_out=$(GH_TOKEN=$gh_token GH_HOST="${GH_HOST:-github.com}" REPO_URL="$(git -C "$HOST_CWD" remote get-url origin)" \
+  github_out=$(GH_TOKEN=$gh_token GH_HOST="${GH_HOST:-github.com}" REPO_URL="$github_origin" \
     timeout 30 python3 "$PLUGIN_DIR/host/github.py" "$@" 2>"$err") || rc=$?
   [ "$rc" = 0 ] || web_note "github $1: $(head -n 1 "$err" | grep . || echo "failed or timed out")"
   rm -f "$err"

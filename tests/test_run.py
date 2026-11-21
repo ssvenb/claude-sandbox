@@ -295,20 +295,19 @@ def test_project_names_its_file_and_the_repo_it_works_on(sb, run_sh):
     assert done.returncode and "names no repo" in done.stderr
 
 
-def test_a_projects_repo_may_be_a_git_url_cloned_and_fetched_on_this_machine(sb, run_sh):
-    origin = sb.tmp / "origin"
-    git = lambda *a: subprocess.run(["git", *a], check=True, capture_output=True)  # noqa: E731
-    git("init", "-q", "-b", "main", str(origin))
-    git("-C", str(origin), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "one")
+def test_a_projects_repo_may_be_a_git_url_never_cloned_on_this_machine(sb, run_sh):
+    """A URL repo (private ones too) is cloned only in the container: HOST_CWD is empty, REPO_URL
+    the URL, and the plugins that need a checkout here refuse it."""
     listing = sb.home / ".config/claude-sandbox/projects"
     listing.mkdir(parents=True)
-    (listing / "app.json").write_text(json.dumps({"repo": f"file://{origin}", **BASE}))
-    clone = sb.home / ".cache/claude-sandbox/repos/app"
-    for _ in range(2):  # cloned, then fetched
-        done = run_sh("--project", "app", config=None, CLAUDE_CODE_OAUTH_TOKEN="t")
-        assert done.returncode == 0, done.stderr
-        assert f"{clone}:/workspace" in calls(done, "run")[0]
-    git("-C", str(origin), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "two")
-    run_sh("--project", "app", config=None, CLAUDE_CODE_OAUTH_TOKEN="t")
-    assert subprocess.run(["git", "-C", str(clone), "log", "-1", "--format=%s", "origin/main"],
-                          capture_output=True, text=True).stdout.strip() == "two"
+    url = "https://github.com/acme/private-widgets.git"  # unreachable: nothing may fetch it
+    plugins = {**BASE["plugins"], "cwd-workspace": {"enabled": False}, "agent-workspace": {"enabled": True},
+               "branch-guard": {"enabled": False}}
+    (listing / "app.json").write_text(json.dumps({**BASE, "repo": url, "plugins": plugins}))
+    done = run_sh("--project", "app", config=None, CLAUDE_CODE_OAUTH_TOKEN="t", GIT_TERMINAL_PROMPT="0")
+    assert done.returncode == 0, done.stderr
+    assert any("/private-widgets-" in a and a.endswith(":/workspace") for a in calls(done, "run")[0])
+    assert not (sb.home / ".cache/claude-sandbox/repos").exists()
+    (listing / "app.json").write_text(json.dumps({**BASE, "repo": url}))  # cwd-workspace on
+    done = run_sh("--project", "app", config=None, CLAUDE_CODE_OAUTH_TOKEN="t")
+    assert done.returncode and "no checkout on this machine to mount" in done.stderr

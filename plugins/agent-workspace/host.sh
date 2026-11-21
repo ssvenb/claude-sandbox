@@ -4,7 +4,9 @@
 # still clones into it and owns the branch. One directory per run.
 
 AGENT_WORKSPACE_DIR="${AGENT_WORKSPACE_DIR:-$HOME/.agent-workspaces}"
-run_dir="$AGENT_WORKSPACE_DIR/$(basename "$HOST_CWD")-$RUN_DATE-$RUN_ID"
+# Named after the checkout, or for a git-URL project (no checkout) after the repo in the URL.
+repo_name=$(basename "${HOST_CWD:-${REPO_URL:-repo}}" .git)
+run_dir="$AGENT_WORKSPACE_DIR/${repo_name##*:}-$RUN_DATE-$RUN_ID"
 
 # On --resume the date segment is the day the run was created, not today: reuse the directory that
 # already carries this RUN_ID rather than opening a second one for the same run.

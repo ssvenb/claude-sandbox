@@ -141,6 +141,12 @@ def test_an_explicit_branch_prefix_is_also_the_identity(image):
     assert b.out.splitlines()[:3] == ["feature/20260102-abc123", "feature", "feature@sandbox.local"]
 
 
+def test_without_a_base_branch_the_clones_default_branch_is_cut_from(image):
+    b = boot(image, "git-workspace", GIT_PROBE, REPO_URL="/srv/origin.git")  # a URL repo's run
+    assert b.out.splitlines()[3] == "initial"
+    assert "created for this sandbox run (RUN_ID=abc123) off main" in b.briefing
+
+
 def test_resume_finds_the_runs_branch_and_its_pull_request(image):
     b = boot(image, "git-workspace", GIT_PROBE, REPO_URL="/srv/origin.git", BASE_BRANCH="main",
              RESUME=1, RUN_ID="dead01")

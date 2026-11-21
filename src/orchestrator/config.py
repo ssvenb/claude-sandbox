@@ -2,7 +2,7 @@
 (`run.sh --project <name>`), and the settings it layers over your environment.
 
 Configuration is per-project: the file names the repo the agent works on ("repo": a path on this
-machine, or a git URL, cloned to ~/.cache/claude-sandbox/repos/<name>) and how it wants to be
+machine, or a git URL, cloned only in the container) and how it wants to be
 sandboxed; the sandbox's own directory contributes nothing. Lowest to highest precedence:
 
   1. a plugin manifest's defaultEnabled, and each setting's built-in default
@@ -31,14 +31,11 @@ decides what, if anything, crosses over.
 from __future__ import annotations
 
 import json
-import os
 import re
-import subprocess
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import SANDBOX, Die, say
+from . import SANDBOX, Die
 
 _KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _BLANK = " \t\n\v\f\r"  # bash's [[:space:]]
@@ -156,28 +153,17 @@ _URL = re.compile(r"[a-z][a-z0-9+.-]*://|[\w.-]+@[\w.-]+:")  # https://…, ssh:
 
 
 def repo_dir(env: dict, name: str, repo) -> str:
-    """The project's repo on this machine: its path, or for a git URL a clone of it kept under
-    ~/.cache/claude-sandbox/repos/<name>, fetched afresh."""
+    """The project's repo on this machine: its path, or "" for a git URL — nothing is cloned on the
+    host; git-workspace clones the URL in the container, with the project's credentials."""
     if not isinstance(repo, str) or not repo.strip():
         raise Die(f"Project '{name}' names no repo: set \"repo\" in its file to a path on this machine or a git URL.")
-    if not _URL.match(repo):
-        path = Path(repo).expanduser()
-        if not path.is_absolute():
-            raise Die(f"Project '{name}': repo '{repo}' must be an absolute path (or ~/…) or a git URL.")
-        if not path.is_dir():
-            raise Die(f"Project '{name}': repo {path} is not a directory.")
-        return str(path)
-    cache = Path(env.get("XDG_CACHE_HOME") or Path(env.get("HOME") or Path.home()) / ".cache")
-    path = cache / "claude-sandbox/repos" / name
-    git = {"env": {**os.environ, **env, "GIT_TERMINAL_PROMPT": "0"}, "stdout": sys.stderr, "stdin": subprocess.DEVNULL}
-    if not (path / ".git").exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if subprocess.run(["git", "clone", "--quiet", repo, str(path)], **git).returncode:
-            raise Die(f"Project '{name}': could not clone {repo}")
-    else:  # the URL may have changed since the clone; a failed fetch leaves the last one standing
-        subprocess.run(["git", "-C", str(path), "remote", "set-url", "origin", repo], **git)
-        if subprocess.run(["git", "-C", str(path), "fetch", "--quiet", "--prune", "origin"], **git).returncode:
-            say(f"⚠️  Project '{name}': could not fetch {repo}; working from the last fetch", file=sys.stderr)
+    if _URL.match(repo):
+        return ""
+    path = Path(repo).expanduser()
+    if not path.is_absolute():
+        raise Die(f"Project '{name}': repo '{repo}' must be an absolute path (or ~/…) or a git URL.")
+    if not path.is_dir():
+        raise Die(f"Project '{name}': repo {path} is not a directory.")
     return str(path)
 
 

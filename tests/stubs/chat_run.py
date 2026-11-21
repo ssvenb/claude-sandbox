@@ -2,7 +2,7 @@
 """Stands in for run.sh under the web UI's tests (and for looking at the pages without Docker).
 
 `--web` prints web.json from next to it, `--web-action` is logged to `actions`. A session without
-`--chat` is the old terminal "agent": it says it has a question, waits for a line, exits 4. With
+`--chat` is the agent's own TUI: it says it has a question, then is a shell (to type into). With
 `--chat` it is a sandbox that boots (a few lines of output, STUB_BOOT seconds apart), then an
 agent behind a chat bridge, speaking src/services/chat/chat-bridge.mjs on stdio (the boot waits for as long
 as a file `hold` lies next to this one): each prompt gets a turn
@@ -58,8 +58,7 @@ if "--chat" not in args:
     print(f"agent {args[1]} at work" + (f" on: {task}" if task else ""), flush=True)
     sys.stdout.write("\033]1337;SetUserVar=agent_status=%s\007" % base64.b64encode(b"question").decode())
     sys.stdout.flush()
-    sys.stdin.readline()
-    sys.exit(4)
+    os.execv("/bin/sh", ["sh"])  # a TUI to type into: the terminal page's keys are tested on it
 
 BOOT = float(os.environ.get("STUB_BOOT", "0.05"))
 PACE = float(os.environ.get("STUB_PACE", "0"))

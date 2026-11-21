@@ -18,7 +18,7 @@ import { endedIn, isLive, listedIn, runningIn, tiedItems } from '../lib/board';
 
 export default function Dashboard() {
   const board = useDashboard();
-  const { state, plugins, loaded, reload, start, openTerminal, stop, remove, show, openItem } = board;
+  const { state, plugins, loaded, reload, start, stop, remove, show, openItem } = board;
   const [settings, setSettings] = useState<OpenSettings | null>(null);
   const openings = useRef(0);
 
@@ -39,8 +39,8 @@ export default function Dashboard() {
       alert(message(e));
     }
   }, [projects]);
-  const actions = useMemo<DashboardActions>(() => ({ start, openTerminal, stop, remove, show, openItem, configure, configureSandbox }),
-    [start, openTerminal, stop, remove, show, openItem, configure, configureSandbox]);
+  const actions = useMemo<DashboardActions>(() => ({ start, stop, remove, show, openItem, configure, configureSandbox }),
+    [start, stop, remove, show, openItem, configure, configureSandbox]);
 
   const itemsOf = (s: Session) => tiedItems(state, plugins, s);
   const groups = state.projects.map(project => ({ project, sessions: runningIn(state, project) })).filter(g => g.sessions.length);

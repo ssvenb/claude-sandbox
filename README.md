@@ -69,9 +69,8 @@ answer first; each says what it was asked and what it is doing right now, with i
 its ports and, top right, its stop button); with nothing running that side is not there, and the
 projects take the width. On the right is every listed **project** with what its plugins list (its
 issues), its ended sessions at the foot of its panel, a **+** button for a
-new session (`run.sh --project <name> --chat`) and a terminal
-button (**>_**) for a shell on this machine in the project — one per project, its tab brought to
-the front when it is already open. The gear button opens the project's settings, saved to its
+new session (`run.sh --project <name> --chat`). There is no shell on this machine: the server
+runs as you, so one would be your account to anyone who reaches the page. The gear button opens the project's settings, saved to its
 file (its repo among them): a form drawn from what the sandbox, each agent and each plugin declare (see
 [Declaring settings](#declaring-settings)) — a switch per plugin, and per setting a toggle, text
 field, number field, dropdown, list or name/value editor, with its default shown and a **reset**
@@ -152,7 +151,7 @@ and keeps it listed among its project's ended sessions, its tab showing how it e
 chat, VS Code and its pull request (the last two only while the page that opened them has
 not been reloaded).
 
-In a project's terminal tab, **Ctrl+C** copies the selection (and interrupts as usual when nothing is
+In a terminal tab (an agent's TUI, `"ui": "terminal"`), **Ctrl+C** copies the selection (and interrupts as usual when nothing is
 selected), **Ctrl+Shift+C** always copies, **Ctrl+V** and **Ctrl+Shift+V** paste; where the program has taken the mouse, as the agent's
 interface does, select with **Shift+drag**.
 

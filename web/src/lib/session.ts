@@ -5,10 +5,10 @@ import type { Session, SessionStatus } from '../api/types';
 export const projectName = (path: string): string => path.replace(/\/+$/, '').split('/').pop() ?? '';
 
 /** A session's short name: its run. */
-export const label = (s: Session): string => (s.kind === 'shell' ? 'terminal' : s.run_id + (s.kind === 'resume' ? ' (resumed)' : ''));
+export const label = (s: Session): string => s.run_id + (s.kind === 'resume' ? ' (resumed)' : '');
 
 /** What a session is called: what it was first asked, else its run. */
-export const titled = (s: Session): string => s.title || (s.kind === 'shell' ? 'Terminal' : 'Session ' + s.run_id);
+export const titled = (s: Session): string => s.title || 'Session ' + s.run_id;
 
 export const SAYS: Record<SessionStatus, string> = {
   starting: 'starting its sandbox',

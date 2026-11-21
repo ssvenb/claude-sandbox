@@ -1,5 +1,5 @@
-// A terminal: a project's shell on this machine (or an agent's own TUI, for a session started with
-// "ui": "terminal"). An agent's session is otherwise a chat: see pages/Chat.
+// A terminal: an agent's own TUI, for a session started with "ui": "terminal". An agent's
+// session is otherwise a chat: see pages/Chat.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getState } from '../api/sessions';
 import type { Session } from '../api/types';
@@ -30,14 +30,13 @@ export default function TerminalPage() {
   useEffect(() => onSessionDeleted(s => { if (s.id === id) window.close(); }), [id]);
 
   useTabIdentity(session ? `${projectName(session.project)} ${label(session)}`.trim() : null,
-    !session || session.kind === 'shell' ? 'shell' : session.status ?? 'unlit');
+    session?.status ?? 'unlit');
 
-  const shell = (s: Session) => (s.kind === 'shell' ? 'terminal' : 'session');
   const stop = async (s: Session) => {
-    if (await stopAfterAsking(s, `Stop this ${shell(s)}?`)) await refresh();
+    if (await stopAfterAsking(s, 'Stop this session?')) await refresh();
   };
   const remove = async (s: Session) => {
-    if (!await deleteAfterAsking(s, `Stop and delete this ${shell(s)}?`)) return;
+    if (!await deleteAfterAsking(s, 'Stop and delete this session?')) return;
     announceDeleted(s);
     window.close();
     await refresh();  // still here: this tab was not opened by the dashboard, so it may not close itself

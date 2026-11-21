@@ -7,7 +7,7 @@
 # scripts, one per privilege stage:
 #   host.sh        sourced here, on the host — validates config, appends to DOCKER_ARGS
 #   web.sh         sourced here, on the host, by `run.sh --web` — what the web UI shows for a project
-#   root-init.sh   sourced by entrypoint.sh as root, where secrets live
+#   root-init.sh   sourced by entrypoint.sh as root: setup that needs root, not a boundary
 #   agent-init.sh  sourced by agent-setup.sh as the unprivileged 'node' user
 #
 # Enablement is resolved ONCE, by src/orchestrator/plugins.py, and handed to the stages and the container

@@ -6,7 +6,6 @@
   "provides": ["dev-server"],
   "requires": [],
   "requiredEnv": [],
-  "secrets": [],
   "settings": [
     {
       "key": "command",

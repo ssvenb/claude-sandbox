@@ -1,7 +1,9 @@
 # shellcheck shell=sh
-# Root stage: bring this sandbox's own NetBird client up before the agent starts. Only root can
-# create the WireGuard interface and only root holds $NB_SETUP_KEY (entrypoint.sh drops it before
-# handing over), so the agent gets mesh connectivity it cannot reconfigure or re-enrol elsewhere.
+# Root stage: bring this sandbox's own NetBird client up before the agent starts; creating the
+# WireGuard interface needs root. The setup key is in the container, so it is the agent's (it is
+# root whenever it wants): use a key that may enrol no more than this sandbox should reach —
+# ephemeral peers, a group with narrow policies. It is unset below only so it does not sit in the
+# agent's environment, to be printed or committed by mistake.
 
 # Peer name in the dashboard: traceable back to this run. DNS-safe, like RUN_ID.
 NB_PEER_NAME="${NB_HOSTNAME:-sandbox-${RUN_ID:-$(openssl rand -hex 3)}}"
@@ -20,3 +22,4 @@ else
   echo "⚠️  NetBird enrollment failed — see /var/log/netbird.log (continuing without the mesh)"
   export NB_ENROLLED=0
 fi
+unset NB_SETUP_KEY

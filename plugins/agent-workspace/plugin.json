@@ -7,7 +7,6 @@
   "requires": [],
   "conflicts": ["cwd-workspace"],
   "requiredEnv": [],
-  "secrets": [],
   "settings": [
     {
       "env": "AGENT_WORKSPACE_DIR",

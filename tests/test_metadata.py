@@ -1,4 +1,4 @@
-"""plugins/gcp-auth/root/metadata.py: the stand-in GCE metadata server."""
+"""plugins/gcp-auth/bin/metadata.py: the stand-in GCE metadata server."""
 import http.client
 import json
 import os
@@ -10,7 +10,7 @@ import pytest
 
 from conftest import load
 
-metadata = load("plugins/gcp-auth/root/metadata.py")
+metadata = load("plugins/gcp-auth/bin/metadata.py")
 SA = "sandbox@proj.iam.gserviceaccount.com"
 V1 = "/computeMetadata/v1/"
 
@@ -103,17 +103,3 @@ def test_missing_token_file_is_503(server, token_file):
 def test_head_has_no_body(server):
     resp, body = get(server, V1 + "project/project-id", method="HEAD")
     assert (resp.status, body, resp.getheader("Content-Length")) == (200, "", "4")
-
-
-@pytest.mark.parametrize("ours", [True, False])
-def test_only_this_sandboxs_processes_are_answered(monkeypatch, token_file, ours):
-    monkeypatch.setattr(metadata, "from_this_sandbox", lambda peer, local: ours)
-    s = serve(metadata.Server((metadata.LOOPBACK, 0), metadata.handler_for(str(token_file), SA, "proj")))
-    try:
-        if ours:
-            assert get(s, V1 + "project/project-id")[1] == "proj"
-        else:
-            with pytest.raises((http.client.RemoteDisconnected, ConnectionResetError)):
-                get(s, V1 + "project/project-id")
-    finally:
-        s.shutdown()

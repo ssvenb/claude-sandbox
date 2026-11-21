@@ -88,26 +88,24 @@ RUN set -eu; for f in /opt/plugins/*/install.sh; do \
       fi; \
       echo "📦 $f"; sh "$f"; \
     done
-# bin/ is world-executable (hooks run as the agent), root/ is root-only (secrets), and everything
-# lands root-owned outside /workspace so the agent cannot edit its own guardrails.
+# bin/ is world-executable (the agent runs it: hooks, helpers), and everything lands root-owned
+# outside /workspace, so the agent does not edit its guardrails by accident. Guardrails only: the
+# agent is root here whenever it wants (the docker group), so nothing in the image is a boundary.
 RUN chown -R root:root /opt/plugins \
     && find /opt/plugins -type d -exec chmod 555 {} + \
     && find /opt/plugins -type f -exec chmod 444 {} + \
-    && find /opt/plugins -type f -path '*/bin/*' -exec chmod 555 {} + \
-    && find /opt/plugins -type f -path '*/root/*' -exec chmod 500 {} +
+    && find /opt/plugins -type f -path '*/bin/*' -exec chmod 555 {} +
 
-# The frameworks the boot scripts source, the loopback-ownership check root helpers import, the
-# settings merger, and the base policy the plugin settings.json fragments are merged into at runtime.
+# The frameworks the boot scripts source, the settings merger, and the base policy the plugin settings.json fragments are merged into at runtime.
 COPY src/contract/container/plugins.sh /usr/local/lib/sandbox/plugins.sh
 COPY src/contract/container/agents.sh /usr/local/lib/sandbox/agents.sh
-COPY src/shared/peer_owner.py /usr/local/lib/sandbox/peer_owner.py
 # What the agents' chat bridges (agents/<name>/chat.mjs) share: the wire to the web UI.
 COPY src/services/chat/chat-bridge.mjs /usr/local/lib/sandbox/chat-bridge.mjs
 COPY src/services/settings/merge-settings.py /usr/local/bin/merge-settings.py
 COPY src/services/settings/settings-base.json /usr/local/share/sandbox/settings-base.json
 RUN chmod 555 /usr/local/bin/merge-settings.py \
     && chmod 444 /usr/local/lib/sandbox/plugins.sh /usr/local/lib/sandbox/agents.sh \
-                 /usr/local/lib/sandbox/peer_owner.py /usr/local/lib/sandbox/chat-bridge.mjs \
+                 /usr/local/lib/sandbox/chat-bridge.mjs \
                  /usr/local/share/sandbox/settings-base.json
 
 # entrypoint.sh boots as root; agent-setup.sh is the part it runs as 'node'.

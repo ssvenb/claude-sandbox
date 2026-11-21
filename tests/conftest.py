@@ -23,11 +23,6 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 
-# The root helpers import peer_owner from /usr/local/lib/sandbox (where the image installs it);
-# importing it here first makes them use this checkout's copy.
-sys.path.insert(0, str(REPO / "src/shared"))
-import peer_owner  # noqa: E402,F401
-
 sys.path.insert(0, str(REPO / "src"))
 import orchestrator  # noqa: E402
 from orchestrator import config as host_config  # noqa: E402

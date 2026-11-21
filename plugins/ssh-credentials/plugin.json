@@ -6,7 +6,6 @@
   "provides": ["ssh-credentials"],
   "requires": [],
   "requiredEnv": ["SSH_AUTH"],
-  "secrets": [],
   "settings": [
     {
       "env": "SSH_AUTH",

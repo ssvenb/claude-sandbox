@@ -4,12 +4,10 @@
 Usage: forward.py --log FILE <port>=<socket> [<port>=<socket>]...
 
 Ordinary HTTP clients need a TCP port, the host proxy listens on a unix socket, so each
-bind-mounted socket is bridged to a loopback port — for this sandbox's processes only. Each
-connection is traced back to its owner: the client end shows up in /proc/net/tcp with a socket
-inode, and that inode must be an open fd of a process in this container's PID namespace.
-
-Runs as root so the agent cannot replace it. Binds before detaching, so a port that cannot be
-bound fails the container's start.
+bind-mounted socket is bridged to a loopback port. Runs as the agent, like everything in the
+container: the credential stays in the host proxy, and what a route may reach is the host
+proxy's to decide (its allowMethods/allowPaths), not this bridge's. Binds before detaching, so a
+port that cannot be bound fails the container's start.
 """
 
 from __future__ import annotations
@@ -22,12 +20,7 @@ import sys
 import threading
 import time
 
-sys.path.insert(0, "/usr/local/lib/sandbox")
-from peer_owner import LOOPBACK, from_this_sandbox  # noqa: E402  (installed by the Dockerfile)
-REFUSAL = (
-    b"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
-    b"This port serves only this sandbox's own processes; use the endpoints in your own briefing.\n"
-)
+LOOPBACK = "127.0.0.1"
 
 
 def log(msg: str) -> None:
@@ -64,16 +57,8 @@ def serve(listeners: dict[socket.socket, tuple[int, str]]) -> None:
         for key, _ in sel.select():
             port, sock_path = listeners[key.fileobj]
             try:
-                client, (_, peer_port) = key.fileobj.accept()
+                client, _ = key.fileobj.accept()
             except OSError:
-                continue
-            if not from_this_sandbox(peer_port, port):
-                log(f"refused :{port} ← 127.0.0.1:{peer_port}: not a process of this sandbox")
-                try:
-                    client.sendall(REFUSAL)
-                except OSError:
-                    pass
-                client.close()
                 continue
             upstream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:

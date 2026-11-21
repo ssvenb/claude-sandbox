@@ -25,14 +25,15 @@ unset skip p
 # shellcheck source=lib/agents.sh
 . /usr/local/lib/sandbox/agents.sh
 
-# Root stage: the only context holding the secrets run.sh passed in, so anything needing them
-# happens here. Tokens derived from long-lived keys are minted on the host instead and arrive
-# ready-made under /run/credentials (src/services/credentials/credentials.sh).
+# Root stage: the setup that needs root (a trust store, a daemon, packages, a device's group).
+# Not a boundary: everything in the container is the agent's, root included (it has the docker
+# group). Tokens derived from long-lived keys are minted on the host and arrive ready-made under
+# /run/credentials (src/services/credentials/credentials.sh).
 plugin_run_stage root-init
 
 # Compose the enterprise policy from the enabled plugins' fragments, at the path the selected
-# agent reads it from. Root-owned, outside /workspace and read-only, so the agent cannot disable
-# its own guardrails.
+# agent reads it from. Root-owned, outside /workspace and read-only: a guardrail the agent does not
+# edit by accident, not one it could not get around.
 MANAGED_SETTINGS=$(agent_meta '.managedSettings // empty')
 if [ -n "$MANAGED_SETTINGS" ]; then
   mkdir -p "$(dirname "$MANAGED_SETTINGS")"
@@ -43,11 +44,8 @@ if [ -n "$MANAGED_SETTINGS" ]; then
   chmod 444 "$MANAGED_SETTINGS"
 fi
 
-# Hand off to 'node', dropping every var the plugins declared as a secret first — the agent only
-# ever sees the short-lived derivatives the root stage exported. setpriv leaves that curated env
-# as is, and unlike `su -c` it keeps the session: su starts the command in a new one with no
-# controlling terminal, so the agent's TUI never got SIGWINCH and garbled after every resize.
-for _secret in $(plugin_secret_vars); do
-  unset "$_secret"
-done
+# Hand off to 'node', which the agent's CLI wants to run as (and which owns what is mounted from the
+# host). setpriv leaves the env as is, and unlike `su -c` it keeps the session: su starts the
+# command in a new one with no controlling terminal, so the agent's TUI never got SIGWINCH and
+# garbled after every resize.
 exec setpriv --reuid=node --regid=node --init-groups /usr/local/bin/agent-setup.sh

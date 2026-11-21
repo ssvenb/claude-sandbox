@@ -5,6 +5,5 @@
   "defaultEnabled": true,
   "provides": ["docker-cli"],
   "requires": [],
-  "requiredEnv": [],
-  "secrets": []
+  "requiredEnv": []
 }

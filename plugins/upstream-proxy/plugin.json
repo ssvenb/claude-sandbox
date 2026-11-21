@@ -6,7 +6,6 @@
   "provides": ["upstream-proxy"],
   "requires": [],
   "requiredEnv": [],
-  "secrets": [],
   "settings": [
     {
       "key": "routes",

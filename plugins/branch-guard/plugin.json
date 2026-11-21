@@ -6,6 +6,5 @@
   "requiredAgent": "claude",
   "provides": [],
   "requires": ["workspace"],
-  "requiredEnv": [],
-  "secrets": []
+  "requiredEnv": []
 }

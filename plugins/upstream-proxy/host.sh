@@ -117,9 +117,11 @@ done
 [ "${missing:-1}" = 0 ] \
   || die "upstream-proxy: sockets did not appear in $UPSTREAM_PROXY_SOCK_DIR."$'\n'"$(cat "$UPSTREAM_PROXY_LOG")"
 
-pass_mount "$UPSTREAM_PROXY_SOCK_DIR" /run/upstream-proxy
+# Read-only: the directory is shared by the project's running sandboxes, and one that could swap a
+# socket there for its own would sit between the others and the proxy. Connecting needs no write.
+pass_mount "$UPSTREAM_PROXY_SOCK_DIR" /run/upstream-proxy ro
 
-# name:port pairs drive the container-side forwarder in root-init.sh, and the agent's briefing.
+# name:port pairs drive the container-side forwarder in agent-init.sh, and the agent's briefing.
 pass_value UPSTREAM_PROXY_PORTS "$(jq -r '[.[] | "\(.name):\(.port)"] | join(" ")' "$UPSTREAM_PROXY_ROUTE_FILE")"
 
 # Each route declares the env the agent should see: endpoints pointed at loopback, and placeholder

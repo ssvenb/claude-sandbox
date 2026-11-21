@@ -6,7 +6,6 @@
   "provides": ["gcp-credentials"],
   "requires": [],
   "requiredEnv": ["GCP_AUTH"],
-  "secrets": [],
   "settings": [
     {
       "env": "GCP_AUTH",

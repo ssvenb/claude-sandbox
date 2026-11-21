@@ -7,7 +7,7 @@ first run.sh starts it, and it exits once no run.sh that uses it is alive.
 Usage: portd.py [--bind ADDR] [--name HOST] <dir>
 
 Each sandbox has a network namespace of its own, so two of them can both serve on :3000. Inside,
-a root helper (../root/publish-ports.py) watches what the agent listens on and offers each port as a unix
+a helper of the agent's (../bin/publish-ports.py) watches what the agent listens on and offers each port as a unix
 socket, <dir>/runs/<RUN_ID>/<port>.sock, in a directory bind-mounted from here. This process
 gives each such socket a TCP port on this machine — the same number while it is free, any free
 one otherwise — and relays connections to it. Ports are handed out per session: a run keeps the
@@ -58,13 +58,29 @@ def pump(src: socket.socket, dst: socket.socket) -> None:
             pass
 
 
-def relay(client: socket.socket, path: str) -> None:
+def connect(path: str) -> socket.socket:
+    """A connection to the socket at path, never to what a symlink there points at: the directory is
+    the container's, and whatever it swaps in after a scan (a link to this machine's docker.sock,
+    say) must not be reached as you. Through an O_PATH descriptor of the file itself."""
+    fd = os.open(path, os.O_PATH | os.O_NOFOLLOW)
     up = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        up.connect(path)
+        if not stat.S_ISSOCK(os.fstat(fd).st_mode):
+            raise OSError(f"{path}: not a socket")
+        up.connect(f"/proc/self/fd/{fd}")
+    except OSError:
+        up.close()
+        raise
+    finally:
+        os.close(fd)
+    return up
+
+
+def relay(client: socket.socket, path: str) -> None:
+    try:
+        up = connect(path)
     except OSError as e:
         log(f"{path}: {e}")
-        up.close()
         client.close()
         return
     other = threading.Thread(target=pump, args=(up, client), daemon=True)
@@ -133,9 +149,10 @@ def alive(pid: int) -> bool:
     return True
 
 
-def claims(users_dir: str) -> dict[str, str]:
-    """RUN_ID → pid of a live run.sh using this daemon for it."""
-    found = {}
+def claims(users_dir: str) -> dict[str, frozenset[int]]:
+    """RUN_ID → the ports its PORTS lists, for every live run.sh using this daemon. Written here, by
+    lease.py on the host (users/<pid>: "RUN_ID PORT..."), not by the container."""
+    found: dict[str, frozenset[int]] = {}
     try:
         entries = os.listdir(users_dir)
     except OSError:
@@ -145,19 +162,20 @@ def claims(users_dir: str) -> dict[str, str]:
             continue
         try:
             with open(os.path.join(users_dir, entry), encoding="utf-8") as fh:
-                run_id = fh.read().strip()
+                run_id, *ports = fh.read().split() or [""]
         except OSError:
             continue
         if RUN_ID.fullmatch(run_id):
-            found[run_id] = entry
+            found[run_id] = found.get(run_id, frozenset()) | {int(p) for p in ports if p.isdigit()}
     return found
 
 
-def offered(runs_dir: str, live: dict[str, str]) -> dict[tuple[str, int], str]:
-    """(RUN_ID, port) → socket path, for every port a live run offers. Only real sockets: what
-    the container put there is followed nowhere else (no symlinks, no other file types)."""
+def offered(runs_dir: str, live: dict[str, frozenset[int]]) -> dict[tuple[str, int], str]:
+    """(RUN_ID, port) → socket path, for every port a live run offers that its PORTS lists. Only real
+    sockets: what the container put there is followed nowhere else (no symlinks, no other file
+    types), and connect() checks again on every connection."""
     found = {}
-    for run_id in live:
+    for run_id, ports in live.items():
         d = os.path.join(runs_dir, run_id)
         try:
             names = os.listdir(d)
@@ -167,7 +185,7 @@ def offered(runs_dir: str, live: dict[str, str]) -> dict[tuple[str, int], str]:
             m = SOCK.fullmatch(name)
             path = os.path.join(d, name)
             try:
-                if not m or not stat.S_ISSOCK(os.lstat(path).st_mode) or int(m[1]) > 65535:
+                if not m or int(m[1]) not in ports or not stat.S_ISSOCK(os.lstat(path).st_mode):
                     continue
             except OSError:
                 continue

@@ -6,7 +6,6 @@
   "provides": ["git-credentials"],
   "requires": [],
   "requiredEnv": ["GH_AUTH"],
-  "secrets": [],
   "settings": [
     {
       "env": "GH_AUTH",

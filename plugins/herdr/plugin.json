@@ -6,6 +6,5 @@
   "provides": ["herdr"],
   "requires": [],
   "conflicts": [],
-  "requiredEnv": [],
-  "secrets": []
+  "requiredEnv": []
 }

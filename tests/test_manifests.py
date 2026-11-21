@@ -32,8 +32,9 @@ def test_plugin_manifest_is_well_formed(name):
     assert m["name"] == name
     assert isinstance(m.get("priority", 50), int)
     assert isinstance(m["defaultEnabled"], bool)
-    for key in ("provides", "requires", "conflicts", "requiredEnv", "secrets"):
+    for key in ("provides", "requires", "conflicts", "requiredEnv"):
         assert isinstance(m.get(key, []), list), key
+    assert "secrets" not in m  # gone: nothing in the container is kept from the agent
     assert m.get("requiredAgent", AGENTS[0]) in AGENTS
     assert set(m.get("conflicts", [])) <= set(PLUGINS)
 

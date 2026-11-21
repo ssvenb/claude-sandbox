@@ -7,7 +7,6 @@
   "provides": ["claude-home"],
   "requires": [],
   "requiredEnv": [],
-  "secrets": [],
   "settings": [
     {
       "env": "CLAUDE_HOME_DIR",

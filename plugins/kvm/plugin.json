@@ -6,7 +6,6 @@
   "provides": ["kvm"],
   "requires": [],
   "requiredEnv": [],
-  "secrets": [],
   "settings": [
     {
       "key": "briefing",

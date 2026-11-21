@@ -6,7 +6,6 @@
   "provides": ["data-mounts"],
   "requires": [],
   "requiredEnv": [],
-  "secrets": [],
   "settings": [
     {
       "key": "mounts",

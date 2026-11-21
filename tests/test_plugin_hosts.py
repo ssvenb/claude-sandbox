@@ -41,19 +41,104 @@ def test_copilot_needs_its_own_token(sb):
     assert sb.agent(AGENT="copilot", AGENT_AUTH_PROVIDED=1).ok().args == []
 
 
-@pytest.mark.parametrize("agent, plugin, var, target", [
-    ("claude", "claude-home", "CLAUDE_HOME_DIR", "/home/node/.claude"),
-    ("copilot", "copilot-home", "COPILOT_HOME_DIR", "/home/node/.copilot"),
-])
-def test_home_plugins_mount_the_host_config_and_replace_the_token(sb, agent, plugin, var, target):
-    stage = f"ENABLED_PLUGINS={plugin}\nplugins_host_stage\nagent_host_stage"
-    sb.bash(stage, AGENT=agent).dies("wants to mount")  # nothing at the default path yet
-    default = sb.home / f".{agent}"
+def test_copilot_home_mounts_the_host_config_and_replaces_the_token(sb):
+    stage = "ENABLED_PLUGINS=copilot-home\nplugins_host_stage\nagent_host_stage"
+    sb.bash(stage, AGENT="copilot").dies("wants to mount")  # nothing at the default path yet
+    default = sb.home / ".copilot"
     default.mkdir()
-    assert sb.bash(stage, AGENT=agent).ok().args == ["-v", f"{default}:{target}"]
+    assert sb.bash(stage, AGENT="copilot").ok().args == ["-v", f"{default}:/home/node/.copilot"]
     custom = sb.tmp / "elsewhere"
     custom.mkdir()
-    assert sb.bash(stage, AGENT=agent, **{var: custom}).ok().mounts == [f"{custom}:{target}"]
+    assert sb.bash(stage, AGENT="copilot", COPILOT_HOME_DIR=custom).ok().mounts == [f"{custom}:/home/node/.copilot"]
+
+
+CLAUDE_STAGE = "ENABLED_PLUGINS=claude-home\nplugins_host_stage\nagent_host_stage"
+
+
+def login(expires, token="t"):
+    return {"claudeAiOauth": {"accessToken": token, "refreshToken": f"r-{token}", "expiresAt": expires}}
+
+
+@pytest.fixture
+def claude_home(sb):
+    """A host ~/.claude: a login, settings, a project's conversation and /workspace's memory."""
+    home = sb.home / ".claude"
+    (home / "projects/-home-me").mkdir(parents=True)
+    (home / "projects/-home-me/s.jsonl").write_text("mine")
+    (home / "projects/-workspace/memory").mkdir(parents=True)
+    (home / "projects/-workspace/memory/MEMORY.md").write_text("- a fact")
+    (home / "settings.json").write_text("{}")
+    (home / ".credentials.json").write_text(json.dumps({**login(100), "mcpOAuth": {"x": 1}}))
+    return home
+
+
+def test_claude_home_mounts_a_copy_per_run_not_the_host_config(sb, claude_home):
+    sb.bash(CLAUDE_STAGE, HOME=sb.tmp / "nobody").dies("no Claude config directory")
+    run = sb.bash(CLAUDE_STAGE).ok()
+    copy = sb.home / ".local/state/claude-sandbox/claude-home/abc123"
+    assert run.args == ["-v", f"{copy}:/home/node/.claude"]
+    assert run.env == {}  # AGENT_AUTH_PROVIDED: no token wanted
+    custom = sb.tmp / "elsewhere"
+    shutil.copytree(claude_home, custom)
+    assert sb.bash(CLAUDE_STAGE, CLAUDE_HOME_DIR=custom, XDG_STATE_HOME=sb.tmp / "state").ok().mounts \
+        == [f"{sb.tmp}/state/claude-sandbox/claude-home/abc123:/home/node/.claude"]
+
+
+def test_claude_home_copy_holds_the_config_not_your_other_conversations(sb, claude_home):
+    copy = sb.home / ".local/state/claude-sandbox/claude-home/abc123"
+    sb.bash(CLAUDE_STAGE + f"\nfind {copy} -type f | sort > {sb.tmp}/seen").ok()
+    seen = [p.removeprefix(f"{copy}/") for p in (sb.tmp / "seen").read_text().split()]
+    assert seen == [".credentials.json", "projects/-workspace/memory/MEMORY.md", "settings.json"]
+    assert oct(copy.stat().st_mode & 0o777) == "0o700"
+
+
+def test_claude_home_exit_keeps_only_the_runs_conversation_and_a_refreshed_login(sb, claude_home):
+    copy = sb.home / ".local/state/claude-sandbox/claude-home/abc123"
+    agent = f"""
+echo '{{"hooks": "evil"}}' > {copy}/settings.json
+echo planted > {copy}/projects/-workspace/memory/MEMORY.md
+echo talk > {copy}/projects/-workspace/abc.jsonl
+echo '{json.dumps(login(200, "new"))}' > {copy}/.credentials.json"""
+    sb.bash(CLAUDE_STAGE + agent).ok()
+    assert sorted(p.name for p in copy.iterdir()) == ["projects"]
+    assert (copy / "projects/-workspace/abc.jsonl").read_text() == "talk\n"
+    assert (claude_home / "settings.json").read_text() == "{}"
+    assert (claude_home / "projects/-workspace/memory/MEMORY.md").read_text() == "- a fact"
+    assert json.loads((claude_home / ".credentials.json").read_text()) == {**login(200, "new"), "mcpOAuth": {"x": 1}}
+    assert oct((claude_home / ".credentials.json").stat().st_mode & 0o777) == "0o600"
+
+    # Resumed: the conversation stays, the rest comes afresh, the memory again from yours.
+    sb.bash(CLAUDE_STAGE + f"\ncp {copy}/settings.json {sb.tmp}/resumed", RESUME=1).ok()
+    assert (copy / "projects/-workspace/abc.jsonl").exists() and (sb.tmp / "resumed").read_text() == "{}"
+
+
+def test_claude_home_resume_does_not_write_through_what_the_agent_planted(sb, claude_home):
+    copy = sb.home / ".local/state/claude-sandbox/claude-home/abc123"
+    outside = sb.tmp / "outside"
+    outside.mkdir()
+    (copy / "projects").mkdir(parents=True)
+    (copy / "projects/-workspace").symlink_to(outside)  # left by a previous container of the run
+    sb.bash(CLAUDE_STAGE, RESUME=1).ok()
+    assert list(outside.iterdir()) == []
+    assert (copy / "projects/-workspace/memory/MEMORY.md").read_text() == "- a fact"
+
+
+@pytest.mark.parametrize("planted", [
+    "garbage", json.dumps({"claudeAiOauth": {"accessToken": "a", "refreshToken": "r", "expiresAt": "soon"}}),
+    json.dumps(login(50)), "symlink", "fifo"])
+def test_claude_home_keeps_your_login_when_the_runs_is_not_a_newer_one(sb, claude_home, planted):
+    run = sb.tmp / "run.json"
+    if planted == "symlink":
+        (sb.tmp / "real.json").write_text(json.dumps(login(999)))
+        run.symlink_to(sb.tmp / "real.json")
+    elif planted == "fifo":
+        os.mkfifo(run)
+    else:
+        run.write_text(planted)
+    before = (claude_home / ".credentials.json").read_text()
+    subprocess.run([REPO / "plugins/claude-home/host/keep-credentials.py", run, claude_home / ".credentials.json"],
+                   check=True, timeout=10)
+    assert (claude_home / ".credentials.json").read_text() == before
 
 
 # --- agent-workspace -----------------------------------------------------------------------
@@ -778,6 +863,22 @@ def test_git_workspace_lists_the_files_a_run_changed_since_it_left_main(tmp_path
     assert changes("main") == changes()  # the base named, as BASE_BRANCH does
 
 
+
+
+def test_git_workspace_lists_a_runs_changes_in_its_container_not_on_the_host(sb):
+    """The checkout's .git/config is the agent's: git on the host would run its core.fsmonitor as you."""
+    checkout = sb.tmp / "checkout"
+    checkout.mkdir()
+    subprocess.run(["git", "init", "-q", checkout], check=True)
+    planted = sb.tmp / "planted"
+    subprocess.run(["git", "-C", checkout, "config", "core.fsmonitor", f"touch {planted}; false"], check=True)
+    sb.stub("docker", f'printf "%s\\n" "$@" >"{sb.tmp}/argv"; cat >"{sb.tmp}/stdin"; echo "[]"')
+    done = subprocess.run([REPO / "plugins/git-workspace/host/changes.py", "trunk"], cwd=checkout,
+                          env=sb._env({"WEB_RUN_ID": "abc123"}), check=True, capture_output=True, text=True)
+    assert json.loads(done.stdout) == [] and not planted.exists()
+    assert (sb.tmp / "argv").read_text().split() == ["exec", "-i", "-u", "node", "-w", "/workspace",
+                                                     "sandbox-abc123", "python3", "-", "trunk"]
+    assert (sb.tmp / "stdin").read_text() == (REPO / "plugins/git-workspace/host/changes.py").read_text()
 
 def test_git_workspace_tells_the_page_how_to_list_a_runs_changes(sb, described):
     changes = lambda: described("git-workspace")["commands"]["git-workspace"]["changes"]  # noqa: E731

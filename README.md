@@ -166,7 +166,7 @@ web UI itself, so there is no second port to open or to forward over an SSH tunn
 
 Resuming brings back the agent's conversation as well as the branch: each run's conversation is
 keyed to its RUN_ID (Claude Code `--session-id`, Copilot `--name`). The transcript lives in the
-agent's home directory, so it only outlives the container while `claude-home` / `copilot-home`
+agent's home directory, so it only outlives the container while `claude-home` (the run's copy) / `copilot-home`
 mounts it from the host (both on by default); without them a resumed run starts a new conversation
 on the old branch.
 
@@ -298,7 +298,7 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | Plugin | Priority | Default | Agent | Provides | Requires | Owns |
 |--------|---------:|---------|-------|----------|----------|------|
 | `ca-certs` | 1 | off | any | `ca-certs` | — | installs the host's extra root CAs (or `$CA_CERTS_DIR`) into the container trust store; sets `NODE_EXTRA_CA_CERTS` / `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` |
-| `claude-home` | 5 | on | claude | `claude-home` | — | mounts the host's `~/.claude` (or `$CLAUDE_HOME_DIR`) at `/home/node/.claude`; sets `AGENT_AUTH_PROVIDED=1` |
+| `claude-home` | 5 | on | claude | `claude-home` | — | mounts a copy of the host's `~/.claude` (or `$CLAUDE_HOME_DIR`) at `/home/node/.claude`: the run's own, at `~/.local/state/claude-sandbox/claude-home/<RUN_ID>`, taken afresh at every start without your projects' conversations (`/workspace`'s memory included), and cut back to the run's conversation when it exits. Only a login the run refreshed goes back to yours, so hooks or settings the agent writes never run on this machine; sets `AGENT_AUTH_PROVIDED=1` |
 | `copilot-home` | 5 | on | copilot | `copilot-home` | — | mounts the host's `~/.copilot` (or `$COPILOT_HOME_DIR`) at `/home/node/.copilot`; sets `AGENT_AUTH_PROVIDED=1` |
 | `docker-cli` | 5 | on | any | `docker-cli` | — | Docker Engine, CLI, compose and buildx install; runs the sandbox under the host's [Sysbox](https://github.com/nestybox/sysbox) runtime (`--runtime=sysbox-runc`, refuses to start without it) and starts a Docker daemon of its own inside, so the agent sees neither the host's containers nor another sandbox's |
 | `netbird` | 5 | off | any | `mesh-network` | — | NetBird client install; enrols the container as its own peer (`sandbox-<RUN_ID>`) from the `netbird-setup-key` authentication `NB_AUTH` names, adding `NET_ADMIN` + `/dev/net/tun` |
@@ -526,7 +526,7 @@ request, with its CI). An item is `{title, url}` plus optional `ref` (a short id
 | `web_start JSON` | nothing: a session the server starts by itself, once per `key`, removed when its agent has finished |
 | `web_on_status CMD [ARG]…` | nothing: a command the server runs on this machine each time one of the project's sessions changes status as its dot shows it (idle with background tasks running counts as working), with `{project, run_id, session, url, status, before}` as JSON on stdin; `url` is the session's page, a status is `starting`, `working`, `idle`, `question` or `null` once it ended (agent-status posts its webhook from it) |
 | `web_checkout GLOB` | where a run's `/workspace` is on this machine, `{run_id}` standing for the run: its session's `workspace` |
-| `web_command NAME CMD [ARG]…` | a command the server runs in a run's checkout (see `web_checkout`) when the plugin's page code asks (`GET /api/sessions/<id>/plugins/<plugin>/<NAME>`); the JSON it prints is the answer |
+| `web_command NAME CMD [ARG]…` | a command the server runs in a run's checkout (see `web_checkout`), with the run's id in `WEB_RUN_ID`, when the plugin's page code asks (`GET /api/sessions/<id>/plugins/<plugin>/<NAME>`); the JSON it prints is the answer. The checkout is the agent's, `.git/config` included: run git there through `docker exec … sandbox-$WEB_RUN_ID`, never on this machine |
 | `web_server CMD [ARG]…` | an HTTP server of the plugin's, started on the first request under `/plugins/<plugin>/` and handed every such request (WebSockets too), behind the web UI's own guard; one for all projects, listening on the unix socket `$WEB_SOCKET` under the base path `$WEB_BASE` |
 
 Anything else a plugin draws itself, in `plugins/<name>/web/index.tsx`: React, typechecked and

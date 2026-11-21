@@ -28,7 +28,10 @@ sync_api = pytest.importorskip("playwright.sync_api")
 
 RUN = "abc123"  # the run the fixture's first pull request and checkout belong to
 
-DOCKER = "#!/bin/sh\n"
+# `docker exec … python3 - ARG…` (git-workspace's changes, run in the run's container) runs here, in
+# the checkout the server runs it in, without the server's environment as in a container; every
+# other docker call does nothing.
+DOCKER = '#!/bin/sh\n[ "$1" = exec ] || exit 0\nwhile [ "$1" != python3 ]; do shift; done\nexec env -u WEB_RUN_ID "$@"\n'
 
 
 def tool(path, body):

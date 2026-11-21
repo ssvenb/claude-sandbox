@@ -1,6 +1,6 @@
 {
   "name": "claude-home",
-  "description": "Mounts the host user's ~/.claude directory into the agent's home so the container reuses the globally configured Claude credentials and settings.",
+  "description": "Mounts a per-run copy of the host user's ~/.claude into the agent's home so the container reuses the globally configured Claude credentials and settings, without the agent writing to the host's own.",
   "priority": 5,
   "defaultEnabled": true,
   "requiredAgent": "claude",
@@ -13,7 +13,7 @@
       "env": "CLAUDE_HOME_DIR",
       "type": "path",
       "label": "Claude config directory",
-      "description": "Host directory mounted as the agent's ~/.claude.",
+      "description": "Host directory copied as the agent's ~/.claude, for each run.",
       "placeholder": "~/.claude"
     }
   ]

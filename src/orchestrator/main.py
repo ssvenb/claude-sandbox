@@ -113,7 +113,10 @@ def run(opts: dict) -> int:
     # plugin mix are per-project.
     project = load_project(env)
     if opts["project"]:
-        env["HOST_CWD"] = project.cwd = repo_dir(env, opts["project"], project.config.get("repo"))
+        repo = project.config.get("repo")
+        env["HOST_CWD"] = project.cwd = repo_dir(env, opts["project"], repo)
+        if not project.cwd:  # a git URL: no checkout here, HOST_CWD is empty and plugins clone REPO_URL
+            env["REPO_URL"] = repo
     env.pop(STARTED_BY, None)  # only --set says which plugin started this run
     if project.config is not None:
         say(f"📄 Project config: {project.config_file}", file=out)

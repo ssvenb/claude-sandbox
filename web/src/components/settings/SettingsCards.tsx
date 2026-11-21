@@ -51,7 +51,7 @@ export function SettingsCards({ declared, draft, query }: Props) {
   const sandbox: CardSpec[] = [
     {
       key: 'general', title: 'General', description: declared.kernel.description, fields: [
-        { spec: { type: 'string', label: 'Repository', description: 'The repo the agent works on: a path on this machine, or a git URL (cloned under ~/.cache/claude-sandbox/repos).', placeholder: 'https://github.com/owner/repo', required: true, monospace: true },
+        { spec: { type: 'string', label: 'Repository', description: 'The repo the agent works on: a path on this machine, or a git URL (cloned only in the container).', placeholder: 'https://github.com/owner/repo', required: true, monospace: true },
           slot: slot(() => draft, 'repo'), name: 'repo', required: true },
         ...declared.kernel.settings.map(s => envField(s)),
       ],

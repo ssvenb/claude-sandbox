@@ -160,6 +160,12 @@ def test_agent_workspace_mounts_a_fresh_dir_and_removes_it_after(sb):
     assert not run_dir.exists()
 
 
+def test_agent_workspace_names_a_url_repos_dir_after_the_repo(sb):
+    for url in ("https://github.com/acme/widgets.git", "git@github.com:widgets.git"):
+        run = sb.plugin("agent-workspace", AGENT_WORKSPACE_DIR=sb.tmp / "m", HOST_CWD="", REPO_URL=url).ok()
+        assert run.mounts == [f"{sb.tmp}/m/widgets-20260102-abc123:/workspace"]
+
+
 def test_agent_workspace_cleanup_can_be_turned_off(sb):
     mirrors = sb.tmp / "mirrors"
     sb.plugin("agent-workspace", AGENT_WORKSPACE_DIR=mirrors, AGENT_WORKSPACE_CLEANUP=0).ok()
@@ -246,6 +252,12 @@ def test_data_mounts(sb):
         f"{sb.tmp}/datasets:/data:ro", "rel/data", "~/scratch:/scratch"]}}})
     assert sb.plugin("data-mounts").ok().mounts == [
         f"{sb.tmp}/datasets:/data:ro", f"{sb.cwd}/rel/data:{sb.cwd}/rel/data", f"{sb.home}/scratch:/scratch"]
+
+
+def test_data_mounts_relative_paths_need_a_checkout(sb):
+    sb.config({"plugins": {"data-mounts": {"mounts": ["~/x", "rel/data"]}}})
+    (sb.home / "x").mkdir()
+    sb.plugin("data-mounts", HOST_CWD="").dies("'rel/data' is relative, but the project's repo is a git URL")
 
 
 @pytest.mark.parametrize("spec, message", [
@@ -393,6 +405,15 @@ def test_git_workspace_needs_a_checkout_with_an_origin(sb):
 def test_git_workspace_hands_over_the_repo_and_its_default_branch(sb):
     origin = checkout_with_origin(sb)
     assert sb.plugin("git-workspace").ok().env == {"REPO_URL": str(origin), "BASE_BRANCH": "main"}
+
+
+def test_git_workspace_takes_a_url_repo_without_a_checkout(sb):
+    """A project whose repo is a git URL: no HOST_CWD; the container finds the default branch."""
+    url = "git@github.com:acme/w.git"
+    assert sb.plugin("git-workspace", HOST_CWD="", REPO_URL=url).ok().env == {"REPO_URL": url}
+    assert sb.plugin("git-workspace", HOST_CWD="", REPO_URL=url, BASE_BRANCH="dev").ok().env == {
+        "REPO_URL": url, "BASE_BRANCH": "dev"}
+    sb.plugin("git-workspace", HOST_CWD="").dies("no REPO_URL to clone")
 
 
 def test_git_workspace_finds_a_default_branch_not_called_main(sb):
@@ -708,6 +729,12 @@ def described(sb):
                   **env).ok()
         return json.loads(out.read_text())
     return run
+
+
+def test_github_asks_about_a_url_repo_without_a_checkout(sb, described, github):
+    described("github-auth", HOST_CWD="", REPO_URL="git@github.com:o/r.git")
+    [(_, _, token, body)] = github.requests
+    assert (token, body["variables"]) == ("tok", {"owner": "o", "name": "r"})
 
 
 def test_github_lists_pull_requests_and_issues_and_git_workspace_ties_them_to_runs(sb, described, github):

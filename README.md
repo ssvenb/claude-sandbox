@@ -546,9 +546,11 @@ The sandbox's own directory holds no configuration, and no `.env` is read — ne
 sandbox's nor the worked-on repo's: a project's file is the one place its settings are made (its
 `env` block for the variables [.env.example](.env.example) lists, a section per plugin for the
 rest), over what your shell exports. The file's name is the project's (`run.sh --project
-<name>`), and its `repo` the repo the agent works on: a path on this machine, or a git URL, cloned
-into `~/.cache/claude-sandbox/repos/<name>` on the first run and fetched on every one after. Plugins
-see that checkout as `$HOST_CWD`. Without `--project`, `run.sh` works on the directory it was
+<name>`), and its `repo` the repo the agent works on: a path on this machine, or a git URL. Plugins
+see a path as `$HOST_CWD`; a git URL is not cloned on this machine at all: `$HOST_CWD` is empty,
+`$REPO_URL` is the URL, and git-workspace clones it in the container with the project's
+credentials (so a private repo needs only its `GH_AUTH` App). `cwd-workspace` and relative
+`data-mounts` paths need a checkout here, and refuse a URL. Without `--project`, `run.sh` works on the directory it was
 started in, with no project file (`PROJECT_CONFIG_FILE` names one).
 
 ```json

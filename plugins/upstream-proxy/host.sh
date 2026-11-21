@@ -25,7 +25,7 @@ UPSTREAM_PROXY_ARGS=()
 
 # One proxy per project: every sandbox launched from this checkout with these routes shares it —
 # the first run starts it and the last one to exit stops it. A changed config gets a proxy of its own.
-UPSTREAM_PROXY_KEY=$(printf '%s\n' "$HOST_CWD" "${SANDBOX_AUTH_FILE:-}" "$UPSTREAM_PROXY_ROUTES_JSON" \
+UPSTREAM_PROXY_KEY=$(printf '%s\n' "${HOST_CWD:-${REPO_URL:-}}" "${SANDBOX_AUTH_FILE:-}" "$UPSTREAM_PROXY_ROUTES_JSON" \
   | sha256sum | cut -c1-12)
 UPSTREAM_PROXY_DIR="${TMPDIR:-/tmp}/upstream-proxy-$(id -u)-$UPSTREAM_PROXY_KEY"
 mkdir -p -m 755 "$UPSTREAM_PROXY_DIR"

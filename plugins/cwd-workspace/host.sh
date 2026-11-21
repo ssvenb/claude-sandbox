@@ -3,6 +3,8 @@
 # host directory immediately, with no branch isolation.
 
 HOST_WORKSPACE_DIR="${HOST_WORKSPACE_DIR:-$HOST_CWD}"
+[ -n "$HOST_WORKSPACE_DIR" ] ||
+  die "cwd-workspace: the project's repo is a git URL, with no checkout on this machine to mount (use git-workspace, or set \"repo\" to a path)"
 [ -d "$HOST_WORKSPACE_DIR" ] || die "HOST_WORKSPACE_DIR is not a directory: $HOST_WORKSPACE_DIR"
 HOST_WORKSPACE_DIR=$(cd "$HOST_WORKSPACE_DIR" && pwd)
 

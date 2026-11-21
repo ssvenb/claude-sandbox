@@ -7,7 +7,11 @@ while IFS= read -r spec; do
   [ -n "$spec" ] || continue
   IFS=: read -r host_path container_path opts <<<"$spec"
   host_path="${host_path/#\~/$HOME}"
-  case $host_path in /*) ;; *) host_path="$HOST_CWD/$host_path" ;; esac
+  case $host_path in
+    /*) ;;
+    *) [ -n "$HOST_CWD" ] || die "data-mounts: '$spec' is relative, but the project's repo is a git URL with no checkout on this machine"
+       host_path="$HOST_CWD/$host_path" ;;
+  esac
   [ -e "$host_path" ] || die "data-mounts: no such host path: $host_path"
   host_path="$(cd "$(dirname "$host_path")" && pwd)/$(basename "$host_path")"
   container_path="${container_path:-$host_path}"

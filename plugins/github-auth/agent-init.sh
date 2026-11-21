@@ -35,6 +35,10 @@ watch its CI (`gh pr checks --watch`) until every check is green. If a check fai
 problem comes up, read why (`gh run view --log-failed`), fix the cause, push the fix and watch CI
 again. The task is not finished until the pull request's CI is green.
 
+Leave whole test suites to GitHub CI, which runs the unit tests on every push: push your branch
+and watch its checks instead of running a full suite locally. Locally, run only the selection of
+tests that covers what you changed.
+
 If the sandbox itself gets in your way (a hook blocks something it should not, a tool or
 credential is missing, its instructions are wrong or unclear), file an issue on the sandbox's
 own repository: `gh issue create --repo ssvenb/claude-sandbox`. Say what you ran, what happened

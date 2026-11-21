@@ -6,7 +6,6 @@
   "provides": ["screenshots"],
   "requires": [],
   "requiredEnv": [],
-  "secrets": [],
   "settings": [
     {
       "env": "SCREENSHOTS_DIR",

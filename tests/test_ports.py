@@ -1,4 +1,4 @@
-"""The ports plugin: root/publish-ports.py in the container, host/portd.py (the central proxy) and
+"""The ports plugin: bin/publish-ports.py in the container, host/portd.py (the central proxy) and
 host/lease.py (its lifecycle) on the host, and its host stage."""
 import json
 import os
@@ -12,7 +12,7 @@ import pytest
 
 from conftest import REPO, load
 
-publish = load("plugins/ports/root/publish-ports.py")
+publish = load("plugins/ports/bin/publish-ports.py")
 portd = load("plugins/ports/host/portd.py")
 lease_py = load("plugins/ports/host/lease.py")
 Ports, items_file = lease_py.Ports, lease_py.items_file
@@ -74,14 +74,14 @@ def test_proc_net_addresses_are_read_in_host_byte_order():
     assert publish.address("0000000000000000FFFF00000100007F") == "127.0.0.1"  # v4-mapped
 
 
-def test_listening_finds_what_non_root_users_listen_on(tmp_path):
+def test_listening_finds_what_anyone_listens_on(tmp_path):
     header = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
     (tmp_path / "tcp").write_text(header + "".join(
         f"   0: {local} 00000000:0000 {st} 00000000:00000000 00:00000000 00000000  {uid}        0 1 1\n"
         for local, st, uid in [
             ("00000000:0BB8", "0A", 1000),   # :3000 on every address
             ("0100007F:1F90", "0A", 1000),   # :8080 on localhost only
-            ("0100007F:1F91", "0A", 0),      # :8081, root's: a sandbox helper
+            ("0100007F:1F91", "0A", 0),      # :8081, root's: docker-proxy for a `docker run -p`
             ("0100007F:1F92", "01", 1000),   # :8082, an established connection
         ]))
     (tmp_path / "tcp6").write_text(header + "".join(
@@ -89,7 +89,7 @@ def test_listening_finds_what_non_root_users_listen_on(tmp_path):
         for local in ["00000000000000000000000000000000:0BB8",    # :3000 again, IPv6
                       "00000000000000000000000001000000:1388"]))  # :5000 on ::1 only
     found = publish.listening((tmp_path / "tcp", tmp_path / "tcp6"))
-    assert found == {3000: "127.0.0.1", 8080: "127.0.0.1", 5000: "::1"}
+    assert found == {3000: "127.0.0.1", 8080: "127.0.0.1", 8081: "127.0.0.1", 5000: "::1"}
 
 
 def test_a_port_listened_on_is_offered_as_a_socket_and_withdrawn_when_it_closes(tmp_path):
@@ -119,8 +119,8 @@ def daemon(short_tmp):
     d = portd.Daemon(str(short_tmp), "127.0.0.1")
     d.dir = short_tmp
 
-    def run(run_id, pid=os.getpid()):
-        (short_tmp / "users" / str(pid)).write_text(run_id + "\n")
+    def run(run_id, pid=os.getpid(), ports="4000 5000 5001 5002"):
+        (short_tmp / "users" / str(pid)).write_text(f"{run_id} {ports}\n")
         (short_tmp / "runs" / run_id).mkdir(exist_ok=True)
         return short_tmp / "runs" / run_id
     d.join = run
@@ -130,7 +130,7 @@ def daemon(short_tmp):
 
 def test_each_session_gets_its_own_host_port_for_the_same_port(daemon):
     port = free_port()
-    a, b = daemon.join("aaaaaa"), daemon.join("bbbbbb", os.getppid())
+    a, b = daemon.join("aaaaaa", ports=str(port)), daemon.join("bbbbbb", os.getppid(), ports=str(port))
     servers = [unix_echo(a / f"{port}.sock", b"a:"), unix_echo(b / f"{port}.sock", b"b:")]
     assert daemon.scan()
     ports = json.loads((daemon.dir / "ports.json").read_text())
@@ -176,6 +176,33 @@ def test_only_sockets_of_live_runs_are_published(daemon, tmp_path):
     dead.close()
 
 
+def test_only_the_ports_a_run_lists_are_published(daemon):
+    run = daemon.join("aaaaaa", ports="4000")
+    servers = [unix_echo(run / "4000.sock"), unix_echo(run / "5000.sock")]  # 5000: not in its PORTS
+    daemon.scan()
+    assert [p["port"] for p in json.loads((daemon.dir / "ports.json").read_text())] == [4000]
+    for s in servers:
+        s.close()
+
+
+def test_a_socket_swapped_for_a_symlink_after_the_scan_is_not_followed(daemon, tmp_path):
+    """The container may replace a published socket at any moment: each connection opens it anew."""
+    run = daemon.join("aaaaaa")
+    ours = unix_echo(run / "4000.sock", b"ours:")
+    daemon.scan()
+    [p] = json.loads((daemon.dir / "ports.json").read_text())
+    host = unix_echo(tmp_path / "host.sock", b"host:")  # a socket of this machine's, e.g. docker.sock
+    (run / "4000.sock").unlink()
+    (run / "4000.sock").symlink_to(tmp_path / "host.sock")
+    try:
+        got = ask(socket.create_connection(("127.0.0.1", p["host_port"]), timeout=5))
+    except ConnectionResetError:
+        got = b""
+    assert got == b""  # dropped, never relayed to host.sock
+    ours.close()
+    host.close()
+
+
 def test_the_proxy_exits_once_nobody_uses_it(daemon):
     daemon.join("aaaaaa", pid=2 ** 22 + 1)
     assert not daemon.scan()
@@ -205,7 +232,7 @@ def test_a_run_joins_the_central_proxy_and_the_last_one_out_stops_it(short_tmp, 
     base = short_tmp / f"sandbox-ports-{os.getuid()}-127.0.0.1"
     assert args == ["-v", f"{base}/runs/abc123:/run/ports/sockets", "-e", "PORTS_BIND=127.0.0.1", "-e", "PORTS=3000 5173"]
     assert "🔌 Ports: 3000, 5173 published on 127.0.0.1" in capsys.readouterr().err
-    assert (base / f"users/{os.getpid()}").read_text() == "abc123\n"
+    assert (base / f"users/{os.getpid()}").read_text() == "abc123 3000 5173\n"  # what the proxy may publish
     assert os.listdir(base / "runs") == ["abc123"]
     pid = int((base / "portd.pid").read_text())
     for _ in range(50):

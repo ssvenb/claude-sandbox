@@ -1,4 +1,4 @@
-"""plugins/upstream-proxy/root/forward.py: the container half of upstream-proxy."""
+"""plugins/upstream-proxy/bin/forward.py: the container half of upstream-proxy."""
 import socket
 import sys
 import threading
@@ -7,7 +7,7 @@ import pytest
 
 from conftest import load
 
-forward = load("plugins/upstream-proxy/root/forward.py")
+forward = load("plugins/upstream-proxy/bin/forward.py")
 
 
 def unix_echo(path):
@@ -32,8 +32,7 @@ def recv_all(sock):
     return b"".join(chunks)
 
 
-def start_serve(monkeypatch, sock_path, ours=True):
-    monkeypatch.setattr(forward, "from_this_sandbox", lambda peer, local: ours)
+def start_serve(sock_path):
     lsock = socket.socket()
     lsock.bind(("127.0.0.1", 0))
     lsock.listen()
@@ -57,24 +56,17 @@ def test_bridge_relays_both_ways_and_closes():
     assert not t.is_alive()
 
 
-def test_own_connections_are_bridged_to_the_socket(monkeypatch, short_tmp):
+def test_connections_are_bridged_to_the_socket(short_tmp):
     unix_echo(short_tmp / "r.sock")
-    port = start_serve(monkeypatch, short_tmp / "r.sock")
+    port = start_serve(short_tmp / "r.sock")
     with socket.create_connection(("127.0.0.1", port), timeout=5) as c:
         c.sendall(b"ping")
         c.shutdown(socket.SHUT_WR)
         assert recv_all(c) == b"ping"
 
 
-def test_foreign_connections_get_a_403(monkeypatch, short_tmp):
-    unix_echo(short_tmp / "r.sock")
-    port = start_serve(monkeypatch, short_tmp / "r.sock", ours=False)
-    with socket.create_connection(("127.0.0.1", port), timeout=5) as c:
-        assert recv_all(c) == forward.REFUSAL
-
-
-def test_missing_host_socket_drops_the_connection(monkeypatch, short_tmp):
-    port = start_serve(monkeypatch, short_tmp / "absent.sock")
+def test_missing_host_socket_drops_the_connection(short_tmp):
+    port = start_serve(short_tmp / "absent.sock")
     with socket.create_connection(("127.0.0.1", port), timeout=5) as c:
         assert recv_all(c) == b""
 

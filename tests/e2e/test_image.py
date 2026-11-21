@@ -8,8 +8,6 @@ runs a probe as the agent user.
 import json
 import os
 import subprocess
-import time
-import uuid
 
 import pytest
 
@@ -100,19 +98,18 @@ def test_the_agent_cli_and_every_plugins_tools_are_installed(image):
     assert boot(image, probe=probe).out == ""
 
 
-def test_the_agent_cannot_touch_its_guardrails(image):
+def test_the_agent_does_not_edit_its_guardrails_by_accident(image):
     probe = f"""touch /opt/plugins/x 2>/dev/null && echo plugins writable
 touch /opt/agents/x 2>/dev/null && echo agents writable
-cat /opt/plugins/gcp-auth/root/metadata.py >/dev/null 2>&1 && echo root helper readable
 rm -f {MANAGED} 2>/dev/null; [ -f {MANAGED} ] || echo policy removed
 [ -x /opt/plugins/branch-guard/bin/guard-branch.py ] || echo hook not executable"""
     assert boot(image, "branch-guard", probe).out == ""
 
 
-def test_declared_secrets_never_reach_the_agent(image):
+def test_netbird_enrols_with_the_setup_key_and_leaves_it_out_of_the_agents_env(image):
     b = boot(image, "netbird", "cat /var/log/netbird-up.args", NB_SETUP_KEY="e2e-setup-key",
              NB_MANAGEMENT_URL="https://nb.example")
-    assert "NB_SETUP_KEY" not in b.env and "e2e-setup-key" not in json.dumps(b.env)
+    assert "NB_SETUP_KEY" not in b.env  # tidiness, not a boundary: the agent may be root
     assert b.out.strip() == ("up --setup-key e2e-setup-key --hostname sandbox-abc123 "
                              "--management-url https://nb.example")
     assert b.env["NB_ENROLLED"] == "1" and "NetBird peer named sandbox-abc123" in b.briefing
@@ -263,47 +260,15 @@ def test_upstream_proxy_reaches_the_upstream_with_the_hosts_credential(image):
     assert "- `api` at http://127.0.0.1:8099" in b.briefing
 
 
-def test_processes_outside_the_sandbox_are_refused_on_its_loopback(image):
-    """A second container in the first one's network namespace, but its own PID namespace, must
-    not use these ports."""
-    name = f"sandbox-e2e-{uuid.uuid4().hex[:8]}"
-    env = {**UPSTREAM, "GCP_SERVICE_ACCOUNT": "sa@e2e-proj.iam.gserviceaccount.com", "GCP_PROJECT": "e2e-proj"}
-    subprocess.run(["docker", "run", "-d", "--name", name, *run_args("e2e-upstream upstream-proxy gcp-auth",
-                                                                    "sleep 300", env), image],
-                   check=True, capture_output=True)
-    try:
-        deadline = time.time() + 120
-        while "E2E-REPORT " not in (logs := subprocess.run(["docker", "logs", name], capture_output=True,
-                                                           text=True).stdout):
-            assert time.time() < deadline, logs
-            time.sleep(0.5)
-        metadata = json.loads(logs.split("E2E-REPORT ", 1)[1].splitlines()[0])["env"]["GCE_METADATA_HOST"]
-        project = f"http://{metadata}/computeMetadata/v1/project/project-id"
-
-        def curl(*prefix, url):
-            done = subprocess.run([*prefix, "curl", "-s", "-i", "-m", "10", "-H", "Metadata-Flavor: Google", url],
-                                  capture_output=True, text=True)
-            return done.stdout
-        inside = ("docker", "exec", "-u", "node", name)
-        neighbour = ("docker", "run", "--rm", f"--network=container:{name}", "--entrypoint", "", image)
-        assert "200 OK" in curl(*inside, url="http://127.0.0.1:8099/x")
-        assert curl(*inside, url=project).endswith("e2e-proj")
-        assert curl(*neighbour, url="http://127.0.0.1:8099/x").startswith("HTTP/1.1 403 Forbidden")
-        assert curl(*neighbour, url=project) == ""   # dropped without an answer
-    finally:
-        subprocess.run(["docker", "rm", "-f", name], capture_output=True)
-
-
-def test_ports_the_agent_listens_on_are_offered_to_the_host_out_of_its_reach(image, tmp_path):
-    """The ports plugin's root/publish-ports.py: a server of the agent's, on localhost only, shows up as a socket in
-    the directory its host.sh mounts, which the agent itself cannot reach."""
+def test_ports_the_agent_listens_on_are_offered_to_the_host(image, tmp_path):
+    """The ports plugin's bin/publish-ports.py, the agent's own: a server of the agent's, on localhost
+    only, shows up as a socket in the directory its host.sh mounts."""
     sockets = tmp_path / "sockets"
     sockets.mkdir()
+    sockets.chmod(0o777)  # as host/lease.py makes it: the agent's to write, whichever uid it has
     probe = ("python3 -m http.server 8123 --bind 127.0.0.1 >/dev/null 2>&1 &\n"
-             "python3 -m http.server 8125 --bind 127.0.0.1 >/dev/null 2>&1 & sleep 3\n"
-             "ls /run/ports/sockets >/dev/null 2>&1 && echo reachable")
+             "python3 -m http.server 8125 --bind 127.0.0.1 >/dev/null 2>&1 & sleep 3")
     b = boot(image, "ports", probe, mounts=[f"{sockets}:/run/ports/sockets"], PORTS="8123 9229")
-    assert b.out == ""
     assert (sockets / "8123.sock").is_socket()
     assert not (sockets / "8125.sock").exists()  # not configured: never published
     assert "## Ports" in b.briefing and "host.docker.internal" in b.briefing

@@ -4,6 +4,7 @@ The rest — entrypoint.sh, agent-setup.sh, the root stages, git-workspace and g
 agent stages — only make sense inside the real image; tests/e2e boots it.
 """
 import json
+import shutil
 import stat
 
 import pytest
@@ -34,11 +35,10 @@ def test_stages_run_in_the_order_the_host_resolved(sb):
     assert "Unknown plugin 'ghost'" in run.err
 
 
-def test_settings_fragments_and_secrets_of_enabled_plugins(sb):
-    run = sb.sh("plugin_settings_files\necho ---\nplugin_secret_vars",
-                ENABLED_PLUGINS="github-auth branch-guard netbird gcp-auth").ok()
-    assert run.out == f"{REPO}/plugins/branch-guard/settings.json\n---\nNB_SETUP_KEY\n"
-    assert sb.sh("plugin_settings_files; plugin_secret_vars", ENABLED_PLUGINS="").ok().out == ""
+def test_settings_fragments_of_enabled_plugins(sb):
+    run = sb.sh("plugin_settings_files", ENABLED_PLUGINS="github-auth branch-guard netbird gcp-auth").ok()
+    assert run.out == f"{REPO}/plugins/branch-guard/settings.json\n"
+    assert sb.sh("plugin_settings_files", ENABLED_PLUGINS="").ok().out == ""
 
 
 def test_container_agent_framework(sb):
@@ -156,10 +156,18 @@ def test_cwd_workspace_names_the_masked_files(sb):
     assert "## Masked files" in prompt and "- `/workspace/.env`\n- `/workspace/k.json`\n" in prompt
 
 
-def test_gcp_auth_briefing(sb):
-    prompt = stage(sb, "gcp-auth", GCP_SERVICE_ACCOUNT="sa@p.iam.gserviceaccount.com", GCP_PROJECT="p",
-                   GCE_METADATA_HOST="127.0.0.1:4567").prompt
-    assert "`sa@p.iam.gserviceaccount.com` (project `p`)" in prompt and "127.0.0.1:4567" in prompt
+def test_gcp_auth_starts_its_metadata_server_and_briefs_the_agent(sb):
+    plugin = sb.tmp / "gcp-auth"
+    shutil.copytree(REPO / "plugins/gcp-auth", plugin)
+    (plugin / "bin/metadata.py").write_text(f"#!/bin/sh\necho \"$@\" > {sb.tmp}/argv\necho 4567\n")
+    token = sb.tmp / "gcp-token"
+    env = dict(GCP_SERVICE_ACCOUNT="sa@p.iam.gserviceaccount.com", GCP_PROJECT="p", PLUGIN_DIR=plugin, HOME=sb.home)
+    sb.sh(f". {plugin}/agent-init.sh", GCP_TOKEN_FILE=token, **env).dies("gcp-token is missing")
+    token.write_text("ya29.x")
+    run = sb.sh(f". {plugin}/agent-init.sh; echo $GCE_METADATA_HOST $CLOUDSDK_AUTH_ACCESS_TOKEN_FILE", GCP_TOKEN_FILE=token, **env).ok()
+    assert run.out.splitlines()[-1] == f"127.0.0.1:4567 {token}"
+    assert (sb.tmp / "argv").read_text().split()[:6] == ["--token-file", str(token), "--account", env["GCP_SERVICE_ACCOUNT"], "--project", "p"]
+    assert "`sa@p.iam.gserviceaccount.com` (project `p`)" in run.prompt and "127.0.0.1:4567" in run.prompt
 
 
 def test_pr_review_briefs_only_a_review_session_and_with_its_guardrails(sb):

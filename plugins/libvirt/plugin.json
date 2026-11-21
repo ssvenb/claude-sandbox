@@ -5,6 +5,5 @@
   "defaultEnabled": false,
   "provides": ["libvirt"],
   "requires": [],
-  "requiredEnv": [],
-  "secrets": []
+  "requiredEnv": []
 }

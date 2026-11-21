@@ -7,7 +7,6 @@
   "provides": ["agent-status"],
   "requires": [],
   "requiredEnv": [],
-  "secrets": [],
   "settings": [
     {
       "key": "webhook",

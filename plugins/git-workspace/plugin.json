@@ -5,7 +5,6 @@
   "defaultEnabled": true,
   "provides": ["workspace"],
   "requires": ["git-credentials"],
-  "secrets": [],
   "settings": [
     {
       "key": "branchPrefix",

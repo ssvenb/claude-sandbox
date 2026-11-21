@@ -6,7 +6,6 @@
   "provides": ["project-deps"],
   "requires": [],
   "requiredEnv": [],
-  "secrets": [],
   "settings": [
     {
       "key": "apt",

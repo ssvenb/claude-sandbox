@@ -41,15 +41,24 @@ def test_copilot_needs_its_own_token(sb):
     assert sb.agent(AGENT="copilot", AGENT_AUTH_PROVIDED=1).ok().args == []
 
 
-def test_copilot_home_mounts_the_host_config_and_replaces_the_token(sb):
+def test_copilot_home_mounts_a_copy_per_run_and_replaces_the_token(sb):
     stage = "ENABLED_PLUGINS=copilot-home\nplugins_host_stage\nagent_host_stage"
-    sb.bash(stage, AGENT="copilot").dies("wants to mount")  # nothing at the default path yet
-    default = sb.home / ".copilot"
-    default.mkdir()
-    assert sb.bash(stage, AGENT="copilot").ok().args == ["-v", f"{default}:/home/node/.copilot"]
-    custom = sb.tmp / "elsewhere"
-    custom.mkdir()
-    assert sb.bash(stage, AGENT="copilot", COPILOT_HOME_DIR=custom).ok().mounts == [f"{custom}:/home/node/.copilot"]
+    sb.bash(stage, AGENT="copilot").dies("no Copilot config directory")  # nothing at the default path yet
+    home = sb.home / ".copilot"
+    (home / "session-state").mkdir(parents=True)
+    (home / "session-state/other.json").write_text("a session of yours")
+    (home / "config.json").write_text("{}")
+    copy = sb.home / ".local/state/claude-sandbox/copilot-home/abc123"
+    agent = f"""
+cp {copy}/config.json {sb.tmp}/seen; ls -A {copy}/session-state > {sb.tmp}/sessions 2>/dev/null || true
+echo '{{"mcpServers": "evil"}}' > {copy}/config.json
+mkdir -p {copy}/session-state && echo mine > {copy}/session-state/sandbox-abc123.json"""
+    run = sb.bash(stage + agent, AGENT="copilot").ok()
+    assert run.args == ["-v", f"{copy}:/home/node/.copilot"]
+    assert (sb.tmp / "seen").read_text() == "{}" and (sb.tmp / "sessions").read_text() == ""
+    assert (home / "config.json").read_text() == "{}"  # yours, untouched
+    assert sorted(p.name for p in copy.iterdir()) == ["session-state"]  # the run's session stays, for --resume
+    assert (copy / "session-state/sandbox-abc123.json").read_text() == "mine\n"
 
 
 CLAUDE_STAGE = "ENABLED_PLUGINS=claude-home\nplugins_host_stage\nagent_host_stage"
@@ -579,7 +588,7 @@ def test_upstream_proxy_starts_a_proxy_and_hands_over_only_sockets_and_env(proxy
         containerEnv={"API_URL": "http://127.0.0.1:18080", "FROM_HOST": "${HOST_ONLY}", "MISSING": "x${NOPE}y"})}}})
     run = proxy_sb.plugin("upstream-proxy", HOST_ONLY="h", SANDBOX_AUTH_FILE=file).ok()
     [proxy_dir] = proxy_dirs(proxy_sb)
-    assert run.mounts == [f"{proxy_dir}/sockets:/run/upstream-proxy"]
+    assert run.mounts == [f"{proxy_dir}/sockets:/run/upstream-proxy:ro"]
     assert run.env == {"UPSTREAM_PROXY_PORTS": "api:18080", "API_URL": "http://127.0.0.1:18080",
                        "FROM_HOST": "h", "MISSING": "xy"}
     assert not any("hunter2" in a for a in run.args)

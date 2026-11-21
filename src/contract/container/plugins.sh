@@ -31,13 +31,3 @@ plugin_settings_files() {
   unset _name
   return 0
 }
-
-# Every env var enabled plugins declare as a secret, so root can drop them before handing over.
-plugin_secret_vars() {
-  for _name in ${ENABLED_PLUGINS:-}; do
-    [ -f "$PLUGIN_ROOT/$_name/plugin.json" ] &&
-      jq -r '.secrets // [] | .[]' "$PLUGIN_ROOT/$_name/plugin.json"
-  done
-  unset _name
-  return 0
-}

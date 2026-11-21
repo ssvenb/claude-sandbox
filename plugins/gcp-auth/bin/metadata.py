@@ -5,12 +5,12 @@ Usage: metadata.py --token-file FILE --account EMAIL --project ID --log FILE
 
 Binds a free loopback port, prints it, and detaches. Every Google client library — and gcloud's
 own GCE detection — honours GCE_METADATA_HOST / GCE_METADATA_IP / GCE_METADATA_ROOT, which
-root-init.sh points here; the library then asks for a token exactly as it would on a GCE VM.
+agent-init.sh points here; the library then asks for a token exactly as it would on a GCE VM.
 Tokens come from the file the host's credential refresher replaces (/run/credentials/gcp-token),
 minted with a 1h lifetime, so the expiry reported is one hour after the file was written.
 
-Only this container's own processes are answered (peer_owner), whoever else shares its loopback.
-Runs as root so the agent cannot replace it with a server of its own.
+Runs as the agent, like everything in the container: it holds nothing the agent may not have, the
+token being one the agent's own processes are handed anyway.
 """
 
 from __future__ import annotations
@@ -22,9 +22,7 @@ import sys
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-sys.path.insert(0, "/usr/local/lib/sandbox")
-from peer_owner import LOOPBACK, from_this_sandbox  # noqa: E402  (installed by the Dockerfile)
-
+LOOPBACK = "127.0.0.1"
 LIFETIME = 3600
 SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 
@@ -117,13 +115,6 @@ def handler_for(token_file: str, account: str, project: str):
 
 
 class Server(HTTPServer):
-    # Single-threaded on purpose: from_this_sandbox switches the process-wide euid.
-    def verify_request(self, request, client_address) -> bool:
-        if from_this_sandbox(client_address[1], self.server_address[1]):
-            return True
-        log(f"refused 127.0.0.1:{client_address[1]}: not a process of this sandbox")
-        return False
-
     def get_request(self):
         request, addr = super().get_request()
         # A client that connects and stalls must not hold up everyone else's token requests.

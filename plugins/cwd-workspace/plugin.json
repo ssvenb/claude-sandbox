@@ -7,7 +7,6 @@
   "requires": [],
   "conflicts": ["git-workspace"],
   "requiredEnv": [],
-  "secrets": [],
   "settings": [
     {
       "env": "HOST_WORKSPACE_DIR",

@@ -7,8 +7,8 @@ Usage: lease.py join RUN_ID PID    joins (or starts) the proxy; prints the `dock
 
 Every sandbox has a network namespace of its own, so two sessions can both serve on :3000. Which
 ports a sandbox opens is the project's choice: $PORTS lists them, and nothing else is published
-(nor shown on the dashboard). Inside, a root helper (../root/publish-ports.py, started by the
-plugin's root-init.sh) offers each of those a process of the agent's listens on as a unix socket in a
+(nor shown on the dashboard): users/<pid> holds them, and the proxy reads them from there. Inside, a
+helper of the agent's (../bin/publish-ports.py, started by the plugin's agent-init.sh) offers each of those a process of the agent's listens on as a unix socket in a
 directory mounted from here; one central proxy on this machine (portd.py), shared by every
 sandbox of every project, gives each a port on its bind address — the same number while it is free,
 another free one otherwise. The first run starts the proxy; it exits by itself once no run using
@@ -21,7 +21,7 @@ page was opened), else 127.0.0.1. Only the web UI's address keeps the name it wa
 
     ${TMPDIR:-/tmp}/sandbox-ports-<uid>-<bind>/
       lock            taken to join or leave, and by the proxy before it exits
-      users/<pid>     one per run using the proxy, holding its RUN_ID
+      users/<pid>     one per run using the proxy, holding its RUN_ID and its PORTS
       runs/<RUN_ID>/  the run's sockets, mounted at /run/ports/sockets
       portd.pid, portd.log, ports.json, items.json (the web UI's session buttons)
 """
@@ -107,7 +107,7 @@ class Ports:
             if f.name == self.pid or not _alive(f.name):
                 continue
             try:
-                if f.read_text().strip() == run_id:
+                if f.read_text().split()[:1] == [run_id]:
                     return True
             except OSError:
                 pass
@@ -129,9 +129,9 @@ class Ports:
 
     def start(self) -> list[str]:
         """Joins (or starts) the central proxy for this run, and hands the container its socket
-        directory — only when the project configured ports to publish ($PORTS). Its sockets sit
-        under a root-only directory in the container (the plugin's root-init.sh), so the agent cannot plant
-        anything there for this machine to connect to. The `docker run` arguments."""
+        directory — only when the project configured ports to publish ($PORTS). The directory is the
+        agent's to write: the proxy follows nothing planted there and publishes only these ports
+        (portd.py). The `docker run` arguments."""
         bind, ports = settings(self.env)
         if not ports:
             say('🔌 Ports: none published (list them in PORTS, e.g. PORTS="3000 5173")')
@@ -144,12 +144,15 @@ class Ports:
             d.mkdir(exist_ok=True)
             d.chmod(0o700)
         with self._locked():
-            (self.dir / "users" / self.pid).write_text(f"{self.run_id}\n")
+            # The ports with it: the proxy publishes those alone, whatever the container offers.
+            (self.dir / "users" / self.pid).write_text(f"{self.run_id} {' '.join(ports)}\n")
             self.joined = True
             self._prune()
             run = self.dir / "runs" / self.run_id
             run.mkdir(exist_ok=True)
-            run.chmod(0o755)
+            # The agent's to write, whichever uid it has in there (rootless docker keeps it apart
+            # from yours); the 0700 directories above keep everyone else on this machine out.
+            run.chmod(0o777)
             try:
                 pid = (self.dir / "portd.pid").read_text().strip()
             except OSError:

@@ -6,7 +6,6 @@
   "provides": [],
   "requires": ["git-credentials"],
   "requiredEnv": [],
-  "secrets": [],
   "settings": [
     {
       "key": "auth",

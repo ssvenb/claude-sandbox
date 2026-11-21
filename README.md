@@ -9,7 +9,7 @@ the agent to a branch, mounting your `~/.claude` — lives in **plugins** that c
 individually. With the defaults, the GitHub App private key never leaves your machine — tokens are
 minted and refreshed on the host, and the container only sees the current short-lived installation
 token — and each run works on its own
-`<prefix>/<yyyymmdd>-<RUN_ID>` branch enforced by a managed hook the agent cannot edit.
+`<prefix>/<yyyymmdd>-<RUN_ID>` branch kept by a managed hook — a guardrail: everything inside the container is the agent's, and only what crosses to the host is a boundary (see [Security model](#security-model)).
 
 ## Quick start
 
@@ -201,9 +201,9 @@ run.sh (host: src/orchestrator, Python)
   ├─ docker build --build-arg AGENT=... --build-arg ENABLED_PLUGINS=...
   └─ docker run → entrypoint.sh (root)
        ├─ chown /workspace to node
-       ├─ each enabled plugin's root-init.sh (only context that holds the vars plugins declared as secrets)
+       ├─ each enabled plugin's root-init.sh (setup that needs root: trust store, dockerd, packages)
        ├─ merges settings-base.json + plugin settings.json → the agent's managedSettings path (0444)
-       ├─ unsets every var declared in a plugin's `secrets`, then `setpriv` to `node`
+       ├─ `setpriv` to `node`
        └─ agent-setup.sh (node)
             ├─ the agent's agent-init.sh (seeds its own config for a non-interactive boot)
             ├─ each enabled plugin's agent-init.sh (auth, /workspace, guardrails, briefing)
@@ -299,14 +299,14 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 |--------|---------:|---------|-------|----------|----------|------|
 | `ca-certs` | 1 | off | any | `ca-certs` | — | installs the host's extra root CAs (or `$CA_CERTS_DIR`) into the container trust store; sets `NODE_EXTRA_CA_CERTS` / `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` |
 | `claude-home` | 5 | on | claude | `claude-home` | — | mounts a copy of the host's `~/.claude` (or `$CLAUDE_HOME_DIR`) at `/home/node/.claude`: the run's own, at `~/.local/state/claude-sandbox/claude-home/<RUN_ID>`, taken afresh at every start without your projects' conversations (`/workspace`'s memory included), and cut back to the run's conversation when it exits. Only a login the run refreshed goes back to yours, so hooks or settings the agent writes never run on this machine; sets `AGENT_AUTH_PROVIDED=1` |
-| `copilot-home` | 5 | on | copilot | `copilot-home` | — | mounts the host's `~/.copilot` (or `$COPILOT_HOME_DIR`) at `/home/node/.copilot`; sets `AGENT_AUTH_PROVIDED=1` |
+| `copilot-home` | 5 | on | copilot | `copilot-home` | — | mounts a copy of the host's `~/.copilot` (or `$COPILOT_HOME_DIR`) at `/home/node/.copilot`: the run's own, at `~/.local/state/claude-sandbox/copilot-home/<RUN_ID>`, taken afresh at every start but for the run's sessions (`session-state/`), cut back to those when it exits; nothing goes back to yours; sets `AGENT_AUTH_PROVIDED=1` |
 | `docker-cli` | 5 | on | any | `docker-cli` | — | Docker Engine, CLI, compose and buildx install; runs the sandbox under the host's [Sysbox](https://github.com/nestybox/sysbox) runtime (`--runtime=sysbox-runc`, refuses to start without it) and starts a Docker daemon of its own inside, so the agent sees neither the host's containers nor another sandbox's |
 | `netbird` | 5 | off | any | `mesh-network` | — | NetBird client install; enrols the container as its own peer (`sandbox-<RUN_ID>`) from the `netbird-setup-key` authentication `NB_AUTH` names, adding `NET_ADMIN` + `/dev/net/tun` |
-| `ports` | 5 | on | any | `ports` | — | publishes the ports listed in `PORTS`: joins the central port proxy on the HOST, shared by every sandbox of every project, and offers what the agent listens on as unix sockets in a root-only directory; see [Published ports](#published-ports); nothing listed → does nothing |
+| `ports` | 5 | on | any | `ports` | — | publishes the ports listed in `PORTS`: joins the central port proxy on the HOST, shared by every sandbox of every project, and offers what the agent listens on as unix sockets in a directory mounted from it; see [Published ports](#published-ports); nothing listed → does nothing |
 | `github-auth` | 10 | on | any | `git-credentials` | — | `gh` CLI install; mints App installation tokens on the host as the `github-token` credential (re-minted every 40 min), `gh auth login` with each one; briefs the agent to open a pull request for its work and fix whatever fails until its CI is green |
 | `gcp-auth` | 10 | off | any | `gcp-credentials` | — | Google Cloud CLI install; mints 1h service-account tokens on the host and makes them the container's ambient identity: `gcloud` reads the token file, a stand-in GCE metadata server serves the client libraries |
 | `ssh-credentials` | 15 | off | any | `ssh-credentials` | — | `openssh-client` install; writes `~/.ssh/sandbox_key` + `~/.ssh/config` for the agent user |
-| `upstream-proxy` | 15 | on | any | `upstream-proxy` | — | credential-injecting reverse proxies on the HOST, one per route from the project config, shared by all of a project's running sandboxes, bind-mounted as unix sockets and bridged to loopback ports that only the project's own sandboxes may use; no routes configured → does nothing |
+| `upstream-proxy` | 15 | on | any | `upstream-proxy` | — | credential-injecting reverse proxies on the HOST, one per route from the project config, shared by all of a project's running sandboxes, bind-mounted (read-only) as unix sockets and bridged to loopback ports; no routes configured → does nothing |
 | `pr-review` | 25 | off | any | — | `git-credentials` | has the web UI start a review session for a run's pull request once its CI is green and the run's session is deleted, under another GitHub App (`.plugins["pr-review"].auth`), with guardrails against what the pull request says; see [Reviewing pull requests](#reviewing-pull-requests-with-pr-review) |
 | `git-workspace` | 20 | on | any | `workspace` | `git-credentials` | clone the `origin` remote of `run.sh`'s cwd into `/workspace`, per-run branch named after the agent (or `$BRANCH_PREFIX`) and the date, its commit identity, resume briefing |
 | `cwd-workspace` | 20 | off | any | `workspace` | — | bind-mounts the host's cwd (or `$HOST_WORKSPACE_DIR`) at `/workspace`; conflicts with `git-workspace` |
@@ -331,14 +331,14 @@ executed), so their `export`s survive into the rest of the boot sequence.
 | `host.sh` | you | on the host, before `docker run` |
 | `web.sh` | you | on the host, by `run.sh --web`, whenever the web UI draws the project |
 | `web/index.tsx` | your browser | the plugin's own part of the web UI, bundled with it when it is built (see [`web.sh`](#websh--web-stage-your-user)) |
-| `root-init.sh` | root | in the container, while secrets are still present |
+| `root-init.sh` | root | in the container, for setup that needs root |
 | `agent-init.sh` | `node` | in the container, just before Claude starts |
 | `settings.json` | — | merged into the managed policy at boot |
-| `bin/` | `node` | world-executable helpers (e.g. hook scripts), chmod 555 |
-| `root/` | root | root-only helpers that touch secrets, chmod 500 |
+| `bin/` | `node` | world-executable helpers (hook scripts, the agent stage's daemons), chmod 555 |
 
-Everything lands root-owned under `/opt/plugins`, which is immutable from inside the container,
-so the agent cannot edit or disable its own guardrails.
+Everything lands root-owned and read-only under `/opt/plugins`, so the agent does not edit its
+guardrails by accident. Guardrails only: the agent can be root in its container (the `docker`
+group), so nothing in the image holds against it.
 
 ### `plugin.json` — the manifest
 
@@ -350,8 +350,7 @@ so the agent cannot edit or disable its own guardrails.
   "defaultEnabled": false,
   "provides": ["mesh-network"],
   "requires": [],
-  "requiredEnv": ["NB_AUTH"],
-  "secrets": ["NB_SETUP_KEY"]
+  "requiredEnv": ["NB_AUTH"]
 }
 ```
 
@@ -366,7 +365,6 @@ so the agent cannot edit or disable its own guardrails.
 | `requires` | string[] | `[]` | Capabilities that must be provided by *some* enabled plugin. Otherwise the run aborts on the host, listing the plugins that could provide it. |
 | `conflicts` | string[] | `[]` | Plugin names that must not be enabled at the same time. |
 | `requiredEnv` | string[] | `[]` | Env vars that must be non-empty while this plugin is enabled. |
-| `secrets` | string[] | `[]` | Env vars `entrypoint.sh` unsets before handing control to `node`. Use for anything only the root stage may see. |
 | `settings` | object[] | `[]` | The settings this plugin reads, for the web UI's settings form. See [Declaring settings](#declaring-settings). |
 
 Validation (`conflicts`, `requiredEnv`, `requires`) runs on the host **before** the image is
@@ -598,10 +596,9 @@ real endpoints, real TLS, no emulator variables:
 where `data` is a `gcp-service-account` of your authentications. `run.sh` mints a 1-hour token for
 its account with your application default credentials (`gcloud auth application-default login`,
 once; you need `roles/iam.serviceAccountTokenCreator` on it) and re-mints it every 40 minutes as the `gcp-token`
-credential. In the container, `gcloud` reads that file on every call, and a root-owned stand-in
+credential. In the container, `gcloud` reads that file on every call, and a stand-in
 for the GCE metadata server hands it to the client libraries, which find it through
-`GCE_METADATA_HOST` as they would on a VM. It listens on a free loopback port and answers only the
-container's own processes. The agent holds the current
+`GCE_METADATA_HOST` as they would on a VM. It listens on a free loopback port. The agent holds the current
 token, usable from anywhere until it expires, but never anything it could mint a new one from; what
 it can do is decided by the account's IAM roles alone. For per-method/path restrictions on top,
 use the proxy route below instead.
@@ -669,10 +666,13 @@ dashboard edits its `env` block):
 ```
 
 Nothing else is published, and the dashboard shows nothing else; with `PORTS` unset a sandbox
-opens no ports at all, and no proxy is started for it. Inside the container a root helper
-(`plugins/ports/root/publish-ports.py`, started by its `root-init.sh`) notices when a non-root process listens on one
+opens no ports at all, and no proxy is started for it. Inside the container a helper
+(`plugins/ports/bin/publish-ports.py`, started by its `agent-init.sh`) notices when a process listens on one
 of those ports — on any address, `127.0.0.1` included — and offers it as a unix socket in a
-directory mounted from the host, under a root-only `/run/ports` the agent cannot reach. One central
+directory mounted from the host, `/run/ports/sockets`. That directory is the agent's to write, so the
+proxy on the host trusts nothing in it: it publishes only the ports the run's `PORTS` lists (which it
+learns from `run.sh`, not from the container), and opens each socket anew, never through a symlink,
+on every connection. One central
 proxy on your machine (`plugins/ports/host/portd.py`, joined and left through `host/lease.py` by its `host.sh`),
 shared by every sandbox of every project, gives each such port a port of its own on `$PORTS_BIND`
 (default: the address the web UI listens on, which `src/server/server.py` exports as `SANDBOX_WEB_BIND`
@@ -784,27 +784,27 @@ configuration is left to a human.
 
 ### `root-init.sh` — root stage (in the container)
 
-Sourced by `entrypoint.sh` as root, in POSIX `sh`. This is the **only** context that still holds
-the vars listed in `secrets` — for a secret that has to enter the container as is, like netbird's
-setup key, which only root may use. Anything derived from a long-lived credential is minted on the
-host instead (`register_credential`). Anything you `export` survives the `setpriv` handoff to
-`node` (except the secrets themselves, which are dropped right after this stage).
+Sourced by `entrypoint.sh` as root, in POSIX `sh`, for setup that needs root: a trust store, a
+daemon, packages, a device's group. Not a boundary: the agent can be root in its container, so
+whatever enters the container — netbird's setup key, say — is the agent's. Anything derived from a
+long-lived credential is minted on the host instead (`register_credential`). Anything you `export`
+survives the `setpriv` handoff to `node`.
 
 Context: `$PLUGIN_NAME`, `$PLUGIN_DIR` (`/opt/plugins/<name>`), `$ENABLED_PLUGINS`, `$RUN_ID`,
 `$RESUME`, plus every `-e` var the host stage passed in.
 
 ```sh
 # shellcheck shell=sh
-netbird up --setup-key "$NB_SETUP_KEY" ...   # dropped from the environment right after this stage
+netbird up --setup-key "$NB_SETUP_KEY" ...
+unset NB_SETUP_KEY   # out of the agent's environment, so it is not printed by mistake
 ```
-
-Helper scripts that need the secrets go in `root/` (chmod 500 — unreadable to `node`).
 
 ### `agent-init.sh` — agent stage (`node`)
 
-Sourced by `agent-setup.sh` as the unprivileged agent user, in POSIX `sh`, after the secrets have
-been dropped and after the agent seeded its own config. Use it for authentication with short-lived
-tokens, provisioning `/workspace`, and briefing the agent.
+Sourced by `agent-setup.sh` as the agent user, in POSIX `sh`, after the agent seeded its own
+config. Use it for authentication with short-lived tokens, the helpers the agent's tools talk to
+(upstream-proxy's forwarder, gcp-auth's metadata server, the ports helper), provisioning
+`/workspace`, and briefing the agent.
 
 Context: `$PLUGIN_NAME`, `$PLUGIN_DIR`, `$ENABLED_PLUGINS`, `$AGENT`, `$AGENT_DIR`, `$RUN_ID`,
 `$RESUME`, `$HOME` (`/home/node`), `$AGENT_PROMPT_FILE`, plus anything the root stage exported.
@@ -842,8 +842,8 @@ Merged by `src/services/settings/merge-settings.py` into the selected agent's `m
 - lists **concatenate**, so several plugins can each add an entry to the same `hooks` array,
 - on scalar conflicts the later (higher-priority-number) fragment wins.
 
-The result is written by root, outside `/workspace`, mode `0444`, so the agent cannot relax its
-own policy. Fragments are written in the schema of one agent, so a plugin contributing one
+The result is written by root, outside `/workspace`, mode `0444`, so the agent does not relax
+its own policy by accident; a guardrail, like every hook in it. Fragments are written in the schema of one agent, so a plugin contributing one
 usually declares a `requiredAgent` too.
 
 ```json
@@ -858,12 +858,11 @@ usually declares a `requiredAgent` too.
 }
 ```
 
-### `bin/` and `root/`
+### `bin/`
 
 | Directory | Mode | Owner-visible to | Use for |
 |-----------|------|------------------|---------|
 | `bin/` | 555 | everyone, incl. `node` | hook scripts and helpers Claude or the agent stage invokes |
-| `root/` | 500 | root only | anything that reads a secret or must not be replaced by `node` (e.g. upstream-proxy's `forward.py`) |
 
 Everything else under the plugin directory is 444 with 555 directories.
 
@@ -895,7 +894,7 @@ only required while that agent or plugin is in use.
 | `AGENT_WORKSPACE_CLEANUP` | agent-workspace | Delete the run's mirror directory when the container exits; 0 keeps it for inspection, at one leftover directory per run (default: 1) |
 | `CA_CERTS_DIR` | ca-certs | Host dir holding extra root certificates, PEM or DER (default `/usr/local/share/ca-certificates`) |
 | `CLAUDE_HOME_DIR` | claude-home | Host dir mounted as the agent's `~/.claude` (default `$HOME/.claude`) |
-| `COPILOT_HOME_DIR` | copilot-home | Host dir mounted as the agent's `~/.copilot` (default `$HOME/.copilot`) |
+| `COPILOT_HOME_DIR` | copilot-home | Host dir copied as the agent's `~/.copilot` for each run (default `$HOME/.copilot`) |
 
 Volume mounts are contributed by plugins via `pass_mount`; the core `docker run` has none. The agent's
 user, `node`, takes the uid of whoever runs `run.sh` (`HOST_UID`, set by the boot in
@@ -905,16 +904,33 @@ its sessions a `~/.claude` they can read, and can delete a run's mirror afterwar
 
 ## Security model
 
-- The GitHub App private key never enters the container, not even as root — the host mints the
-  1-hour installation tokens and re-mints them every 40 minutes; the container only reads the
-  current one from `/run/credentials`.
-- Vars listed in a plugin's `secrets` are unset before the `setpriv` handoff to `node`.
-- `/opt/plugins`, `/opt/agents` and the merged managed-settings file are root-owned and
-  read-only, so the agent cannot edit or disable its own guardrails.
-- `branch-guard` blocks `git checkout/switch/branch/worktree` outright and only allows `git push`
-  of the run's own branch.
+The boundary is between the container and your machine; there is none inside the container.
+Everything in it is the agent's: `node` is in the `docker` group, so the agent is root there
+whenever it wants, and whatever enters the container — a token, a setup key, a file — it has.
+What runs in the container is a **guardrail**, there to keep a well-meaning agent on track, never to
+hold against one that is not:
+
+- `branch-guard` blocks `git checkout/switch/branch/worktree` and pushes of other branches; the
+  managed settings, `/opt/plugins` and `/opt/agents` are root-owned and read-only. What actually
+  keeps a branch safe is the forge's branch protection, and what the token may do.
 - `DISABLE_AUTOUPDATER=1` / `COPILOT_AUTO_UPDATE=false` — the agent version is pinned at image
   build time.
+
+Nothing the container does may reach your machine, so every part on the host treats what comes out
+of it as hostile:
+
+- Long-lived keys stay on the host: the GitHub App private key, service-account credentials and
+  the proxies' keys never enter the container; it gets short-lived tokens in `/run/credentials`,
+  mounted read-only.
+- Nothing on the host runs what the container wrote: the changes a run made are listed by git
+  inside its container (`docker exec`), never in its mirror here, whose `.git/config` is the
+  agent's; `claude-home` mounts a copy of `~/.claude` per run and takes back only a validated login.
+- What the host connects to, it checks each time: the port proxy publishes only the run's `PORTS`
+  and opens each socket without following symlinks; upstream-proxy's sockets are mounted
+  read-only, so no sandbox can put itself between another one and the proxy.
+- Plugins that hand the container a part of your machine by design — `cwd-workspace` (your
+  checkout), `data-mounts` (what you list), `libvirt` (your VMs) — do nothing until you switch them on or
+  list what to mount, and give the agent exactly that: switch one on only for what you would let the agent run on your machine.
 
 ## Repository layout
 
@@ -933,7 +949,6 @@ The core is grouped by role under `src/`; each folder has one reason to change.
 | [src/services/credentials/](src/services/credentials) | `register_credential`: minting on the host, refreshing, the `/run/credentials` mount |
 | [src/services/settings/](src/services/settings) | the agent's managed policy: `merge-settings.py` deep-merges plugin fragments into `settings-base.json` |
 | [src/services/chat/](src/services/chat) | `chat-bridge.mjs`: the chat events the agents' `chat.mjs` speak and the web UI draws |
-| [src/shared/](src/shared) | `peer_owner.py`: who is on the other end of a socket, for root-side helpers |
 | [src/server/](src/server) | **the web UI's server** over `run.sh`: `server.py` (sessions, PRs and issues, a tunnel to `code serve-web`, the pages), `holder.py` (what keeps a session running through a restart of the server), `serve.sh` (starts it in the uv environment), `serve-oauth.sh` (the same behind Google sign-in) |
 | [web/](web) | the web UI's pages — a React app (Vite, TypeScript): the dashboard, a session's chat, a terminal (`src/pages`), their components by feature (`src/components`), `src/hooks`, `src/api`, `src/lib`, `src/styles` |
 | [agents/](agents) | the agents themselves |

@@ -3,16 +3,15 @@
 
 Usage: publish-ports.py --log FILE --port PORT [--port PORT]... <dir>
 
-Watches this container's /proc/net/tcp and tcp6 for listening sockets of any user but root (root
-only runs the sandbox's own helpers: upstream-proxy's forwarder, gcp-auth's metadata server), and
-for each such port the project configured (PORTS, the --port arguments) listens on
+Watches this container's /proc/net/tcp and tcp6 for listening sockets (a container the agent
+started with `docker run -p` among them), and for each such port the project configured (PORTS, the --port arguments) listens on
 <dir>/<port>.sock, relaying every connection to the address the server listens on — 127.0.0.1 for a server on every address, so one bound to localhost only is
 published just the same. A port no longer listened on is withdrawn.
 
 <dir> is bind-mounted from the host, where the central port proxy (../host/portd.py) gives each
-socket a TCP port on the host. It sits in a root-only directory: the agent cannot reach it to plant
-anything there for the host to connect to (the plugin's root-init.sh). Runs as root, detached; its own sockets are unix ones,
-so it never shows up in what it watches.
+socket a TCP port on the host. Runs as the agent, detached, like everything in the container: what
+the host proxy publishes and connects to it decides itself. Its own sockets are unix ones, so it
+never shows up in what it watches.
 """
 from __future__ import annotations
 
@@ -43,7 +42,7 @@ def address(hex_addr: str) -> str:
 
 
 def listening(tables=("/proc/net/tcp", "/proc/net/tcp6")) -> dict[int, str]:
-    """port → address to reach it on, for every socket a non-root user listens on."""
+    """port → address to reach it on, for every listening socket."""
     found: dict[int, str] = {}
     for table in tables:
         try:
@@ -53,7 +52,7 @@ def listening(tables=("/proc/net/tcp", "/proc/net/tcp6")) -> dict[int, str]:
             continue
         for row in rows:
             f = row.split()
-            if len(f) < 8 or f[3] != LISTEN or f[7] == "0":
+            if len(f) < 8 or f[3] != LISTEN:
                 continue
             hex_addr, hex_port = f[1].split(":")
             port, addr = int(hex_port, 16), address(hex_addr)

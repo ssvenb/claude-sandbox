@@ -5,6 +5,5 @@
   "defaultEnabled": true,
   "provides": ["package-managers"],
   "requires": [],
-  "requiredEnv": [],
-  "secrets": []
+  "requiredEnv": []
 }

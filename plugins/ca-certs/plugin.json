@@ -6,7 +6,6 @@
   "provides": ["ca-certs"],
   "requires": [],
   "requiredEnv": [],
-  "secrets": [],
   "settings": [
     {
       "env": "CA_CERTS_DIR",

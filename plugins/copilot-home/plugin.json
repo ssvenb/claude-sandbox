@@ -1,19 +1,18 @@
 {
   "name": "copilot-home",
-  "description": "Mounts the host user's ~/.copilot directory into the agent's home so the container reuses the globally configured Copilot CLI credentials and settings.",
+  "description": "Mounts a per-run copy of the host user's ~/.copilot into the agent's home so the container reuses the globally configured Copilot CLI credentials and settings, without the agent writing to the host's own.",
   "priority": 5,
   "defaultEnabled": true,
   "requiredAgent": "copilot",
   "provides": ["copilot-home"],
   "requires": [],
   "requiredEnv": [],
-  "secrets": [],
   "settings": [
     {
       "env": "COPILOT_HOME_DIR",
       "type": "path",
       "label": "Copilot config directory",
-      "description": "Host directory mounted as the agent's ~/.copilot.",
+      "description": "Host directory copied as the agent's ~/.copilot, for each run.",
       "placeholder": "~/.copilot"
     }
   ]

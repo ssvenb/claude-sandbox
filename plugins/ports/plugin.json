@@ -7,7 +7,6 @@
   "requires": [],
   "conflicts": [],
   "requiredEnv": [],
-  "secrets": [],
   "settings": [
     {
       "env": "PORTS",

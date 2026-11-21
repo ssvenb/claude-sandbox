@@ -4,7 +4,7 @@
 #
 # Only package NAMES arrive here, validated on the host against a strict character set, so the
 # unquoted expansions below cannot turn into a second command. Project-supplied shell runs in
-# agent-init.sh instead, unprivileged and after the secrets are dropped.
+# agent-init.sh instead, as the agent user.
 
 if [ -n "${PROJECT_DEPS_APT:-}" ]; then
   echo "📦 project-deps: apt-get install $PROJECT_DEPS_APT"

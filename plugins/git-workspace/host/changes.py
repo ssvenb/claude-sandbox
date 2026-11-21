@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """The files a run's checkout changed since it branched off its base, committed or not, as a JSON
 array on stdout: each {path, status (A, M or D), added, removed}, the lines added and removed being
-null for a binary file. Run by the web server in the checkout (web_command in ../web.sh).
+null for a binary file. Asked for by the web server (web_command in ../web.sh), which names the
+run in WEB_RUN_ID: then this script runs itself inside that run's container, never on this machine.
+The checkout is the agent's, .git/config included, and git runs what that config says (core.fsmonitor,
+a diff or filter driver): run here, as you, that would be anything the agent wrote there.
 
     changes.py [BASE_BRANCH]    (default: origin's default branch, else main or master)
 """
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -37,5 +41,14 @@ def changes(base_branch=""):
     return sorted(found.values(), key=lambda f: f["path"])
 
 
+def in_container(run_id, args):
+    """This script, fed on stdin to python3 in the run's container, as its agent user, in /workspace."""
+    with open(__file__, "rb") as me:
+        return subprocess.run(["docker", "exec", "-i", "-u", "node", "-w", "/workspace", f"sandbox-{run_id}",
+                               "python3", "-", *args], stdin=me, check=False).returncode
+
+
 if __name__ == "__main__":
+    if run_id := os.environ.get("WEB_RUN_ID"):
+        sys.exit(in_container(run_id, sys.argv[1:2]))
     json.dump(changes(*sys.argv[1:2]), sys.stdout)

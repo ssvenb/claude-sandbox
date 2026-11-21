@@ -1131,14 +1131,16 @@ def checkout(project, run_id):
 
 def plugin_command(project, run_id, plugin, name):
     """What a plugin's page code asks of a run (web_command): the plugin's command run in the run's
-    checkout, and the JSON it prints. None when the project's plugin has no such command, the run
-    has no checkout here, or the command failed."""
+    checkout, the run named in WEB_RUN_ID, and the JSON it prints. None when the project's plugin has
+    no such command, the run has no checkout here, or the command failed. The checkout is the agent's:
+    a command must not run git (or anything that reads its files as config) in it on this machine."""
     command = described.get(project, {}).get("commands", {}).get(plugin, {}).get(name)
     root = checkout(project, run_id)
     if not command or not root:
         return None
     try:
-        return json.loads(subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=20).stdout)
+        return json.loads(subprocess.run(command, cwd=root, env={**os.environ, "WEB_RUN_ID": run_id},
+                                         capture_output=True, text=True, timeout=20).stdout)
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return None
 

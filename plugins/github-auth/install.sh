@@ -11,3 +11,6 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githu
 apt-get update
 apt-get install -y --no-install-recommends gh
 rm -rf /var/lib/apt/lists/*
+
+# Ahead of /usr/bin/gh on PATH: picks the token for the repo gh acts on (bin/gh). COPY'd later.
+ln -sf /opt/plugins/github-auth/bin/gh /usr/local/bin/gh

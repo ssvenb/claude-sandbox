@@ -82,6 +82,22 @@ def test_github_token_comes_from_the_installation_owning_the_repo(gh_env, monkey
     assert [r.get_method() for r in api.requests] == ["GET", "POST"]
 
 
+@pytest.mark.parametrize("argv, body", [
+    ([], {"repositories": ["widgets"], "permissions": {"contents": "write", "issues": "read", "metadata": "read"}}),
+    (["--all"], {"permissions": {"contents": "read", "issues": "read", "metadata": "read"}}),
+])
+def test_github_token_is_scoped_and_capped_at_what_the_app_has(gh_env, monkeypatch, argv, body):
+    monkeypatch.setenv("REPO_URL", "https://github.com/acme/widgets.git")
+    monkeypatch.setattr("sys.argv", ["mint-gh-token.py", *argv])
+    granted = {"contents": "write", "issues": "read", "metadata": "read", "administration": "write"}
+    api = FakeAPI(monkeypatch, {
+        ("GET", f"{API}/repos/acme/widgets/installation"): (200, {"id": 7, "permissions": granted}),
+        ("POST", f"{API}/app/installations/7/access_tokens"): (201, {"token": "t"}),
+    })
+    run(GH_MINT)
+    assert json.loads(api.requests[1].data) == body
+
+
 def test_github_jwt_is_signed_by_the_app_key(gh_env, monkeypatch, app_key):
     api = FakeAPI(monkeypatch, {
         ("GET", f"{API}/app/installations"): (200, [{"id": 3}]),

@@ -2,7 +2,9 @@
 """Mint a short-lived GitHub App installation token and print it to stdout.
 
 Runs on the HOST: reads the App key from $GH_PRIVATE_KEY_FILE, which never enters the
-container. Installation tokens are hard-capped at 1h by GitHub, so run.sh's credential
+container. The token is scoped (#85): by default to REPO_URL's repo alone, which it may push to and
+open pull requests on; with --all to every repo of the installation, read-only except for issues.
+Each permission is capped at what the App was granted, so a narrower App still mints. Installation tokens are hard-capped at 1h by GitHub, so run.sh's credential
 refresher (src/services/credentials/credentials.sh) calls this at startup and again every 40 minutes.
 """
 import json
@@ -20,12 +22,21 @@ GH_HOST = os.environ.get("GH_HOST") or "github.com"
 API = "https://api.github.com" if GH_HOST == "github.com" else f"https://{GH_HOST}/api/v3"
 
 
-def api(path: str, jwt: str, method: str = "GET"):
+# The run's own repo; and every repo the App reaches, which an agent may read and file issues on.
+REPO_PERMISSIONS = {"contents": "write", "pull_requests": "write", "issues": "write", "workflows": "write",
+                    "actions": "write", "checks": "read", "statuses": "read", "metadata": "read"}
+ALL_PERMISSIONS = {"contents": "read", "pull_requests": "read", "issues": "write", "actions": "read",
+                   "checks": "read", "statuses": "read", "metadata": "read"}
+LEVELS = ["read", "write", "admin"]
+
+
+def api(path: str, jwt: str, method: str = "GET", body=None):
     req = urllib.request.Request(
         API + path,
         method=method,
+        data=None if body is None else json.dumps(body).encode(),
         headers={"Authorization": f"Bearer {jwt}",
-                 "Accept": "application/vnd.github+json"},
+                 "Accept": "application/vnd.github+json", "Content-Type": "application/json"},
     )
     try:
         with urllib.request.urlopen(req) as r:
@@ -59,12 +70,18 @@ except (ValueError, TypeError, pyjwt.PyJWTError) as e:
 # The App may be installed on several orgs; a token from the wrong one sees REPO_URL as "not found".
 repo = re.search(r"[/:]([^/:]+)/([^/]+?)(?:\.git)?/?$", os.environ.get("REPO_URL", ""))
 if repo:
-    installation_id = api(f"/repos/{repo[1]}/{repo[2]}/installation", jwt)["id"]
+    installation = api(f"/repos/{repo[1]}/{repo[2]}/installation", jwt)
 else:
     installations = api("/app/installations", jwt)
     if not installations:
         sys.exit("mint-gh-token: the GitHub App has no installations; install it on the "
                  "account or org that owns REPO_URL.")
-    installation_id = installations[0]["id"]
-token = api(f"/app/installations/{installation_id}/access_tokens", jwt, "POST")["token"]
+    installation = installations[0]
+every_repo = "--all" in sys.argv[1:] or not repo
+granted = installation.get("permissions", {})
+wanted = ALL_PERMISSIONS if every_repo else REPO_PERMISSIONS
+body = {"permissions": {k: min(v, granted[k], key=LEVELS.index) for k, v in wanted.items() if k in granted}}
+if not every_repo:
+    body["repositories"] = [repo[2]]
+token = api(f"/app/installations/{installation['id']}/access_tokens", jwt, "POST", body)["token"]
 print(token)

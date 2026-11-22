@@ -171,10 +171,15 @@ printf '%s' '{{"tool_input": {{"command": "git push origin main"}}}}' | {hook} 2
 
 
 def test_github_auth_logs_gh_in_with_the_minted_token(image):
-    b = boot(image, "github-auth", "cat /tmp/gh.log", GH_HOST="github.com", GH_USERNAME="e2e-bot")
+    probe = ("cat /tmp/gh.log; git config --global --get-all credential.https://github.com.helper; "
+             "git config --global --get-all credential.https://github.com/e2e/repo.git.helper")
+    b = boot(image, "github-auth", probe, GH_HOST="github.com", GH_USERNAME="e2e-bot",
+             REPO_URL="https://github.com/e2e/repo")
     assert b.out.splitlines() == ["auth login --hostname github.com --with-token | ghs_e2e",
                                   "config set -h github.com user e2e-bot",
-                                  "auth setup-git --hostname github.com"]
+                                  "auth setup-git --hostname github.com",
+                                  "", "!GH_TOKEN=$(cat /run/credentials/github-token-all) /usr/bin/gh auth git-credential",
+                                  "", "!/usr/bin/gh auth git-credential"]
     assert "gh pr create" in b.briefing and "until every check is green" in b.briefing
 
 

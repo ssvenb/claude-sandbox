@@ -10,6 +10,17 @@ gh_set_user() { [ -z "${GH_USERNAME:-}" ] || gh config set -h "$GH_HOST" user "$
 gh auth login --hostname "$GH_HOST" --with-token <"$GH_TOKEN_FILE"
 gh_set_user
 gh auth setup-git --hostname "$GH_HOST"
+# git, like bin/gh: every repo with the read-only token (plus issues), the run's own with gh's login.
+git config --global --replace-all "credential.https://$GH_HOST.helper" ''
+git config --global --add "credential.https://$GH_HOST.helper" \
+  '!GH_TOKEN=$(cat /run/credentials/github-token-all) /usr/bin/gh auth git-credential'
+case "${REPO_URL:-}" in
+  "https://$GH_HOST/"*)
+    for url in "${REPO_URL%.git}" "${REPO_URL%.git}.git"; do
+      git config --global --replace-all "credential.$url.helper" ''
+      git config --global --add "credential.$url.helper" '!/usr/bin/gh auth git-credential'
+    done ;;
+esac
 echo "✅ GitHub CLI authenticated successfully for the Agent!"
 
 (

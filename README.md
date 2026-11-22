@@ -316,7 +316,7 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | `docker-cli` | 5 | on | any | `docker-cli` | — | Docker Engine, CLI, compose and buildx install; runs the sandbox under the host's [Sysbox](https://github.com/nestybox/sysbox) runtime (`--runtime=sysbox-runc`, refuses to start without it) and starts a Docker daemon of its own inside, so the agent sees neither the host's containers nor another sandbox's |
 | `netbird` | 5 | off | any | `mesh-network` | — | NetBird client install; enrols the container as its own peer (`sandbox-<RUN_ID>`) from the `netbird-setup-key` authentication `NB_AUTH` names, adding `NET_ADMIN` + `/dev/net/tun` |
 | `ports` | 5 | on | any | `ports` | — | publishes the ports listed in `PORTS`: joins the central port proxy on the HOST, shared by every sandbox of every project, and offers what the agent listens on as unix sockets in a directory mounted from it; see [Published ports](#published-ports); nothing listed → does nothing |
-| `github-auth` | 10 | on | any | `git-credentials` | — | `gh` CLI install; mints App installation tokens on the host as the `github-token` credential (re-minted every 40 min), `gh auth login` with each one; briefs the agent to open a pull request for its work and fix whatever fails until its CI is green |
+| `github-auth` | 10 | on | any | `git-credentials` | — | `gh` CLI install; mints App installation tokens on the host (re-minted every 40 min): `github-token`, scoped to the run's repo (push, pull requests, issues), and `github-token-all`, every repo of the App read-only plus issues; `gh auth login` with the first, and `gh` (`bin/gh`) and git use the second for any other repo; briefs the agent to open a pull request for its work and fix whatever fails until its CI is green |
 | `gcp-auth` | 10 | off | any | `gcp-credentials` | — | Google Cloud CLI install; mints 1h service-account tokens on the host and makes them the container's ambient identity: `gcloud` reads the token file, a stand-in GCE metadata server serves the client libraries |
 | `ssh-credentials` | 15 | off | any | `ssh-credentials` | — | `openssh-client` install; writes `~/.ssh/sandbox_key` + `~/.ssh/config` for the agent user |
 | `upstream-proxy` | 15 | on | any | `upstream-proxy` | — | credential-injecting reverse proxies on the HOST, one per route from the project config, shared by all of a project's running sandboxes, bind-mounted (read-only) as unix sockets and bridged to loopback ports; no routes configured → does nothing |
@@ -928,6 +928,10 @@ hold against one that is not:
 - `branch-guard` blocks `git checkout/switch/branch/worktree` and pushes of other branches; the
   managed settings, `/opt/plugins` and `/opt/agents` are root-owned and read-only. What actually
   keeps a branch safe is the forge's branch protection, and what the token may do.
+- The GitHub tokens are scoped: only the run's repo gets contents, pull request and workflow
+  write; every other repo of the App is read-only except for issues. That token can still push
+  to any branch of the run's repo, `main` included: protect the default branch with branch
+  protection or a ruleset.
 - `DISABLE_AUTOUPDATER=1` / `COPILOT_AUTO_UPDATE=false` — the agent version is pinned at image
   build time.
 

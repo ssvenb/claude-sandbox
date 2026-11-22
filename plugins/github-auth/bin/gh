@@ -1,0 +1,31 @@
+#!/bin/sh
+# gh, with the token for the repo it acts on. The run's own repo (REPO_URL) gets gh's login, the
+# token scoped to it that may push and open pull requests; any other repo gets github-token-all,
+# which reads every repo of the App and writes issues (#85).
+# shortcut: the repo is read only from -R/--repo, `gh api [/]repos/O/N…`, `gh repo <cmd> O/N` and
+# the working directory's origin; teach it another form when an agent hits one.
+real=/usr/bin/gh
+all=/run/credentials/github-token-all
+case "${1:-}" in auth|config|"") exec "$real" "$@" ;; esac
+[ -r "$all" ] || exec "$real" "$@"
+
+# owner/name of a repo URL or owner/name, lowercased (GitHub names are case-insensitive).
+slug() { printf '%s\n' "$1" | sed -E 's#/+$##; s#\.git$##; s#^.*[/:]([^/:]+/[^/:]+)$#\1#' | tr 'A-Z' 'a-z'; }
+
+target= prev=
+for a in "$@"; do
+  case "$prev" in -R|--repo) target=$a ;; esac
+  case "$a" in
+    --repo=*) target=${a#--repo=} ;;
+    -R?*) target=${a#-R} ;;
+    repos/*/*|/repos/*/*) [ "$1" != api ] || [ -n "$target" ] || target=$(printf '%s' "$a" | sed -E 's#^/?repos/([^/]+/[^/?]+).*#\1#') ;;
+  esac
+  prev=$a
+done
+[ -n "$target" ] || [ "$1" != repo ] || case "${3:-}" in -*) ;; */*) target=$3 ;; esac
+[ -n "$target" ] || target=$(git remote get-url origin 2>/dev/null) || target=
+
+if [ -n "${REPO_URL:-}" ] && [ "$(slug "$target")" = "$(slug "$REPO_URL")" ]; then
+  exec "$real" "$@"
+fi
+GH_TOKEN=$(cat "$all") exec "$real" "$@"

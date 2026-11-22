@@ -193,6 +193,16 @@ def test_route_allowlists():
     assert route().permits("PURGE", "/anything")
 
 
+@pytest.mark.parametrize("path, ok", [
+    ("/v1/items", True), ("/v1/", True), ("/v1", False), ("/v1/a%20b", True), ("/v%31/items", True),
+    ("/models", True), ("/models/x", True), ("/modelsX", False), ("/models%2Fx", False),
+    ("/v1/../admin", False), ("/v1/%2e%2e/admin", False), ("/v1/%252e%252e/admin", False),
+    ("/v1/..;/admin", False), ("/v1/..%5cadmin", False), ("/v1/./items", False), ("/v1%2F..%2Fadmin", False),
+])
+def test_route_paths_match_whole_decoded_segments_and_refuse_dot_segments(path, ok):
+    assert route(allowPaths=["/v1/", "/models"]).permits("GET", path) is ok
+
+
 def test_route_rewrites_local_url_both_ways():
     r = route(port=8081)
     assert r.local_url == "http://127.0.0.1:8081" and r.rewrites

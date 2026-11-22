@@ -18,7 +18,8 @@ Each route in routes.json:
   name           socket basename (<socket-dir>/<name>.sock)
   upstream       scheme://host[:port] every request is forwarded to
   allowMethods   HTTP methods the proxy will relay (default: every method)
-  allowPaths     path prefixes the proxy will relay (default: every path)
+  allowPaths     path prefixes the proxy will relay, matched on whole segments; a path with a
+                 dot segment (even percent-encoded) is always refused (default: every path)
   auth           how the credential is injected, see _Injector below
   maxBodyBytes   request body cap (default 8 MiB)
   port           loopback port the container reaches this route on, used to derive localUrl
@@ -216,6 +217,19 @@ class _Injector:
             return self._token
 
 
+def _segments(path: str) -> list[str]:
+    """Split, then decode each segment, so an encoded %2F cannot fake a segment boundary."""
+    return [urllib.parse.unquote(s) for s in path.split("/")]
+
+
+def _has_dot_segment(path: str) -> bool:
+    """True if "." or ".." appears once fully decoded, splitting on / and \\ and dropping ;params."""
+    prev = None
+    while prev != path:
+        prev, path = path, urllib.parse.unquote(path)
+    return any(s.split(";")[0] in (".", "..") for s in path.replace("\\", "/").split("/"))
+
+
 class _Route:
     def __init__(self, cfg: dict):
         self.name = cfg["name"]
@@ -232,6 +246,7 @@ class _Route:
         methods = cfg.get("allowMethods")
         self.methods = {m.upper() for m in methods} if methods else None
         self.paths = tuple(cfg.get("allowPaths") or ["/"])
+        self._path_segments = [_segments(p) for p in self.paths]
         self.max_body = int(cfg.get("maxBodyBytes", DEFAULT_MAX_BODY))
         auth = cfg.get("auth") or {}
         # A route still in the old shape ({type, valueEnv, …}) would otherwise run with no
@@ -269,7 +284,16 @@ class _Route:
         return bool(self._out_pairs)
 
     def permits(self, method: str, path: str) -> bool:
-        return (self.methods is None or method.upper() in self.methods) and path.startswith(self.paths)
+        if self.methods is not None and method.upper() not in self.methods:
+            return False
+        # An upstream that resolves dot segments would land outside the prefix that matched here.
+        if _has_dot_segment(path):
+            return False
+        segs = _segments(path)
+        # Whole segments: "/v1/models" covers "/v1/models/x" but not "/v1/modelsX"; a prefix
+        # ending in "/" (last segment "") covers anything below it.
+        return any(segs[:len(p) - 1] == p[:-1] and len(segs) >= len(p) if p[-1] == "" else segs[:len(p)] == p
+                   for p in self._path_segments)
 
     def to_upstream(self, data: bytes) -> bytes:
         """Rewrite the sandbox's dummy address to the real one, on its way out."""

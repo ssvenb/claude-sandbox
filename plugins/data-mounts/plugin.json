@@ -1,6 +1,6 @@
 {
   "name": "data-mounts",
-  "description": "Bind-mounts extra host directories into the container, listed in the project config.",
+  "description": "Bind-mounts extra host directories into the container, listed in the project config. Security: mounts are read-write unless the entry ends in :ro, and anything the agent writes there lands on your host as you.",
   "priority": 15,
   "defaultEnabled": true,
   "provides": ["data-mounts"],

@@ -1,6 +1,6 @@
 {
   "name": "cwd-workspace",
-  "description": "Bind-mounts the host directory run.sh was invoked from at /workspace, so the agent works directly on your local checkout.",
+  "description": "Bind-mounts the host directory run.sh was invoked from at /workspace, so the agent works directly on your local checkout. Security: the agent can write your checkout's .git/config (hooks, core.fsmonitor, filter drivers), .envrc and .vscode/, so the next git or editor you run there on the host can execute code it planted.",
   "priority": 20,
   "defaultEnabled": false,
   "provides": ["workspace"],

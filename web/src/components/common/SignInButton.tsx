@@ -1,6 +1,6 @@
-import { useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { message, post } from '../../api/client';
+import { api, message, post } from '../../api/client';
 
 interface Props {
   /** The agent whose `signIn` (its agent.json) the server runs: agents/<agent>. */
@@ -13,16 +13,35 @@ interface Props {
 }
 
 /** Signs an agent's CLI on the server in afresh: a tab the server sends on to the sign-in page its
- *  command prints, and a dialog here for the code that page ends on. */
+ *  command prints, and a dialog here for the code that page ends on. When the server finds it signed
+ *  out (its `signedIn`, on load and each time the page comes back into view), it asks to sign in again;
+ *  a No holds until it is seen signed in once more. */
 export function SignInButton({ agent, label, icon, onClick }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
   const title = useId();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const path = `/api/agents/${agent}/sign-in`;
+  const ask = useRef<HTMLDialogElement>(null);
+  const declined = `sandbox:sign-in-declined:${agent}`;
+
+  useEffect(() => {
+    const check = () => {
+      if (document.hidden || ask.current!.open || dialog.current!.open) return;
+      // No `signedIn` or no CLI on the server: nothing to ask.
+      api<{ signedIn: boolean }>(`/api/agents/${agent}/signed-in`).then(({ signedIn }) => {
+        if (signedIn) localStorage.removeItem(declined);
+        else if (!localStorage.getItem(declined) && !dialog.current!.open) ask.current!.showModal();
+      }, () => {});
+    };
+    check();
+    document.addEventListener('visibilitychange', check);
+    return () => document.removeEventListener('visibilitychange', check);
+  }, [agent, declined]);
 
   const open = () => {
     onClick();
+    ask.current!.close();
     window.open(path, '_blank');  // a real link, so no popup blocker
     setError('');
     dialog.current!.showModal();
@@ -65,6 +84,19 @@ export function SignInButton({ agent, label, icon, onClick }: Props) {
               <button type="submit" className="primary" disabled={busy}>Sign in</button>
             </footer>
           </form>
+        </dialog>,
+        document.body)}
+      {createPortal(
+        <dialog ref={ask} aria-labelledby={`${title}-ask`}>
+          <header>
+            <h2 id={`${title}-ask`}>Signed out</h2>
+            <p>The server is not signed in anymore. {label} again?</p>
+          </header>
+          <footer>
+            <button type="button" onClick={() => { localStorage.setItem(declined, '1'); ask.current!.close(); }}>Not now</button>
+            {/* A click, so the tab it opens gets past the popup blocker. */}
+            <button type="button" className="primary" autoFocus onClick={open}>{label}</button>
+          </footer>
         </dialog>,
         document.body)}
     </>

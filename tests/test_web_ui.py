@@ -986,6 +986,25 @@ def test_the_menus_sign_in_to_claude_opens_its_page_and_takes_the_code_in_a_dial
     board.wait_for_selector("dialog[aria-labelledby]", state="hidden")
 
 
+def test_a_signed_out_claude_asks_to_sign_in_again_and_a_no_holds(board, tmp_path):
+    page = board.base + "/?claude-signin"
+    tool(tmp_path / "bin/claude", f"#!/bin/sh\n[ \"$2\" = status ] && exit 1\necho 'visit: {page}'\nread c\n")
+    ask = board.locator("dialog:has-text('Signed out')")
+    board.reload()
+    ask.wait_for()
+    with board.context.expect_page() as tab:
+        ask.get_by_role("button", name="Sign in to Claude").click()
+    tab.value.wait_for_url(page)
+    tab.value.close()
+    assert ask.is_hidden() and board.get_by_role("textbox", name="Code").is_visible()
+    board.click("dialog button:text('Cancel')")
+    board.reload()
+    ask.get_by_role("button", name="Not now").click()
+    board.reload()
+    board.wait_for_timeout(1000)
+    assert ask.is_hidden()  # asked no more until it is seen signed in again
+
+
 def test_side_chats_are_asked_beside_the_chat_and_the_panels_are_dragged_and_put_away(board):
     subprocess.run(["git", "-C", board.checkout, "init", "-q", "-b", "main"], check=True)
     (board.checkout / "app.py").write_text("a\n")

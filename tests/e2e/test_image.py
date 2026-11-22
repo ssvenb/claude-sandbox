@@ -180,7 +180,7 @@ def test_github_auth_logs_gh_in_with_the_minted_token(image):
                                   "auth setup-git --hostname github.com",
                                   "", "!GH_TOKEN=$(cat /run/credentials/github-token-all) /usr/bin/gh auth git-credential",
                                   "", "!/usr/bin/gh auth git-credential"]
-    assert "gh pr create" in b.briefing and "until every check is green" in b.briefing
+    assert "gh pr create" in b.briefing and "until every check is green" in b.briefing and "github-token-all" in b.briefing
 
 
 def test_ca_certs_joins_the_trust_store(image):

@@ -928,10 +928,6 @@ hold against one that is not:
 - `branch-guard` blocks `git checkout/switch/branch/worktree` and pushes of other branches; the
   managed settings, `/opt/plugins` and `/opt/agents` are root-owned and read-only. What actually
   keeps a branch safe is the forge's branch protection, and what the token may do.
-- The GitHub tokens are scoped: only the run's repo gets contents, pull request and workflow
-  write; every other repo of the App is read-only except for issues. That token can still push
-  to any branch of the run's repo, `main` included: protect the default branch with branch
-  protection or a ruleset.
 - `DISABLE_AUTOUPDATER=1` / `COPILOT_AUTO_UPDATE=false` — the agent version is pinned at image
   build time.
 

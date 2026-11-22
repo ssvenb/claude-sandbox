@@ -59,7 +59,7 @@
               "monospace": true
             },
             "label": "Allowed path prefixes",
-            "description": "None: every path."
+            "description": "Matched on whole segments. None: every path."
           },
           {
             "key": "auth",

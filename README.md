@@ -657,6 +657,8 @@ in three places:
 3. **`allowMethods` / `allowPaths`:** the proxy refuses anything else with 403 before it reaches
    Google, e.g. only `GET`/`HEAD` on `/storage/v1/b/my-bucket/o` and `/download/storage/v1/b/my-bucket/o`.
    Both are optional on every route: left out, the route relays every method and every path.
+   Path prefixes match whole segments (`/v1/models` does not cover `/v1/modelsX`), and a path with
+   a `.` or `..` segment, percent-encoded or not, is always refused.
 
 In the container, `STORAGE_EMULATOR_HOST` points the Python/Go/Node storage clients at the proxy
 (unauthenticated, which is what you want: the proxy adds the credential), and

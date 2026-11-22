@@ -1148,6 +1148,17 @@ def test_an_agents_sign_in_gives_the_link_and_takes_back_its_code(signing_agent,
             web.sign_in(agent)
 
 
+def test_an_agents_sign_in_check_is_its_signed_in_command_exiting_0(signing_agent, tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
+    (tmp_path / "agents/a/agent.json").write_text(json.dumps({"signedIn": ["cli", "status"]}))
+    signing_agent.write_text('#!/bin/sh\n[ -e "$0.in" ]\n')
+    assert web.signed_in("a") is False
+    (tmp_path / "cli.in").touch()
+    assert web.signed_in("a") is True
+    with pytest.raises(ValueError, match="has no sign-in check"):
+        web.signed_in("b")
+
+
 def test_an_agents_sign_in_finds_its_cli_in_local_bin_off_the_path(signing_agent, tmp_path, monkeypatch):
     (tmp_path / ".local/bin").mkdir(parents=True)
     signing_agent.rename(tmp_path / ".local/bin/cli")

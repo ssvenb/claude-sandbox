@@ -84,6 +84,9 @@ its fields those of its type — or JSON, saved readable by you alone. Agents ad
 Claude's **Sign in to Claude** runs `claude auth login` on the server (its `~/.claude`, which
 `claude-home` mounts): a new tab goes on to claude.com's sign-in, and the code that page ends on,
 pasted into the dialog on the dashboard, signs it in (see an agent's [`signIn`](#agents)).
+When the server's Claude is signed out (`claude auth status` fails, checked as the dashboard loads
+and each time it comes back into view), the dashboard asks whether to sign in again; **Not now**
+holds until it is seen signed in once more.
 For a project whose
 `origin` is on GitHub it lists the open pull requests, with their CI status, and issues with a token of
 the project's GitHub App (`GH_AUTH`, which the plugin requires; the App needs read access to issues, checks and commit statuses, and
@@ -272,6 +275,9 @@ menu offers it when the agent's `web/index.tsx` puts a `SignInButton`
 ([web/src/components/common/SignInButton.tsx](web/src/components/common/SignInButton.tsx)) in its
 `Menu` (see [web/src/plugins.ts](web/src/plugins.ts)'s `AgentUI`): `GET /api/agents/<name>/sign-in`
 starts the command and redirects to its link, `POST` with `{"code": …}` hands it the code.
+An optional `signedIn` is a command that exits 0 while the CLI is signed in
+(`["claude", "auth", "status"]`): with it, `GET /api/agents/<name>/signed-in` answers
+`{"signedIn": …}`, and the `SignInButton` asks to sign in again when it is not.
 
 Because `host.sh` runs after the plugin host stage, it can see `AGENT_AUTH_PROVIDED=1` from a
 plugin that supplies credentials itself and skip its own token check:

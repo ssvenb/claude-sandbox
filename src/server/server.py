@@ -1255,22 +1255,38 @@ signing_in = {}  # agent → its sign-in command under way, waiting for its code
 sign_in_lock = threading.Lock()
 
 
-def sign_in(agent):
-    """Starts the sign-in command an agent declares (`signIn` in its agent.json), dropping one of it
-    still under way, and gives the link it prints: the page to sign in at, which ends on a code."""
+def _agent_command(agent, key, what):
+    """The command an agent declares under `key` in its agent.json, its program found on this server."""
     meta = _manifest(AGENTS / agent / "agent.json") if re.fullmatch(r"[\w-]+", agent or "") else None
-    command = (meta or {}).get("signIn")
+    command = (meta or {}).get(key)
     if not (isinstance(command, list) and command and all(isinstance(c, str) for c in command)):
-        raise ValueError(f"agent {agent!r} has no sign-in")
+        raise ValueError(f"agent {agent!r} has no {what}")
     # Installers put CLIs in ~/.local/bin, which a service's PATH may lack.
     exe = shutil.which(command[0]) or shutil.which(command[0], path=str(Path.home() / ".local/bin"))
     if not exe:
         raise ValueError(f"{command[0]} is not installed on the server (not on its PATH, nor in ~/.local/bin)")
+    return [exe, *command[1:]]
+
+
+def signed_in(agent):
+    """Whether an agent's CLI on the server is signed in: its `signedIn` command (agent.json) exits 0."""
+    command = _agent_command(agent, "signedIn", "sign-in check")
+    try:
+        return subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL, timeout=60).returncode == 0
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise ValueError(f"cannot check the sign-in: {e}")
+
+
+def sign_in(agent):
+    """Starts the sign-in command an agent declares (`signIn` in its agent.json), dropping one of it
+    still under way, and gives the link it prints: the page to sign in at, which ends on a code."""
+    command = _agent_command(agent, "signIn", "sign-in")
     with sign_in_lock:
         if (old := signing_in.pop(agent, None)) and old.poll() is None:
             old.kill()
         try:
-            proc = subprocess.Popen([exe, *command[1:]], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True, env={**os.environ, "BROWSER": "true"})
         except OSError as e:
             raise ValueError(f"cannot run {command[0]}: {e}")
@@ -1454,6 +1470,11 @@ class Handler(BaseHTTPRequestHandler):
         elif url.path == "/api/config" and query.get("project") in known:
             try:
                 self.reply(200, read_config(query["project"]))
+            except ValueError as e:
+                self.reply(400, {"error": str(e)})
+        elif m := re.fullmatch(r"/api/agents/([\w-]+)/signed-in", url.path):
+            try:
+                self.reply(200, {"signedIn": signed_in(m[1])})
             except ValueError as e:
                 self.reply(400, {"error": str(e)})
         elif m := re.fullmatch(r"/api/agents/([\w-]+)/sign-in", url.path):  # a link to follow: on to its sign-in page

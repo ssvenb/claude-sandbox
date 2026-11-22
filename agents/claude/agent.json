@@ -4,6 +4,7 @@
   "managedSettings": "/etc/claude-code/managed-settings.json",
   "npmPackage": "@anthropic-ai/claude-code",
   "signIn": ["claude", "auth", "login"],
+  "signedIn": ["claude", "auth", "status"],
   "git": {
     "branchPrefix": "claude-code",
     "userName": "Claude Code"

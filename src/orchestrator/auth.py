@@ -43,6 +43,9 @@ TYPES = {
     "copilot-token": (("token",), ()),
 }
 
+# The fields that hold a secret itself rather than where one is: the web UI never sends them back.
+SECRETS = ("key", "token", "clientSecret")
+
 
 def auth_file(env: dict) -> Path:
     return Path(env.get("SANDBOX_AUTH_FILE")

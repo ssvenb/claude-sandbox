@@ -1038,9 +1038,13 @@ def delete_project(name):
     described.pop(name, None)
 
 
-def read_auth():
-    """Your authentications as they are in their file ({} without one), and what each type holds.
-    Unlike auth.load, a file others may read is shown too: saving it here makes it yours alone."""
+# What GET /api/auth shows for a secret (auth.SECRETS) that is set; POSTed back, it keeps the saved value.
+MASKED = "(saved, not shown)"
+
+
+def stored_auth():
+    """Your authentications as they are in their file ({} without one). Unlike auth.load, a file
+    others may read is taken too: saving it here makes it yours alone."""
     path = auth.auth_file(os.environ)
     try:
         entries = json.loads(path.read_text())
@@ -1050,6 +1054,15 @@ def read_auth():
         raise ValueError(f"{path} is not valid JSON ({e}): fix it by hand first")
     if not isinstance(entries, dict):
         raise ValueError(f"{path} must hold a JSON object: fix it by hand first")
+    return entries
+
+
+def read_auth():
+    """Your authentications with every secret masked, and what each type holds. Keys and tokens are
+    only ever written here, never read back: whoever reaches the API does not get them."""
+    path = auth.auth_file(os.environ)
+    entries = {name: {k: MASKED if k in auth.SECRETS and v not in (None, "") else v for k, v in e.items()}
+               if isinstance(e, dict) else e for name, e in stored_auth().items()}
     return {"file": str(path), "exists": path.exists(), "config": entries,
             "types": {t: {"required": list(r), "optional": list(o)} for t, (r, o) in auth.TYPES.items()}}
 
@@ -1058,9 +1071,17 @@ def write_auth(entries):
     """Replaces the authentications' file, readable by you alone, once each entry is a complete one of its type."""
     if not isinstance(entries, dict):
         raise ValueError("the authentications must be a JSON object of entries keyed by name")
+    stored = None
     for name, e in entries.items():
         if not isinstance(e, dict) or e.get("type") not in auth.TYPES:
             raise ValueError(f"{name}: .type must be one of {', '.join(auth.TYPES)}")
+        for k in auth.SECRETS:  # left as read_auth showed it: the value saved under this name
+            if e.get(k) == MASKED:
+                stored = stored_auth() if stored is None else stored
+                saved = stored.get(name) if isinstance(stored.get(name), dict) else {}
+                if saved.get(k) in (None, "", MASKED):
+                    raise ValueError(f"{name}: no {k} saved under this name (renamed?): enter it again")
+                e[k] = saved[k]
         try:
             auth.entry(os.environ, name, e["type"], entries)
         except Die as err:

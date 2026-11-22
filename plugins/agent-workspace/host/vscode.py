@@ -7,6 +7,11 @@ on the unix socket WEB_SOCKET names, under the base path WEB_BASE. It serves any
 VS Code in a browser is a shell on your account. It runs without a connection token: the web
 server's tunnel is the only way in, behind its guard (and a token would not survive anyway: the
 server refuses its token cookie on any navigation another origin started).
+
+The folders it opens are the agent's: its .vscode/ (tasks, launch configs, settings) would run as
+you once the folder is trusted. So every folder opens in restricted mode, without the prompt that
+offers to trust it (SETTINGS). Trust is still one deliberate click away, under "Restricted Mode" in
+the status bar: VS Code has no setting that takes it away.
 """
 import json
 import os
@@ -14,9 +19,17 @@ import shutil
 import sys
 from pathlib import Path
 
-# Machine settings every VS Code tab gets. Copilot's chat pane has no place here: the agent works
-# in the sandbox, VS Code is for reading and editing what it did.
-SETTINGS = {"chat.disableAIFeatures": True}
+# Settings every VS Code tab gets, by the file under the data directory they go in. Copilot's chat
+# pane has no place here: the agent works in the sandbox, VS Code is for reading and editing what it
+# did. Workspace trust is application-scoped, so it is only read from the user's settings.
+SETTINGS = {
+    "Machine": {"chat.disableAIFeatures": True},
+    "User": {
+        "security.workspace.trust.enabled": True,  # off would trust every folder
+        "security.workspace.trust.startupPrompt": "never",  # no dialog whose button trusts the folder
+        "security.workspace.trust.banner": "always",
+    },
+}
 
 
 def cli():
@@ -34,21 +47,21 @@ def cli():
 
 
 def data():
-    """VS Code's data directory (extensions, machine settings), with SETTINGS applied over what is
-    already there: settings changed in VS Code itself, under "Remote", are kept."""
+    """VS Code's data directory (extensions, settings), with SETTINGS applied over what is already
+    there: other settings changed in VS Code itself are kept."""
     data = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "claude-sandbox/vscode"
-    file = data / "data/Machine/settings.json"
-    file.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        settings = json.loads(file.read_text())
-    except FileNotFoundError:
-        settings = {}
-    except ValueError:  # edited in VS Code, with comments: not ours to rewrite
-        return data
-    if settings | SETTINGS != settings:
-        file.write_text(json.dumps(settings | SETTINGS, indent=2) + "\n")
+    for scope, ours in SETTINGS.items():
+        file = data / f"data/{scope}/settings.json"
+        file.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            settings = json.loads(file.read_text())
+        except FileNotFoundError:
+            settings = {}
+        except ValueError:  # edited in VS Code, with comments: not ours to rewrite
+            continue
+        if settings | ours != settings:
+            file.write_text(json.dumps(settings | ours, indent=2) + "\n")
     return data
-
 
 if __name__ == "__main__":
     code = cli()

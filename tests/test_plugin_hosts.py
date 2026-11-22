@@ -975,6 +975,8 @@ def test_vscode_settings_are_applied_over_the_ones_already_there(tmp_path, monke
     file.write_text('{\n  // mine\n  "editor.fontSize": 15\n}')
     vscode.data()  # with comments it is left as it is
     assert "// mine" in file.read_text()
+    user = json.loads((tmp_path / "claude-sandbox/vscode/data/User/settings.json").read_text())
+    assert user["security.workspace.trust.startupPrompt"] == "never"  # the agent's folders stay restricted
 
 
 @pytest.mark.parametrize("rollup, status", [

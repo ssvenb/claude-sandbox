@@ -164,7 +164,11 @@ the .deb/.rpm or snap install, or the standalone CLI): the first click starts on
 accepting the VS Code Server license terms on your behalf, and it stops with the web UI. Its data
 (extensions, settings) lives in `~/.local/share/claude-sandbox/vscode`, with Copilot's chat
 switched off (`chat.disableAIFeatures`) — the agent works in the sandbox. The first folder a
-browser opens may still show the empty chat pane; close it once and VS Code keeps it closed. It listens on a unix socket only your user can reach and is served under `/plugins/agent-workspace/` of the
+browser opens may still show the empty chat pane; close it once and VS Code keeps it closed. The
+checkout is the agent's, so it opens in restricted mode without asking to trust it: tasks, debug
+configs and the risky part of its `.vscode/settings.json` stay off, as they would otherwise run as you on this
+machine. Trusting it is still possible, under **Restricted Mode** in the status bar; don't, and
+don't run `git` or an editor of your own in the mirror either. It listens on a unix socket only your user can reach and is served under `/plugins/agent-workspace/` of the
 web UI itself, so there is no second port to open or to forward over an SSH tunnel.
 
 Resuming brings back the agent's conversation as well as the branch: each run's conversation is

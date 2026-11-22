@@ -1,3 +1,10 @@
+# Only the install scripts, so the dependency layers below are keyed on them alone: editing any
+# other agent or plugin file reuses them instead of reinstalling everything.
+FROM node:20-bookworm-slim AS installers
+COPY agents /i/agents
+COPY plugins /i/plugins
+RUN find /i -type f ! -name install.sh -delete
+
 FROM node:20-bookworm-slim
 
 # Shared dependencies only; anything a single plugin needs is installed by its own install.sh.
@@ -57,37 +64,41 @@ RUN npx -y playwright@latest install --with-deps chromium \
     && chown -R node:node /ms-playwright \
     && rm -rf /var/lib/apt/lists/* /root/.npm
 
-# Every agent's files ship in the image, but only the one named by AGENT gets its CLI installed.
-# AGENT_VERSION (resolved on the host, empty means latest) is part of this layer's cache key, so
-# the layer rebuilds exactly when a new release is out; it is referenced in the RUN so the value
-# cannot be optimised away.
-COPY agents /opt/agents
-ARG AGENT=claude
-ARG AGENT_VERSION=
-RUN set -eu; \
-    [ -d "/opt/agents/$AGENT" ] || { echo "Unknown agent: $AGENT" >&2; exit 1; }; \
-    if [ -f "/opt/agents/$AGENT/install.sh" ]; then \
-      echo "🤖 $AGENT ${AGENT_VERSION:-latest}"; \
-      AGENT_VERSION="$AGENT_VERSION" sh "/opt/agents/$AGENT/install.sh"; \
-    fi
-RUN chown -R root:root /opt/agents \
-    && find /opt/agents -type d -exec chmod 555 {} + \
-    && find /opt/agents -type f -exec chmod 444 {} +
-
-WORKDIR /workspace
-
-# Every plugin's files ship in the image; only those in ENABLED_PLUGINS (resolved by run.sh, empty
-# means all) get their dependencies installed, so flipping a flag rebuilds from here.
-COPY plugins /opt/plugins
+# Plugin dependencies first: they change far less often than the agent CLI's version. Only those
+# in ENABLED_PLUGINS (resolved by run.sh, empty means all) get installed, so flipping a flag
+# rebuilds from here.
 ARG ENABLED_PLUGINS=
-RUN set -eu; for f in /opt/plugins/*/install.sh; do \
+RUN --mount=type=bind,from=installers,source=/i/plugins,target=/tmp/plugins \
+    set -eu; for f in /tmp/plugins/*/install.sh; do \
       [ -f "$f" ] || continue; \
       name=$(basename "$(dirname "$f")"); \
       if [ -n "$ENABLED_PLUGINS" ]; then \
         case " $ENABLED_PLUGINS " in *" $name "*) ;; *) echo "⏭️  $name (disabled)"; continue ;; esac; \
       fi; \
-      echo "📦 $f"; sh "$f"; \
+      echo "📦 $name"; sh "$f"; \
     done
+
+# Only the agent named by AGENT gets its CLI installed. AGENT_VERSION (resolved on the host, empty
+# means latest) is part of this layer's cache key, so the layer rebuilds exactly when a new release
+# is out; it is referenced in the RUN so the value cannot be optimised away.
+ARG AGENT=claude
+ARG AGENT_VERSION=
+RUN --mount=type=bind,from=installers,source=/i/agents,target=/tmp/agents \
+    set -eu; \
+    [ -d "/tmp/agents/$AGENT" ] || { echo "Unknown agent: $AGENT" >&2; exit 1; }; \
+    if [ -f "/tmp/agents/$AGENT/install.sh" ]; then \
+      echo "🤖 $AGENT ${AGENT_VERSION:-latest}"; \
+      AGENT_VERSION="$AGENT_VERSION" sh "/tmp/agents/$AGENT/install.sh"; \
+    fi
+
+WORKDIR /workspace
+
+# Every agent's and plugin's files ship in the image.
+COPY agents /opt/agents
+RUN chown -R root:root /opt/agents \
+    && find /opt/agents -type d -exec chmod 555 {} + \
+    && find /opt/agents -type f -exec chmod 444 {} +
+COPY plugins /opt/plugins
 # bin/ is world-executable (the agent runs it: hooks, helpers), and everything lands root-owned
 # outside /workspace, so the agent does not edit its guardrails by accident. Guardrails only: the
 # agent is root here whenever it wants (the docker group), so nothing in the image is a boundary.

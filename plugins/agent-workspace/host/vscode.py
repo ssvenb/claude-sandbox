@@ -5,7 +5,7 @@ on the unix socket WEB_SOCKET names, under the base path WEB_BASE. It serves any
 (`?folder=`), so one is enough for all projects and runs.
 
 VS Code in a browser is a shell, and the folders it opens are the agent's: their .vscode/ and
-.git/config run code once trusted or used. So it runs in a container of its own (vscode.Dockerfile),
+.git/config run code once trusted or used. So it runs in a container of its own (../vscode.Dockerfile),
 not on this machine: as you (so the mirrors stay yours), with no capabilities, and with nothing
 mounted but the mirrors, its data directory and the socket's directory. Its terminal, tasks and git
 are a shell in there. It runs without a connection token: the web server's tunnel is the only way
@@ -75,7 +75,7 @@ def main(argv):
     store = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "claude-sandbox/vscode"
     for host_dir in (mirrors, store):
         os.makedirs(host_dir, exist_ok=True)  # or docker creates them, as root
-    with open(HERE / "vscode.Dockerfile", "rb") as dockerfile:
+    with open(HERE.parent / "vscode.Dockerfile", "rb") as dockerfile:
         subprocess.run(["docker", "build", "-q", "-t", IMAGE, "-"], stdin=dockerfile, check=True)
     subprocess.run(["docker", "rm", "-f", f"{IMAGE}-{os.getuid()}"], capture_output=True)  # a server before this one's
     os.execvp("docker", run(mirrors, store))

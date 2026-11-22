@@ -22,16 +22,16 @@ import urllib.request
 import pytest
 
 from conftest import REPO
-from test_web import FAKE_CODE, STUB, ui_dist  # noqa: F401 (a fixture)
+from test_web import FAKE_DOCKER, STUB, ui_dist  # noqa: F401 (a fixture)
 
 sync_api = pytest.importorskip("playwright.sync_api")
 
 RUN = "abc123"  # the run the fixture's first pull request and checkout belong to
 
 # `docker exec … python3 - ARG…` (git-workspace's changes, run in the run's container) runs here, in
-# the checkout the server runs it in, without the server's environment as in a container; every
-# other docker call does nothing.
-DOCKER = '#!/bin/sh\n[ "$1" = exec ] || exit 0\nwhile [ "$1" != python3 ]; do shift; done\nexec env -u WEB_RUN_ID "$@"\n'
+# the checkout the server runs it in, without the server's environment as in a container.
+# `docker run` is VS Code's container (FAKE_DOCKER); every other docker call does nothing.
+DOCKER = '#!/bin/sh\n[ "$1" = run ] && exec fake-docker "$@"\n[ "$1" = exec ] || exit 0\nwhile [ "$1" != python3 ]; do shift; done\nexec env -u WEB_RUN_ID "$@"\n'
 
 
 def tool(path, body):
@@ -67,7 +67,7 @@ def board(tmp_path, browser, ui_dist):
     shutil.copy(REPO / ".claude-sandbox.example.json", sandbox)
     tool(sandbox / "run.sh", STUB.read_text())
     tool(tmp_path / "bin/docker", DOCKER)
-    tool(tmp_path / "bin/code", FAKE_CODE)
+    tool(tmp_path / "bin/fake-docker", FAKE_DOCKER)
     project = tmp_path / "proj"
     project.mkdir()
     checkout = tmp_path / f"mirrors/proj-20261112-{RUN}"
@@ -84,7 +84,7 @@ def board(tmp_path, browser, ui_dist):
     (sandbox / "web.json").write_text(json.dumps({"notes": [], "agent": "claude", "checkout": f"{tmp_path}/mirrors/*-{{run_id}}",
         "plugins": ["agent-workspace", "git-workspace", "github-auth"],
         "commands": {"git-workspace": {"changes": [str(sandbox / "plugins/git-workspace/host/changes.py")]}},
-        "servers": {"agent-workspace": [str(sandbox / "plugins/agent-workspace/host/vscode.py")]},
+        "servers": {"agent-workspace": [str(sandbox / "plugins/agent-workspace/host/vscode.py"), str(tmp_path / "mirrors")]},
         "live": [str(tmp_path / "ports.json")],
         "session_items": [{"run_id": RUN, "ref": "preview", "title": "The run's preview", "url": f"{elsewhere}/preview"}],
         "run_items": [

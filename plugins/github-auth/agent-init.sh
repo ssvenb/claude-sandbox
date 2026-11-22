@@ -10,6 +10,17 @@ gh_set_user() { [ -z "${GH_USERNAME:-}" ] || gh config set -h "$GH_HOST" user "$
 gh auth login --hostname "$GH_HOST" --with-token <"$GH_TOKEN_FILE"
 gh_set_user
 gh auth setup-git --hostname "$GH_HOST"
+# git, like bin/gh: every repo with the read-only token (plus issues), the run's own with gh's login.
+git config --global --replace-all "credential.https://$GH_HOST.helper" ''
+git config --global --add "credential.https://$GH_HOST.helper" \
+  '!GH_TOKEN=$(cat /run/credentials/github-token-all) /usr/bin/gh auth git-credential'
+case "${REPO_URL:-}" in
+  "https://$GH_HOST/"*)
+    for url in "${REPO_URL%.git}" "${REPO_URL%.git}.git"; do
+      git config --global --replace-all "credential.$url.helper" ''
+      git config --global --add "credential.$url.helper" '!/usr/bin/gh auth git-credential'
+    done ;;
+esac
 echo "✅ GitHub CLI authenticated successfully for the Agent!"
 
 (
@@ -44,4 +55,15 @@ credential is missing, its instructions are wrong or unclear), file an issue on 
 own repository: `gh issue create --repo ssvenb/claude-sandbox`. Say what you ran, what happened
 and what you expected, and tell the user you filed it. Problems with the project you are
 working on go to the user, not there.
+
+You have two GitHub tokens, both re-minted every 40 minutes. `/run/credentials/github-token` is
+scoped to this run's repository (push, pull requests, issues, CI) and is what `gh` is logged in
+with. `/run/credentials/github-token-all` reaches every other repository of the GitHub App,
+read-only except that it may create and edit issues. `gh` (a wrapper at `/usr/local/bin/gh`) and
+git pick the token by the repository a command targets: `-R/--repo`, `gh api repos/OWNER/NAME/…`,
+`gh repo <cmd> OWNER/NAME`, else the current directory's origin. If a call is refused (401, 403,
+or 404 on a repository that exists), it probably went out with the wrong token: name the
+repository with `--repo`, or set it yourself, e.g.
+`GH_TOKEN=$(cat /run/credentials/github-token-all) /usr/bin/gh …`. Writing anything but issues
+to another repository is not possible.
 BRIEF

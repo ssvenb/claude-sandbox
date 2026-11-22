@@ -105,7 +105,7 @@ export function AuthCards({ auth, projects, draft, query, onChanged }: Props) {
       </div>
       <CardGroup title="Authentications" query={query} cards={[{
         key: 'auth', title: 'Authentications',
-        description: 'Every identity, key and token a sandbox may use, each under a name; projects and plugins only name one. Saved readable by you alone.',
+        description: 'Every identity, key and token a sandbox may use, each under a name; projects and plugins only name one. Saved readable by you alone; a saved key, token or client secret is never shown again, and kept while you leave it as it is.',
         more: ' ' + Object.keys(draft).join(' ').toLowerCase(),
         fields: [{ spec: { type: 'list', label: 'Entries', items: entrySpec(auth.types) }, slot: entries, name: 'auth' }],
       }]} />

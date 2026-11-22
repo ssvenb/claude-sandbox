@@ -327,8 +327,13 @@ def test_projects_are_added_and_deleted_and_authentications_saved_readable_by_yo
     assert (got["file"], got["exists"], got["config"]) == (str(file), False, {})
     assert got["types"]["github-app"] == {"required": ["appId", "privateKeyFile"], "optional": ["host", "username"]}
     entries = {"coder": {"type": "github-app", "appId": "1", "privateKeyFile": "~/k.pem"}, "openai": {"type": "api-key", "key": "sk"}}
-    assert json.load(post("/api/auth", {"config": entries}))["config"] == entries == json.loads(file.read_text())
+    masked = {"coder": entries["coder"], "openai": {"type": "api-key", "key": web.MASKED}}
+    assert json.load(post("/api/auth", {"config": entries}))["config"] == masked  # a secret is never sent back
+    assert json.loads(file.read_text()) == entries and json.load(ui("/api/auth"))["config"] == masked
     assert file.stat().st_mode & 0o777 == 0o600
+    assert post("/api/auth", {"config": masked}).status == 200  # left as shown: the saved key stays
+    assert json.loads(file.read_text()) == entries
+    assert post("/api/auth", {"config": {"renamed": masked["openai"]}}).status == 400  # none saved under that name
     for bad in ([], {"x": "y"}, {"x": {"type": "nope"}}, {"x": {"type": "api-key"}}):
         assert post("/api/auth", {"config": bad}).status == 400
     assert json.loads(file.read_text()) == entries

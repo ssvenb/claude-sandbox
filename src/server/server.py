@@ -27,6 +27,7 @@ import re
 import secrets
 import signal
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -1181,27 +1182,49 @@ def plugin_server(plugin):
         proc, path = servers.get(plugin, (None, None))
         if proc is None or proc.poll() is not None:
             if proc:  # it died: its socket and log go with it
-                shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+                shutil.rmtree(os.path.dirname(os.path.dirname(path)), ignore_errors=True)
             # What a plugin serves may be a shell on your account (VS Code is). A socket in a 0700
             # directory keeps other local users out, and the only way in for a browser is
             # Handler.tunnel, behind the same guard as the terminals: it needs no login of its own.
             run_dir = tempfile.mkdtemp(prefix=f"sandbox-{plugin}-")
-            path = run_dir + "/socket"
+            # The socket in a directory of its own, which the server may hand a container (VS Code's
+            # is one): what it plants there must not reach the log, nor be followed (connect()).
+            os.mkdir(run_dir + "/socket")
+            path = run_dir + "/socket/socket"
             with open(run_dir + "/log", "wb") as log:
                 proc = subprocess.Popen(
                     command, env={**os.environ, "WEB_SOCKET": path, "WEB_BASE": f"/plugins/{plugin}"},
                     stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                     start_new_session=True)  # a group of its own, to stop its children with it
             servers[plugin] = (proc, path)
-        for _ in range(100):  # the first request would otherwise come before it listens
+        for _ in range(1800):  # the first request would otherwise come before it listens; a first
+            # start may build an image first (VS Code's), hence the minutes
             if proc.poll() is not None:
-                said = Path(os.path.dirname(path), "log").read_text(errors="replace").strip()
+                said = Path(os.path.dirname(os.path.dirname(path)), "log").read_text(errors="replace").strip()
                 raise ValueError(f"{plugin}'s server exited with {proc.returncode}"
                                  + (f": {said.splitlines()[-1]}" if said else ""))
             if os.path.exists(path):
                 return path
             time.sleep(0.1)
         raise ValueError(f"{plugin}'s server did not start listening")
+
+
+def connect(path):
+    """A connection to the unix socket at path, never to what a symlink there points at: a plugin's
+    server may run in a container (VS Code's does), and a link it swaps in (to this machine's
+    docker.sock, say) must not be reached as you. Through an O_PATH descriptor of the file itself."""
+    fd = os.open(path, os.O_PATH | os.O_NOFOLLOW)
+    up = socket.socket(socket.AF_UNIX)
+    try:
+        if not stat.S_ISSOCK(os.fstat(fd).st_mode):
+            raise OSError(f"{path}: not a socket")
+        up.connect(f"/proc/self/fd/{fd}")
+    except OSError:
+        up.close()
+        raise
+    finally:
+        os.close(fd)
+    return up
 
 
 scoped = []
@@ -1415,8 +1438,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.guard():
             return
         try:
-            up = socket.socket(socket.AF_UNIX)
-            up.connect(plugin_server(plugin))
+            up = connect(plugin_server(plugin))
         except (ValueError, OSError) as e:
             return self.reply(502, {"error": str(e)})
         upgrade = "upgrade" in self.headers.get("Connection", "").lower()
@@ -1765,4 +1787,4 @@ if __name__ == "__main__":
                 os.killpg(proc.pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
-            shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+            shutil.rmtree(os.path.dirname(os.path.dirname(path)), ignore_errors=True)

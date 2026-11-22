@@ -927,8 +927,8 @@ def test_agent_workspace_tells_the_page_where_a_runs_checkout_is(sb, described):
     assert described("agent-workspace")["checkout"] == f"{sb.home}/.agent-workspaces/*-{{run_id}}"
     sb.config({"env": {"AGENT_WORKSPACE_DIR": "/srv/mirrors"}})  # the project's own setting, as for a run
     assert described("agent-workspace")["checkout"] == "/srv/mirrors/*-{run_id}"
-    [server] = described("agent-workspace")["servers"]["agent-workspace"]  # VS Code, on its first use
-    assert server.endswith("/plugins/agent-workspace/host/vscode.py")
+    server, mirrors = described("agent-workspace")["servers"]["agent-workspace"]  # VS Code, on its first use
+    assert server.endswith("/plugins/agent-workspace/host/vscode.py") and mirrors == "/srv/mirrors"
 
 
 @pytest.fixture
@@ -940,42 +940,29 @@ def vscode():
     return module
 
 
-def test_vscode_skips_the_desktop_launcher_for_the_cli_it_bundles(tmp_path, monkeypatch, vscode):
-
-    def exe(path):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("#!/bin/sh\n")
-        path.chmod(0o755)
-        return path
-    monkeypatch.setenv("PATH", str(tmp_path / "bin"))
-    with pytest.raises(SystemExit, match="not installed"):
-        vscode.cli()
-    standalone = exe(tmp_path / "bin/code")
-    assert vscode.cli() == str(standalone)  # the standalone CLI serves itself
-    # .deb/.rpm: /usr/bin/code links to /usr/share/code/bin/code, next to the bundled CLI
-    standalone.unlink()
-    (tmp_path / "bin/code").symlink_to(exe(tmp_path / "share/code/bin/code"))
-    bundled = exe(tmp_path / "share/code/bin/code-tunnel")
-    assert vscode.cli() == str(bundled)
-    # snap: <snap>/bin/code links to /usr/bin/snap; the CLI is in the snap's own tree
-    (tmp_path / "bin/code").unlink()
-    (tmp_path / "bin/code").symlink_to(exe(tmp_path / "usr/bin/snap"))
-    bundled = exe(tmp_path / "code/current/usr/share/code/bin/code-tunnel")
-    assert vscode.cli() == str(bundled)
+def test_vscode_runs_in_a_container_of_its_own_with_only_the_mirrors(monkeypatch, vscode):
+    monkeypatch.setenv("WEB_SOCKET", "/tmp/sandbox-x/socket/socket")
+    command = vscode.run("/home/me/.agent-workspaces", "/home/me/.local/share/claude-sandbox/vscode")
+    mounts = [command[i + 1] for i, a in enumerate(command) if a == "-v"]
+    assert mounts[:3] == ["/home/me/.local/share/claude-sandbox/vscode:/data",
+                          "/home/me/.agent-workspaces:/home/me/.agent-workspaces",
+                          "/tmp/sandbox-x/socket:/tmp/sandbox-x/socket"]  # not the log next to it
+    assert mounts[3].endswith(":/opt/vscode:ro") and len(mounts) == 4
+    assert {"--cap-drop", "ALL", "no-new-privileges", f"{os.getuid()}:{os.getgid()}"} <= set(command)
+    assert command[-3:] == ["python3", "/opt/vscode/vscode.py", "--serve"]
 
 
-def test_vscode_settings_are_applied_over_the_ones_already_there(tmp_path, monkeypatch, vscode):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-    file = tmp_path / "claude-sandbox/vscode/data/Machine/settings.json"
-    assert vscode.data() == tmp_path / "claude-sandbox/vscode"
+def test_vscode_settings_are_applied_over_the_ones_already_there(tmp_path, vscode):
+    file = tmp_path / "data/Machine/settings.json"
+    assert vscode.data(tmp_path) == tmp_path
     assert json.loads(file.read_text()) == {"chat.disableAIFeatures": True}
     file.write_text('{"editor.fontSize": 15, "chat.disableAIFeatures": false}')
-    vscode.data()
+    vscode.data(tmp_path)
     assert json.loads(file.read_text()) == {"editor.fontSize": 15, "chat.disableAIFeatures": True}
     file.write_text('{\n  // mine\n  "editor.fontSize": 15\n}')
-    vscode.data()  # with comments it is left as it is
+    vscode.data(tmp_path)  # with comments it is left as it is
     assert "// mine" in file.read_text()
-    user = json.loads((tmp_path / "claude-sandbox/vscode/data/User/settings.json").read_text())
+    user = json.loads((tmp_path / "data/User/settings.json").read_text())
     assert user["security.workspace.trust.startupPrompt"] == "never"  # the agent's folders stay restricted
 
 

@@ -220,13 +220,16 @@ def test_without_a_build_the_pages_say_how_to_make_one(tmp_path):
         proc.wait(5)
 
 
-# Stands in for `code serve-web`: echoes each request's head back as the response body.
-FAKE_CODE = r"""#!/usr/bin/env python3
-import socket, sys
+# Stands in for `docker`, whose `run` of VS Code's container serves on WEB_SOCKET: echoes each
+# request's head back as the response body.
+FAKE_DOCKER = r"""#!/usr/bin/env python3
+import os, socket, sys
 args = sys.argv[1:]
-assert args[0] == "serve-web" and "--without-connection-token" in args and "--server-data-dir" in args
+if args[0] != "run":
+    sys.exit(0)  # build, rm
+assert args[-1] == "--serve" and "-e" in args and "WEB_SOCKET" in args
 s = socket.socket(socket.AF_UNIX)
-s.bind(args[args.index("--socket-path") + 1])
+s.bind(os.environ["WEB_SOCKET"])
 s.listen()
 while True:
     c, _ = s.accept()
@@ -238,6 +241,19 @@ while True:
 """
 
 
+def test_a_plugins_server_is_reached_on_its_socket_never_through_a_planted_link(tmp_path):
+    real = socket.socket(socket.AF_UNIX)
+    real.bind(str(tmp_path / "real"))
+    real.listen()
+    web.connect(str(tmp_path / "real")).close()
+    (tmp_path / "planted").symlink_to(tmp_path / "real")  # this machine's docker.sock, say
+    with pytest.raises(OSError):
+        web.connect(str(tmp_path / "planted"))
+    (tmp_path / "file").write_text("")
+    with pytest.raises(OSError, match="not a socket"):
+        web.connect(str(tmp_path / "file"))
+
+
 def test_a_plugins_server_starts_on_first_use_behind_the_guarded_tunnel(ui):
     vscode = "/plugins/agent-workspace/"  # agent-workspace serves VS Code
     json.load(ui("/api/project?project=" + ui.project))
@@ -247,12 +263,13 @@ def test_a_plugins_server_starts_on_first_use_behind_the_guarded_tunnel(ui):
     s = json.load(ui("/api/sessions", json.dumps({"project": ui.project, "kind": "resume",
                                                   "run_id": "0a1b2c"}).encode()))
     assert s["workspace"] == str(mirror) and "agent-workspace" in s["plugins"]
+    docker = ui.tmp / "bin/docker"
+    docker.parent.mkdir()
+    docker.write_text("#!/bin/sh\necho 'cannot build' >&2; exit 1\n")
+    docker.chmod(0o755)
     failed = ui(vscode + "?folder=/x")
-    assert failed.status == 502 and "not installed" in json.load(failed)["error"]  # what the plugin said
-    code = ui.tmp / "bin/code"
-    code.parent.mkdir()
-    code.write_text(FAKE_CODE)
-    code.chmod(0o755)
+    assert failed.status == 502 and "docker" in json.load(failed)["error"]  # what the plugin said
+    docker.write_text(FAKE_DOCKER)
 
     seen = ui(vscode + "?folder=/x").read()  # started afresh, the failed one gone
     assert seen.startswith(b"GET /plugins/agent-workspace/?folder=/x HTTP/1.1\r\n") and b"Connection: close" in seen

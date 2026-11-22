@@ -4,5 +4,7 @@
 
 web_checkout "${AGENT_WORKSPACE_DIR:-$HOME/.agent-workspaces}/*-{run_id}"
 
-# VS Code in the browser, on our origin under /plugins/agent-workspace/: started on its first use.
-web_server "$PLUGIN_DIR/host/vscode.py"
+# VS Code in the browser, on our origin under /plugins/agent-workspace/: started on its first use,
+# in a container of its own that sees the mirrors. shortcut: one VS Code for all projects sees only
+# the first project's mirror directory; give each AGENT_WORKSPACE_DIR its own server if they differ.
+web_server "$PLUGIN_DIR/host/vscode.py" "${AGENT_WORKSPACE_DIR:-$HOME/.agent-workspaces}"

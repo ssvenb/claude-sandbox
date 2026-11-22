@@ -159,12 +159,19 @@ selected), **Ctrl+Shift+C** always copies, **Ctrl+V** and **Ctrl+Shift+V** paste
 interface does, select with **Shift+drag**.
 
 The VS Code icon in a session's tab opens VS Code in the browser on that run's checkout (the `agent-workspace`
-mirror of `/workspace`), again one tab per run. It needs VS Code on the host (`code` on the PATH:
-the .deb/.rpm or snap install, or the standalone CLI): the first click starts one `code serve-web`,
-accepting the VS Code Server license terms on your behalf, and it stops with the web UI. Its data
-(extensions, settings) lives in `~/.local/share/claude-sandbox/vscode`, with Copilot's chat
-switched off (`chat.disableAIFeatures`) — the agent works in the sandbox. The first folder a
-browser opens may still show the empty chat pane; close it once and VS Code keeps it closed. It listens on a unix socket only your user can reach and is served under `/plugins/agent-workspace/` of the
+mirror of `/workspace`), again one tab per run. It runs in a Docker container of its own, not on
+this machine: the first click builds its image (`claude-sandbox-vscode`: Debian and VS Code's
+standalone CLI, a minute or two) and starts one `code serve-web` in it, accepting the VS Code
+Server license terms on your behalf, which downloads its server on first use; it stops with the
+web UI. That container runs as you, with no capabilities, and sees only the mirror directory
+(`AGENT_WORKSPACE_DIR` of the first project that opens one) and its data, which (extensions,
+settings, the downloaded server) lives in `~/.local/share/claude-sandbox/vscode`. The checkout is
+the agent's: its tasks, debug configs, `.git/config` and the integrated terminal all run in that
+container, never on this machine. It opens in restricted mode besides, without asking to trust
+it, as the folder's tasks would otherwise run on folder open. Copilot's chat is switched off
+(`chat.disableAIFeatures`) — the agent works in the sandbox. The first folder a browser opens may
+still show the empty chat pane; close it once and VS Code keeps it closed. Don't run `git` or an
+editor of your own in the mirror: those run on this machine. It listens on a unix socket only your user can reach and is served under `/plugins/agent-workspace/` of the
 web UI itself, so there is no second port to open or to forward over an SSH tunnel.
 
 Resuming brings back the agent's conversation as well as the branch: each run's conversation is

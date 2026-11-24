@@ -99,6 +99,15 @@
       "port": 3000
     },
     "project-deps": {
+      "setup": [
+        "pnpm install --frozen-lockfile",
+        "make bootstrap"
+      ]
+    },
+    "build-tools": {
+      "tools": [
+        "python-pip"
+      ],
       "apt": [
         "ripgrep",
         "postgresql-client"
@@ -108,10 +117,6 @@
       ],
       "pip": [
         "ruff"
-      ],
-      "setup": [
-        "pnpm install --frozen-lockfile",
-        "make bootstrap"
       ]
     }
   }

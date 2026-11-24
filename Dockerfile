@@ -7,7 +7,8 @@ RUN find /i -type f ! -name install.sh -delete
 
 FROM node:20-bookworm-slim
 
-# Shared dependencies only; anything a single plugin needs is installed by its own install.sh.
+# What a fresh Ubuntu has, plus jq, which the boot scripts need. Every other tool comes from a
+# plugin's install.sh (the build-tools plugin for general-purpose ones).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
@@ -18,8 +19,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         openssl \
         git \
         python3 \
-        python3-venv \
-        python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 # Extra root CAs from the ca-certs plugin (PEM, empty when it is off), so HTTPS during the build
@@ -34,40 +33,15 @@ ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt \
     SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
     REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
-# Terraform, from HashiCorp's apt repository.
-RUN curl -fsSL https://apt.releases.hashicorp.com/gpg \
-        | gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(. /etc/os-release && echo "$VERSION_CODENAME") main" \
-        > /etc/apt/sources.list.d/hashicorp.list \
-    && apt-get update && apt-get install -y --no-install-recommends terraform \
-    && rm -rf /var/lib/apt/lists/*
-
-# Ruff, Python's linter and formatter. Debian has no package; the PyPI wheel is one static binary.
-RUN pip3 install --no-cache-dir --break-system-packages ruff
-
-# Headless Chromium, from Debian's repository. Docker has no user namespaces for its sandbox and a
-# 64 MB /dev/shm, so the Debian wrapper always adds the flags that work around both; Puppeteer is
-# pointed at it instead of downloading its own browser.
-RUN apt-get update && apt-get install -y --no-install-recommends chromium fonts-liberation \
-    && rm -rf /var/lib/apt/lists/* \
-    && echo 'export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --disable-dev-shm-usage"' \
-        > /etc/chromium.d/sandbox
-ENV CHROME_BIN=/usr/bin/chromium \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
-    PUPPETEER_SKIP_DOWNLOAD=1
-
-# Playwright's own Chromium, because a project's @playwright/test only runs the exact build it
-# pins, not Debian's. Shared path, owned by node so a project pinning another Playwright release
-# can still `npx playwright install chromium` its build next to this one.
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN npx -y playwright@latest install --with-deps chromium \
-    && chown -R node:node /ms-playwright \
-    && rm -rf /var/lib/apt/lists/* /root/.npm
-
 # Plugin dependencies first: they change far less often than the agent CLI's version. Only those
 # in ENABLED_PLUGINS (resolved by run.sh, empty means all) get installed, so flipping a flag
-# rebuilds from here.
+# rebuilds from here. BUILD_TOOLS and BUILD_TOOLS_APT/_NPM/_PIP are the build-tools plugin's (see its host.sh);
+# the default is every recipe it has.
 ARG ENABLED_PLUGINS=
+ARG BUILD_TOOLS="python-pip terraform ruff chromium playwright"
+ARG BUILD_TOOLS_APT=
+ARG BUILD_TOOLS_NPM=
+ARG BUILD_TOOLS_PIP=
 RUN --mount=type=bind,from=installers,source=/i/plugins,target=/tmp/plugins \
     set -eu; for f in /tmp/plugins/*/install.sh; do \
       [ -f "$f" ] || continue; \

@@ -1,45 +1,14 @@
 {
   "name": "project-deps",
-  "description": "Installs the dependencies the repo being worked on needs — apt/npm/pip packages and setup commands declared in the project config file. No configuration means nothing is installed.",
+  "description": "Runs the setup commands the repo being worked on needs (declared in the project config file) in /workspace as the agent user. Packages belong in build-tools. No configuration means nothing runs.",
   "priority": 25,
   "defaultEnabled": true,
-  "provides": ["project-deps"],
+  "provides": [
+    "project-deps"
+  ],
   "requires": [],
   "requiredEnv": [],
   "settings": [
-    {
-      "key": "apt",
-      "type": "list",
-      "items": {
-        "type": "string",
-        "placeholder": "ripgrep",
-        "monospace": true
-      },
-      "label": "apt packages",
-      "description": "Installed at boot, as root."
-    },
-    {
-      "key": "npm",
-      "type": "list",
-      "items": {
-        "type": "string",
-        "placeholder": "pnpm@9",
-        "monospace": true
-      },
-      "label": "npm packages",
-      "description": "Installed globally at boot."
-    },
-    {
-      "key": "pip",
-      "type": "list",
-      "items": {
-        "type": "string",
-        "placeholder": "ruff",
-        "monospace": true
-      },
-      "label": "pip packages",
-      "description": "Installed at boot."
-    },
     {
       "key": "setup",
       "type": "list",
@@ -49,7 +18,7 @@
         "monospace": true
       },
       "label": "Setup commands",
-      "description": "Shell commands run in /workspace as the agent user, in order, after the packages."
+      "description": "Shell commands run in /workspace as the agent user, in order, at every boot."
     }
   ]
 }

@@ -52,7 +52,7 @@ def test_the_host_pipeline_builds_and_runs_the_image(sb, run_sh):
                   SANDBOX_AUTH_FILE=auth)
     assert done.returncode == 0, done.stderr
     [build], [run] = calls(done, "build"), calls(done, "run")
-    plugins = ("herdr data-mounts upstream-proxy cwd-workspace package-managers "
+    plugins = ("herdr data-mounts upstream-proxy cwd-workspace build-tools package-managers "
                "project-deps dev-server agent-status branch-guard")
     assert build == ["build", "-t", "claude-agent:claude", "--build-arg", "AGENT=claude",
                      "--build-arg", "AGENT_VERSION=1.2.3", "--build-arg", f"ENABLED_PLUGINS={plugins}", "."]

@@ -310,7 +310,7 @@ def test_a_projects_settings_are_read_and_saved_to_its_file(ui):
                 {"env": {"AGENT": ["claude"]}},
                 # declared settings are checked against their type
                 {"env": {"CLAUDE_EFFORT": "huge"}}, {"env": {"AGENT_WORKSPACE_CLEANUP": "yes"}},
-                {"plugins": {"dev-server": {"command": "make", "port": "80"}}}, {"plugins": {"project-deps": {"apt": "ripgrep"}}},
+                {"plugins": {"dev-server": {"command": "make", "port": "80"}}}, {"plugins": {"build-tools": {"apt": "ripgrep"}}},
                 {"plugins": {"dev-server": {"command": ["make"]}}},
                 {"plugins": {"upstream-proxy": {"routes": [{"name": "a", "upstream": "https://x"}]}}},
                 {"plugins": {"upstream-proxy": {"routes": [{"name": "a", "port": 70000, "upstream": "https://x"}]}}},

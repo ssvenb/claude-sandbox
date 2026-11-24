@@ -639,36 +639,49 @@ def test_screenshots_mounts_read_only(sb):
 
 # --- project-deps --------------------------------------------------------------------------
 
-def test_project_deps_without_config_installs_nothing(sb):
+def test_project_deps_without_config_runs_nothing(sb):
     run = sb.plugin("project-deps").ok()
     assert run.args == [] and "nothing configured" in run.out
 
 
-def test_project_deps_hands_over_validated_lists(sb):
-    sb.config({"plugins": {"project-deps": {
-        "apt": ["ripgrep", "postgresql-client"], "npm": ["pnpm@9", "./local-pkg"],
-        "pip": ["ruff==0.6.*", "pkg>=1.0", "git+https://github.com/a/b"],
-        "setup": ["pnpm install --frozen-lockfile", "make bootstrap && echo $HOME"]}}})
+def test_project_deps_hands_over_the_setup_commands(sb):
+    sb.config({"plugins": {"project-deps": {"setup": ["pnpm install --frozen-lockfile", "make bootstrap && echo $HOME"]}}})
     run = sb.plugin("project-deps").ok()
-    assert run.env == {
-        "PROJECT_DEPS_APT": "ripgrep postgresql-client",
-        "PROJECT_DEPS_NPM": "pnpm@9 ./local-pkg",
-        "PROJECT_DEPS_PIP": "ruff==0.6.* pkg>=1.0 git+https://github.com/a/b",
-        "PROJECT_DEPS_SETUP": '["pnpm install --frozen-lockfile","make bootstrap && echo $HOME"]',
-    }
+    assert run.env == {"PROJECT_DEPS_SETUP": '["pnpm install --frozen-lockfile","make bootstrap && echo $HOME"]'}
     assert "2 setup command(s)" in run.out
 
 
-@pytest.mark.parametrize("name", ["two words", "x;reboot", "$(id)", "`id`", "a|b", "a&b", "'q'"])
-def test_project_deps_rejects_anything_but_a_package_name(sb, name):
-    sb.config({"plugins": {"project-deps": {"apt": [name]}}})
-    sb.plugin("project-deps").dies("is not a valid apt package name")
-
-
-@pytest.mark.parametrize("key, value", [("pip", "ruff"), ("npm", [1]), ("setup", "make"), ("setup", [["x"]])])
-def test_project_deps_lists_must_be_arrays_of_strings(sb, key, value):
-    sb.config({"plugins": {"project-deps": {key: value}}})
+@pytest.mark.parametrize("value", ["make", [["x"]]])
+def test_project_deps_setup_must_be_an_array_of_strings(sb, value):
+    sb.config({"plugins": {"project-deps": {"setup": value}}})
     sb.plugin("project-deps").dies("must be an array of strings")
+
+
+# --- build-tools ---------------------------------------------------------------------------
+
+def test_build_tools_hands_the_build_its_lists(sb):
+    assert sb.plugin("build-tools").ok().builds == {}  # unset: the Dockerfile's default, every recipe
+    sb.config({"plugins": {"build-tools": {
+        "tools": ["ruff", "chromium"], "apt": ["ripgrep"], "npm": ["pnpm@9", "./local-pkg"],
+        "pip": ["ruff==0.6.*", "pkg>=1.0", "git+https://github.com/a/b"]}}})
+    assert sb.plugin("build-tools").ok().builds == {
+        "BUILD_TOOLS": "ruff chromium", "BUILD_TOOLS_APT": "ripgrep", "BUILD_TOOLS_NPM": "pnpm@9 ./local-pkg",
+        "BUILD_TOOLS_PIP": "ruff==0.6.* pkg>=1.0 git+https://github.com/a/b"}
+    sb.config({"plugins": {"build-tools": {"tools": []}}})
+    assert sb.plugin("build-tools").ok().builds == {"BUILD_TOOLS": ""}
+
+
+def test_build_tools_rejects_unknown_tools(sb):
+    sb.config({"plugins": {"build-tools": {"tools": ["nope"]}}})
+    sb.plugin("build-tools").dies("must list only")
+
+
+@pytest.mark.parametrize("key, value", [("apt", ["two words"]), ("apt", ["x;reboot"]), ("npm", ["$(id)"]),
+                                        ("pip", ["`id`"]), ("pip", ["a|b"]), ("apt", ["a&b"]),
+                                        ("npm", [1]), ("pip", "ruff")])
+def test_build_tools_rejects_anything_but_package_names(sb, key, value):
+    sb.config({"plugins": {"build-tools": {key: value}}})
+    sb.plugin("build-tools").dies("must be an array of package names")
 
 
 # --- ssh-credentials -----------------------------------------------------------------------

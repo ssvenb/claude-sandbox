@@ -63,13 +63,13 @@ The OAuth client is a Google Cloud *Web application* client with the redirect UR
 no API, and so no Terraform resource, for these clients. A consent screen of type **Internal** also
 keeps out every account outside the Workspace. oauth2-proxy sets its cookie `Secure`, so serve it over
 HTTPS: run it behind a TLS proxy, or pass `-- --https-address=:443 --tls-cert-file=... --tls-key-file=...`.
-Ports that sessions publish (see [Published ports](#published-ports)) do not go through the proxy.
+Demo servers (see [Dev server](#dev-server)) do not go through the proxy.
 
 The home page is a dashboard of all your sandboxes. On top is a box to start a session by writing
 its first message, with the project it is for beside it. Under it, on the left, is what is
 **running now**, grouped by project: a **window** per running session (the ones waiting on your
 answer first; each says what it was asked and what it is doing right now, with its pull request,
-its ports and, top right, its stop button); with nothing running that side is not there, and the
+its demo server and, top right, its stop button); with nothing running that side is not there, and the
 projects take the width. On the right is every listed **project** with what its plugins list (its
 issues), its ended sessions at the foot of its panel, a **+** button for a
 new session (`run.sh --project <name> --chat`). There is no shell on this machine: the server
@@ -318,7 +318,6 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | `copilot-home` | 5 | on | copilot | `copilot-home` | — | mounts a copy of the host's `~/.copilot` (or `$COPILOT_HOME_DIR`) at `/home/node/.copilot`: the run's own, at `~/.local/state/claude-sandbox/copilot-home/<RUN_ID>`, taken afresh at every start but for the run's sessions (`session-state/`), cut back to those when it exits; nothing goes back to yours; sets `AGENT_AUTH_PROVIDED=1` |
 | `docker-cli` | 5 | on | any | `docker-cli` | — | Docker Engine, CLI, compose and buildx install; runs the sandbox under the host's [Sysbox](https://github.com/nestybox/sysbox) runtime (`--runtime=sysbox-runc`, refuses to start without it) and starts a Docker daemon of its own inside, so the agent sees neither the host's containers nor another sandbox's |
 | `netbird` | 5 | off | any | `mesh-network` | — | NetBird client install; enrols the container as its own peer (`sandbox-<RUN_ID>`) from the `netbird-setup-key` authentication `NB_AUTH` names, adding `NET_ADMIN` + `/dev/net/tun` |
-| `ports` | 5 | on | any | `ports` | — | publishes the ports listed in `PORTS`: joins the central port proxy on the HOST, shared by every sandbox of every project, and offers what the agent listens on as unix sockets in a directory mounted from it; see [Published ports](#published-ports); nothing listed → does nothing |
 | `github-auth` | 10 | on | any | `git-credentials` | — | `gh` CLI install; mints App installation tokens on the host (re-minted every 40 min): `github-token`, scoped to the run's repo (push, pull requests, issues), and `github-token-all`, every repo of the App read-only plus issues; `gh auth login` with the first, and `gh` (`bin/gh`) and git use the second for any other repo; briefs the agent to open a pull request for its work and fix whatever fails until its CI is green |
 | `gcp-auth` | 10 | off | any | `gcp-credentials` | — | Google Cloud CLI install; mints 1h service-account tokens on the host and makes them the container's ambient identity: `gcloud` reads the token file, a stand-in GCE metadata server serves the client libraries |
 | `ssh-credentials` | 15 | off | any | `ssh-credentials` | — | `openssh-client` install; writes `~/.ssh/sandbox_key` + `~/.ssh/config` for the agent user |
@@ -329,7 +328,7 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | `agent-workspace` | 15 | on | any | `workspace-mirror` | — | bind-mounts `$AGENT_WORKSPACE_DIR/<project>-<date>-<RUN_ID>` (default `~/.agent-workspaces/<project>-<date>-<RUN_ID>`, created if missing) at `/workspace`, so the agent's checkout is visible on the host; removed when the container exits, unless `AGENT_WORKSPACE_CLEANUP=0`; complements `git-workspace`, conflicts with `cwd-workspace` |
 | `package-managers` | 25 | on | any | `package-managers` | — | lets the agent install packages itself, without root or `sudo` — `npm -g`/`pip` into its home, and `apt-home <pkg>...`, which downloads Debian packages with the dependencies the image lacks and unpacks them into `~/.local` (on `PATH` and `LD_LIBRARY_PATH`) without running their maintainer scripts |
 | `project-deps` | 25 | on | any | `project-deps` | — | installs the dependencies the target repo declares in the project config: apt/npm/pip packages (as root, at boot) and `setup` shell commands (as the agent user, in the provisioned `/workspace`); nothing configured → does nothing |
-| `dev-server` | 28 | on | any | `dev-server` | — | starts the project's server (`.plugins["dev-server"].command`) in `/workspace` at every boot, after `project-deps`; the agent restarts it with `bin/sandbox-server`. Its ports are published when listed in `PORTS` (the `ports` plugin), see [Published ports](#published-ports); nothing configured → does nothing |
+| `dev-server` | 28 | on | any | `dev-server` | — | starts the project's server (`.plugins["dev-server"].command`) in `/workspace` at every boot, after `project-deps`, for the agent's own checks (`bin/sandbox-server` restarts it), unpublished; with a `.port`, runs the same command in a sibling container on the HOST from the run's checkout (`agent-workspace`'s mirror), after `.demoSetup`, restarted on every change, with what the [sibling plugins](#sibling-plugins) hand the sandbox (`claude-home`: your login), and publishes that port as a button on the run's session; see [Dev server](#dev-server); nothing configured → does nothing |
 | `branch-guard` | 30 | on | claude | — | `workspace` | `guard-branch.py` PreToolUse hook |
 
 Disable them all and the agent starts plain, in an empty `/workspace` with no GitHub access.
@@ -381,10 +380,23 @@ group), so nothing in the image holds against it.
 | `requires` | string[] | `[]` | Capabilities that must be provided by *some* enabled plugin. Otherwise the run aborts on the host, listing the plugins that could provide it. |
 | `conflicts` | string[] | `[]` | Plugin names that must not be enabled at the same time. |
 | `requiredEnv` | string[] | `[]` | Env vars that must be non-empty while this plugin is enabled. |
+| `sibling` | bool | `false` | Its `docker run` args and container stages fit any container of the run's own beside the sandbox too, which then takes them; see [Sibling plugins](#sibling-plugins). |
 | `settings` | object[] | `[]` | The settings this plugin reads, for the web UI's settings form. See [Declaring settings](#declaring-settings). |
 
 Validation (`conflicts`, `requiredEnv`, `requires`) runs on the host **before** the image is
 built, so misconfiguration fails fast and cheaply.
+
+### Sibling plugins
+
+A plugin may start a container of the run's own beside the sandbox (`dev-server`'s demo
+container) without knowing which other plugins it should take from, and they need not know it.
+The host stage keeps which `docker run` args each plugin's `host.sh` added. `plugin_siblings` lists
+the enabled plugins whose manifest says `"sibling": true` (and whose host stage ran already: a lower
+priority), and `plugin_docker_args <plugin>...` puts their args into `PLUGIN_DOCKER_ARGS`; the
+container runs their `root-init.sh` and `agent-init.sh` itself, from `/usr/local/lib/sandbox/plugins.sh`
+with `ENABLED_PLUGINS` set to them. Declare `sibling` only for what any such container may have:
+`upstream-proxy` (sockets, no secret), `ca-certs`, `docker-cli`, and `claude-home`, whose login the
+agent has in the sandbox anyway.
 
 ### Declaring settings
 
@@ -534,7 +546,7 @@ request, with its CI). An item is `{title, url}` plus optional `ref` (a short id
 | `web_session_item RUN_ID JSON_ITEM` | an item on that run's session row, shown while the page lists a session of the run |
 | `web_tie_items JQ_FILTER` | hands items listed so far (by plugins of a lower `priority`) to the run the filter names for each (a RUN_ID; `null` or `""` leaves the item be): such an item moves onto that run's session row while one is listed, else stays in its section with a **Resume** button |
 | `web_map_items JQ_FILTER` | rewrites every item listed so far (by plugins of a lower `priority`) |
-| `web_live_items FILE` | items from a JSON array in FILE, each with its `run_id`, on the row of that run's running session; the server re-reads the file on every poll, so it suits what comes and goes within seconds (a port a session's server publishes, see [Published ports](#published-ports)); `{host}` in a `url` stands for the host name the page was opened by |
+| `web_live_items FILE` | items from a JSON array in FILE, each with its `run_id`, on the row of that run's running session; the server re-reads the file on every poll, so it suits what comes and goes within seconds (a run's demo server, see [Dev server](#dev-server)); `{host}` in a `url` stands for the host name the page was opened by |
 | `web_note TEXT` | one line saying why there is nothing to list |
 | `web_poll SECONDS` | nothing: has the server describe the project at least this often, page or no page (see [Watching and starting](#watching-and-starting-web_poll-web_start)) |
 | `web_start JSON` | nothing: a session the server starts by itself, once per `key`, removed when its agent has finished |
@@ -678,42 +690,33 @@ file — share one host proxy: the first `run.sh` starts it, later ones reuse it
 last one to exit stops it. It loads the env file once, at start, so a rotated key there takes
 effect only once no sandbox of the project is running; a named credential is read on every request.
 
-### Published ports
+### Dev server
 
-The `ports` plugin (on by default). Each sandbox has a network namespace of its own, so two sessions
-can both run a server on `:3000`. Which ports a sandbox opens is a setting, `PORTS`: a
-space-separated list, usually kept in the project's file (the gear on the
-dashboard edits its `env` block):
-
-```json
-{ "env": { "PORTS": "3000 5173" } }
-```
-
-Nothing else is published, and the dashboard shows nothing else; with `PORTS` unset a sandbox
-opens no ports at all, and no proxy is started for it. Inside the container a helper
-(`plugins/ports/bin/publish-ports.py`, started by its `agent-init.sh`) notices when a process listens on one
-of those ports — on any address, `127.0.0.1` included — and offers it as a unix socket in a
-directory mounted from the host, `/run/ports/sockets`. That directory is the agent's to write, so the
-proxy on the host trusts nothing in it: it publishes only the ports the run's `PORTS` lists (which it
-learns from `run.sh`, not from the container), and opens each socket anew, never through a symlink,
-on every connection. One central
-proxy on your machine (`plugins/ports/host/portd.py`, joined and left through `host/lease.py` by its `host.sh`),
-shared by every sandbox of every project, gives each such port a port of its own on `$PORTS_BIND`
-(default: the address the web UI listens on, which `src/server/server.py` exports as `SANDBOX_WEB_BIND`
-for every run it starts; `127.0.0.1` for a run started from a terminal):
-the same number while it is free, otherwise any free one, and the same one again when that
-session's server restarts. The first `run.sh` starts the proxy; it exits once no `run.sh` using it
-is alive. The web UI shows each published port as a button on its session's row, within a second
-or two of the server starting. The agent's briefing names the configured ports, so it serves on
-one of them.
-
-The `dev-server` plugin starts the project's server at every boot, in `/workspace` after
-`project-deps`; the agent controls it with `/opt/plugins/dev-server/bin/sandbox-server
-start|stop|restart|status|log`:
+A sandbox publishes no ports: it has a network of its own, and nothing it listens on reaches you.
+The `dev-server` plugin runs the project's server twice. In the sandbox, at every boot in
+`/workspace` after `project-deps`, for the agent's own checks; the agent controls it with
+`/opt/plugins/dev-server/bin/sandbox-server start|stop|restart|status|log`. And, with a `port`, for
+you: once the run's container is up, its `host.sh` starts a sibling container,
+`sandbox-demo-<RUN_ID>`, from the same image, with the run's checkout (`agent-workspace`'s mirror) at
+`/workspace`. There `plugins/dev-server/bin/demo-server` runs the `demoSetup` commands once (what
+the demo needs and the sandbox must not have: credentials of its own, seed data), then the same
+command, restarted whenever a file the agent edits changes (not `.git`, `node_modules`, `.venv`,
+`__pycache__` or `dist`), and every 10 seconds while it is not running. The port is published on
+this machine at a free port, on the address the web UI listens on (`SANDBOX_WEB_BIND`, `127.0.0.1`
+for a run started from a terminal), and shows as a button on the run's session, on the dashboard
+and in its chat. It goes with the run; `docker logs sandbox-demo-<RUN_ID>` has its output.
 
 ```json
-{ "env": { "PORTS": "3000" }, "plugins": { "dev-server": { "command": "pnpm dev --port 3000" } } }
+{ "plugins": { "dev-server": { "command": "pnpm dev --host 0.0.0.0 --port 3000", "port": 3000,
+                               "demoSetup": ["./scripts/seed-demo-data"] } } }
 ```
+
+In the demo container the command must listen on all addresses. The agent's code runs there, never
+on this machine. It takes what the [sibling plugins](#sibling-plugins) hand the sandbox, and runs
+their container stages: `upstream-proxy`'s routes, `ca-certs`' certificates, and `docker-cli`'s Sysbox
+and Docker daemon, so what it starts stays inside it, and `claude-home`'s copy of your `~/.claude`:
+the same login the sandbox has (a refreshed one comes back to yours; hooks or settings written there
+never do). Never the App key or the host's Docker socket.
 
 The host's own services are at `host.docker.internal` from inside, if they listen on an address
 other than loopback; the host's `localhost` is out of the agent's reach. Unix sockets created in a
@@ -827,7 +830,7 @@ unset NB_SETUP_KEY   # out of the agent's environment, so it is not printed by m
 
 Sourced by `agent-setup.sh` as the agent user, in POSIX `sh`, after the agent seeded its own
 config. Use it for authentication with short-lived tokens, the helpers the agent's tools talk to
-(upstream-proxy's forwarder, gcp-auth's metadata server, the ports helper), provisioning
+(upstream-proxy's forwarder, gcp-auth's metadata server), provisioning
 `/workspace`, and briefing the agent.
 
 Context: `$PLUGIN_NAME`, `$PLUGIN_DIR`, `$ENABLED_PLUGINS`, `$AGENT`, `$AGENT_DIR`, `$RUN_ID`,
@@ -903,13 +906,11 @@ only required while that agent or plugin is in use.
 | `PROJECT_CONFIG_FILE` | core | The project's file; `--project <name>` sets it to `~/.config/claude-sandbox/projects/<name>.json` (optional) |
 | `SANDBOX_AUTH_FILE` | core | Your named authentications (default `~/.config/claude-sandbox/auth.json`), see [Authentications](#authentications--configclaude-sandboxauthjson); shell only |
 | `SANDBOX_WEB_BIND` / `SANDBOX_WEB_NAME` | core | Set by the web UI for every `run.sh` it starts: the address it listens on, and the host name its `--bind` gave for it (plugins that publish what a session serves default to it) |
-| `PORTS` | ports | Space-separated ports a sandbox opens: published on the host, and shown on the dashboard, while something in it listens on them (default: none) |
-| `PORTS_BIND` | ports | Address the central port proxy publishes the sandboxes' ports on (default: `SANDBOX_WEB_BIND`, else `127.0.0.1`; `0.0.0.0` for your whole network) |
 | `CLAUDE_AUTH` | agents/claude | Name of the `claude-token` authentication Claude Code runs with. Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does |
 | `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low`, `medium` (the sandbox default), `high`, `xhigh`, `max` |
 | `CLAUDE_MODEL` | agents/claude | Model Claude Code starts on, an alias (`opus`) or a full id (default: Claude Code's own default) |
 | `COPILOT_AUTH` | agents/copilot | Name of the `copilot-token` authentication Copilot runs with. Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_CA_CERTS` / `ENABLE_DEV_SERVER` / `ENABLE_PORTS` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_NETBIRD` / `ENABLE_GCP_AUTH` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_PR_REVIEW` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `gcp-auth`, `netbird`, `pr-review` and `ssh-credentials`) |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_CA_CERTS` / `ENABLE_DEV_SERVER` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_NETBIRD` / `ENABLE_GCP_AUTH` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_PR_REVIEW` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `gcp-auth`, `netbird`, `pr-review` and `ssh-credentials`) |
 | `GH_AUTH` | github-auth | Name of the `github-app` authentication the sandbox authenticates as |
 | `BASE_BRANCH` | git-workspace | Branch to cut from (default: the repo's own default branch, via `origin/HEAD`) |
 | `HOST_WORKSPACE_DIR` | cwd-workspace | Host dir mounted at `/workspace` (default: `run.sh`'s cwd) |
@@ -949,8 +950,7 @@ of it as hostile:
 - Nothing on the host runs what the container wrote: the changes a run made are listed by git
   inside its container (`docker exec`), never in its mirror here, whose `.git/config` is the
   agent's; `claude-home` mounts a copy of `~/.claude` per run and takes back only a validated login.
-- What the host connects to, it checks each time: the port proxy publishes only the run's `PORTS`
-  and opens each socket without following symlinks; upstream-proxy's sockets are mounted
+- What the host connects to, it checks each time: upstream-proxy's sockets are mounted
   read-only, so no sandbox can put itself between another one and the proxy.
 - Plugins that hand the container a part of your machine by design — `cwd-workspace` (your
   checkout), `data-mounts` (what you list), `libvirt` (your VMs) — do nothing until you switch them on or

@@ -1,9 +1,11 @@
 {
   "name": "dev-server",
-  "description": "Starts the project's server, the command its config names, in /workspace at every boot of the container, and gives the agent a helper to restart it. Its ports are published when the project lists them in PORTS (the ports plugin). Nothing configured → does nothing.",
+  "description": "Starts the project's server in /workspace at every boot of the sandbox, for the agent's own checks (a helper restarts it), and, with a port, a second time in a container of its own next to the sandbox: from the agent's checkout, restarted whenever a file changes, published as a button on the run's session. The sandbox itself publishes nothing; the agent's code never runs on the host, and the demo container gets what the sibling plugins hand the sandbox (claude-home's login among them) and nothing else of yours. Nothing configured → does nothing.",
   "priority": 28,
   "defaultEnabled": true,
-  "provides": ["dev-server"],
+  "provides": [
+    "dev-server"
+  ],
   "requires": [],
   "requiredEnv": [],
   "settings": [
@@ -11,9 +13,26 @@
       "key": "command",
       "type": "string",
       "label": "Command",
-      "description": "Started in /workspace at every boot of the container. Empty: nothing is started.",
-      "placeholder": "pnpm dev --port 3000",
+      "description": "Run in /workspace at every boot of the sandbox, and in the demo container when a port is set (there it must listen on 0.0.0.0). Empty: nothing is started.",
+      "placeholder": "pnpm dev --host 0.0.0.0 --port 3000",
       "monospace": true
+    },
+    {
+      "key": "port",
+      "type": "integer",
+      "label": "Demo port",
+      "description": "The port the command listens on: set, the command also runs in a demo container next to the sandbox, restarted on every change, published on this machine where the web UI listens and shown on the run's session. Needs agent-workspace. Empty: no demo container."
+    },
+    {
+      "key": "demoSetup",
+      "type": "list",
+      "items": {
+        "type": "string",
+        "placeholder": "./scripts/seed-demo-data",
+        "monospace": true
+      },
+      "label": "Demo setup commands",
+      "description": "Shell commands run in the demo container alone, in /workspace, in order, before the command first starts: what the demo needs that the sandbox must not have (credentials of its own, seed data)."
     }
   ]
 }

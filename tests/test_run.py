@@ -52,7 +52,7 @@ def test_the_host_pipeline_builds_and_runs_the_image(sb, run_sh):
                   SANDBOX_AUTH_FILE=auth)
     assert done.returncode == 0, done.stderr
     [build], [run] = calls(done, "build"), calls(done, "run")
-    plugins = ("herdr ports data-mounts upstream-proxy cwd-workspace package-managers "
+    plugins = ("herdr data-mounts upstream-proxy cwd-workspace package-managers "
                "project-deps dev-server agent-status branch-guard")
     assert build == ["build", "-t", "claude-agent:claude", "--build-arg", "AGENT=claude",
                      "--build-arg", "AGENT_VERSION=1.2.3", "--build-arg", f"ENABLED_PLUGINS={plugins}", "."]
@@ -63,8 +63,7 @@ def test_the_host_pipeline_builds_and_runs_the_image(sb, run_sh):
                         "-e", f"ENABLED_PLUGINS={plugins}"]
     assert run[-1] == "claude-agent:claude"
     tail = " ".join(run[13:])
-    assert "--network" not in run  # a network of its own: ports reach the host through the proxy
-    assert not any("PORTS" in arg for arg in run)  # none configured: none opened
+    assert "--network" not in run and not any(a.startswith("-p") for a in run)  # publishes nothing
     for expected in (f"-v {sb.cwd}:/workspace", "-v /dev/null:/workspace/.env:ro",
                      "-e CWD_WORKSPACE_HIDDEN=/workspace/.env",
                      "-e CLAUDE_CODE_OAUTH_TOKEN=oauth-tok", "-e CLAUDE_EFFORT=high"):
@@ -151,22 +150,13 @@ def test_host_proxy_runs_exactly_as_long_as_the_container(sb, run_sh, short_tmp)
     assert os.listdir(proxy_dir) == ["lock"], "the proxy outlived run.sh"
 
 
-def test_the_runs_ports_directory_lives_exactly_as_long_as_the_container(sb, run_sh, short_tmp):
-    done = run_sh("--run-id", "0a1b2c", CLAUDE_CODE_OAUTH_TOKEN="t", PORTS="3000")
-    assert done.returncode == 0, done.stderr
-    [run] = calls(done, "run")
-    base = f"{short_tmp}/sandbox-ports-{os.getuid()}-127.0.0.1"
-    assert f"{base}/runs/0a1b2c:/run/ports/sockets" in run
-    assert os.listdir(f"{base}/runs") == [] and not os.path.exists(f"{base}/portd.pid")
-
-
 def test_web_describes_the_project_and_starts_nothing(sb, run_sh):
     # Its settings are announced on a normal run: that must not leak into the JSON.
     done = run_sh("--web", config={**BASE, "env": {**BASE["env"], "CLAUDE_EFFORT": "high"}})
     assert done.returncode == 0, done.stderr
     said = json.loads(done.stdout)
     assert said["agent"] == "claude" and "cwd-workspace" in said["plugins"]
-    assert said["live"] == [f"{sb.env['TMPDIR']}/sandbox-ports-{os.getuid()}-127.0.0.1/items.json"]
+    assert said["live"] == [f"{sb.home}/.local/state/claude-sandbox/dev-server/items.json"]
     assert said["lists"] == [] and "checkout" not in said  # agent-workspace is off in BASE
     assert done.calls == []
 
@@ -228,7 +218,7 @@ def test_the_container_exit_status_is_the_runs(sb, run_sh):
 
 def test_a_hangup_cleans_up_and_leaves_the_docker_client_be(sb, run_sh, short_tmp):
     """The web UI stops a session with a SIGHUP to its process group: the stage's exit hooks run
-    and the run leaves the port proxy, while `docker run` is left to the `docker rm` that follows."""
+    (upstream-proxy's proxy stops), while `docker run` is left to the `docker rm` that follows."""
     started = sb.tmp / "started"
     sb.stub("docker", f'[ "$1" != run ] || {{ trap "" HUP; echo $$ >"{started}"; sleep 30; }}\n')
     with socket.socket() as s:
@@ -237,7 +227,7 @@ def test_a_hangup_cleans_up_and_leaves_the_docker_client_be(sb, run_sh, short_tm
     config = json.loads(json.dumps(BASE))  # upstream-proxy: a proxy on this machine, stopped by an exit hook
     config["plugins"]["upstream-proxy"] = {"routes": [{"name": "api", "port": port, "upstream": "http://127.0.0.1:9"}]}
     sb.config(config)
-    env = sb._env({"CLAUDE_CODE_OAUTH_TOKEN": "t", "PORTS": "3000", "TMPDIR": str(short_tmp)})
+    env = sb._env({"CLAUDE_CODE_OAUTH_TOKEN": "t", "TMPDIR": str(short_tmp)})
     # Files, not pipes: the docker client, left running, would hold a pipe open past run.sh.
     out, err = open(sb.tmp / "out", "w"), open(sb.tmp / "err", "w")
     proc = subprocess.Popen([REPO / "run.sh", "--run-id", "0a1b2c", "--chat"], cwd=sb.cwd, env=env,
@@ -249,12 +239,10 @@ def test_a_hangup_cleans_up_and_leaves_the_docker_client_be(sb, run_sh, short_tm
             time.sleep(0.1)
         else:
             raise AssertionError((sb.tmp / "err").read_text())
-        base = f"{short_tmp}/sandbox-ports-{os.getuid()}-127.0.0.1"
         [proxy_dir] = glob.glob(f"{short_tmp}/upstream-proxy-*")
-        assert os.listdir(f"{base}/runs") == ["0a1b2c"] and "proxy.pid" in os.listdir(proxy_dir)
+        assert "proxy.pid" in os.listdir(proxy_dir)
         os.killpg(proc.pid, signal.SIGHUP)
         assert proc.wait(timeout=30) == 128 + signal.SIGHUP, (sb.tmp / "err").read_text()
-        assert os.listdir(f"{base}/runs") == []  # left the port proxy
         assert os.listdir(proxy_dir) == ["lock"]  # the stage's exit hook stopped upstream-proxy's
         os.kill(int(started.read_text()), 0)  # the docker client is still there
     finally:

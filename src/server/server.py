@@ -1130,8 +1130,8 @@ def tidy(s, urls, offered):
 
 
 def live_items(project, run_id):
-    """What the project's plugins publish for a run while it runs (web_live_items: the ports its
-    servers listen on), read afresh: it changes faster than the project is described."""
+    """What the project's plugins publish for a run while it runs (web_live_items: its demo
+    server), read afresh: it changes faster than the project is described."""
     found = []
     for file in described.get(project, {}).get("live", []) if run_id else []:
         try:
@@ -1728,7 +1728,7 @@ def local_names(bind):
 
 def web_bind(bind):
     """The address the page listens on, as an address: a plugin publishing what a session serves
-    (ports) publishes it there by default, so its links work from wherever the page was opened."""
+    (dev-server's demo container) publishes it there by default, so its links work from wherever the page was opened."""
     if bind and not re.fullmatch(r"[0-9.]+|.*:.*", bind):
         bind = socket.gethostbyname(bind)  # a name, e.g. a VPN's
     return bind or "0.0.0.0"

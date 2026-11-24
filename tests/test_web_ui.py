@@ -363,13 +363,16 @@ def test_the_first_message_is_a_card_with_its_project_and_start_button_under_the
     assert button()["y"] > before["y"] + 40  # it stays on the card's bottom line
     # The rest is in a sidebar on the left on a desk, with no menu button.
     menu = board.locator("#board-menu").bounding_box()
-    assert board.is_visible("#board-menu .theme") and board.is_visible("#board-menu .sync") and not board.is_visible("button[aria-label='Menu']")
+    assert board.is_visible("#board-menu .sync") and not board.is_visible("button[aria-label='Menu']")
     assert menu["x"] == 0 and menu["x"] + menu["width"] <= card["x"]
+    # The colours are at the top right, not in the sidebar.
+    theme = board.locator(".top .theme").bounding_box()
+    assert not board.is_visible("#board-menu .theme") and theme["x"] > card["x"] + card["width"]
     # On a phone it is behind the menu button beside the card: closed until asked, and Esc closes it again.
     board.set_viewport_size({"width": 400, "height": 800})
     assert not board.is_visible("#board-menu")
     board.click("button[aria-label='Menu']")
-    assert board.is_visible("#board-menu .theme") and board.is_visible("#board-menu .sync")
+    assert board.is_visible("#board-menu .theme") and board.is_visible("#board-menu .sync") and not board.is_visible(".top .theme")
     board.keyboard.press("Escape")
     assert not board.is_visible("#board-menu")
 
@@ -587,8 +590,8 @@ def test_the_pages_follow_the_browsers_day_or_night_unless_one_is_pinned(board):
     board.emulate_media(color_scheme="dark")
     night = paper(board)
     assert day == "rgb(233, 234, 244)" and night == "rgb(27, 29, 54)"
-    board.click(".theme button[aria-label='Day']")  # pinned: the browser's setting no longer decides
-    assert paper(board) == day and board.get_attribute(".theme button[aria-label='Day']", "aria-pressed") == "true"
+    board.click(".top .theme button[aria-label='Day']")  # pinned: the browser's setting no longer decides
+    assert paper(board) == day and board.get_attribute(".top .theme button[aria-label='Day']", "aria-pressed") == "true"
     tab = opens_tab(board, lambda: board.click("button[aria-label='New session']"))
     tab.emulate_media(color_scheme="dark")
     assert tab.evaluate("document.documentElement.dataset.theme") == "light"  # the chat wears it too

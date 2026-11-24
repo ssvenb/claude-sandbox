@@ -2,6 +2,7 @@
   "name": "claude-home",
   "description": "Mounts a per-run copy of the host user's ~/.claude into the agent's home so the container reuses the globally configured Claude credentials and settings, without the agent writing to the host's own.",
   "priority": 5,
+  "sibling": true,
   "defaultEnabled": true,
   "requiredAgent": "claude",
   "provides": ["claude-home"],

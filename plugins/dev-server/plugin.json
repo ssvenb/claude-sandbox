@@ -1,6 +1,6 @@
 {
   "name": "dev-server",
-  "description": "Starts the project's server in /workspace at every boot of the sandbox, for the agent's own checks (a helper restarts it), and, with a port, a second time in a container of its own next to the sandbox: from the agent's checkout, restarted whenever a file changes, published as a button on the run's session. The sandbox itself publishes nothing; the agent's code never runs on the host, and the demo container gets none of your credentials unless you add claude-home to its plugins. Nothing configured → does nothing.",
+  "description": "Starts the project's server in /workspace at every boot of the sandbox, for the agent's own checks (a helper restarts it), and, with a port, a second time in a container of its own next to the sandbox: from the agent's checkout, restarted whenever a file changes, published as a button on the run's session. The sandbox itself publishes nothing; the agent's code never runs on the host, and the demo container gets what the sibling plugins hand the sandbox (claude-home's login among them) and nothing else of yours. Nothing configured → does nothing.",
   "priority": 28,
   "defaultEnabled": true,
   "provides": [
@@ -33,17 +33,6 @@
       },
       "label": "Demo setup commands",
       "description": "Shell commands run in the demo container alone, in /workspace, in order, before the command first starts: what the demo needs that the sandbox must not have (credentials of its own, seed data)."
-    },
-    {
-      "key": "demoPlugins",
-      "type": "list",
-      "items": {
-        "type": "string",
-        "placeholder": "claude-home",
-        "monospace": true
-      },
-      "label": "Demo plugins",
-      "description": "Plugins whose share of the sandbox the demo container takes too, beyond the ones that declare themselves fit for it (upstream-proxy's routes, ca-certs, docker-cli's Docker daemon): claude-home gives it the run's copy of your ~/.claude, a real login for the agent's code. Only plugins enabled for the project."
     }
   ]
 }

@@ -511,7 +511,7 @@ def test_dev_server_demo_needs_a_port_number_valid_setup_and_the_mirror(sb):
     sb.plugin("dev-server").dies("needs agent-workspace's mirror")
 
 
-def test_dev_server_demo_takes_what_sibling_plugins_and_demo_plugins_hand_the_sandbox(sb):
+def test_dev_server_demo_takes_what_the_sibling_plugins_hand_the_sandbox(sb):
     (sb.home / ".agent-workspaces/project-20260102-abc123").mkdir(parents=True)
     (sb.home / ".claude").mkdir()
     calls = sb.tmp / "calls"
@@ -519,23 +519,21 @@ def test_dev_server_demo_takes_what_sibling_plugins_and_demo_plugins_hand_the_sa
 case $1 in info) echo 'runc sysbox-runc' ;; inspect) echo sha256:img ;; port) echo 127.0.0.1:49153 ;; esac
 ''')
     items = sb.home / ".local/state/claude-sandbox/dev-server/items.json"
+    sb.config(DEMO)
 
-    def demo_run(extra):
+    def demo_run(plugins):
         calls.unlink(missing_ok=True)
-        sb.config({"plugins": {"dev-server": {**DEMO["plugins"]["dev-server"], **extra}}})
-        sb.staged("ENABLED_PLUGINS='docker-cli claude-home dev-server'\nplugins_host_stage\n"
+        sb.staged(f"ENABLED_PLUGINS='{plugins}'\nplugins_host_stage\n"
                   f'until grep -q abc123 "{items}" 2>/dev/null; do sleep 0.1; done').ok()
         return next(line for line in calls.read_text().splitlines() if line.startswith("run "))
 
-    plain = demo_run({})  # docker-cli declares itself a sibling: Sysbox, and the daemon it starts
-    assert "--runtime=sysbox-runc" in plain and "-e DEMO_SERVER_PLUGINS=docker-cli " in plain
-    assert ".claude" not in plain  # your login only when asked for
-    with_home = demo_run({"demoPlugins": ["claude-home"]})
+    both = demo_run("docker-cli claude-home herdr dev-server")
+    assert "--runtime=sysbox-runc" in both  # docker-cli: Sysbox, and the daemon it starts
     copy = sb.home / ".local/state/claude-sandbox/claude-home/abc123"
-    assert f"-v {copy}:/home/node/.claude" in with_home  # the run's copy, never ~/.claude itself
-    assert "-e DEMO_SERVER_PLUGINS=docker-cli claude-home " in with_home
-    sb.config({"plugins": {"dev-server": {**DEMO["plugins"]["dev-server"], "demoPlugins": ["kvm"]}}})
-    sb.staged("ENABLED_PLUGINS='docker-cli dev-server'\nplugins_host_stage").dies("'kvm' is not enabled or comes after it")
+    assert f"-v {copy}:/home/node/.claude" in both  # the run's copy, never ~/.claude itself
+    assert "-e DEMO_SERVER_PLUGINS=docker-cli claude-home " in both  # herdr declares nothing
+    alone = demo_run("dev-server")  # what the sandbox has not, the demo has not either
+    assert "--runtime" not in alone and ".claude" not in alone and "-e DEMO_SERVER_PLUGINS= " in alone
 
 
 @pytest.mark.parametrize("bind, name, url", [(None, None, "http://{host}:49153/"),

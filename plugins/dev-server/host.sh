@@ -2,15 +2,15 @@
 # Host stage: the project's server command, from its config —
 #
 #   { "plugins": { "dev-server": { "command": "pnpm dev --host 0.0.0.0 --port 3000", "port": 3000,
-#                                  "demoSetup": ["./scripts/seed-demo-data"], "demoPlugins": [] } } }
+#                                  "demoSetup": ["./scripts/seed-demo-data"] } } }
 #
 # The command runs in the sandbox at every boot, for the agent's own checks (agent-init.sh); nothing
 # there is published. With a port, it runs a second time for you: once the run's container is up, a
 # sibling one from the same image serves the agent's checkout (agent-workspace's mirror), runs
 # demoSetup first, restarts the command on every change (bin/demo-server), and its port is published
-# as a button on the run's session. The agent's code runs in there, never on this machine, and
-# nothing of yours is mounted into it unless demoPlugins says so (claude-home: the run's copy of
-# your ~/.claude), never the App key or the host's Docker socket.
+# as a button on the run's session. The agent's code runs in there, never on this machine. It gets
+# what the sibling plugins hand the sandbox (claude-home: the run's copy of your ~/.claude, when the
+# sandbox has it too), never the App key or the host's Docker socket.
 # No command → the plugin does nothing, which is why it can stay on by default.
 
 DEV_SERVER_COMMAND=$(plugin_config '.command' '')
@@ -27,12 +27,9 @@ printf '%s' "$DEMO_SERVER_SETUP" | jq -e 'type == "array" and all(type == "strin
   || die "dev-server: .plugins[\"dev-server\"].demoSetup must be an array of strings."
 
 # What the sibling plugins hand the sandbox (plugin_siblings: a proxy's sockets, certificates,
-# Sysbox and its Docker daemon) and what demoPlugins names besides, e.g. claude-home's copy of your
-# ~/.claude: the demo container takes their args and runs their container stages (bin/demo-server).
-DEMO_SERVER_EXTRA=$(plugin_config_json '.demoPlugins' '[]')
-printf '%s' "$DEMO_SERVER_EXTRA" | jq -e 'type == "array" and all(type == "string")' >/dev/null 2>&1 \
-  || die "dev-server: .plugins[\"dev-server\"].demoPlugins must be an array of plugin names."
-DEMO_SERVER_PLUGINS=$( { plugin_siblings; jq -r '.[]' <<<"$DEMO_SERVER_EXTRA"; } | awk '!seen[$0]++' | xargs)
+# Sysbox and its Docker daemon, claude-home's copy of your ~/.claude): the demo container takes
+# their args and runs their container stages (bin/demo-server).
+DEMO_SERVER_PLUGINS=$(plugin_siblings | xargs)
 # shellcheck disable=SC2086  # one argument per plugin name
 plugin_docker_args $DEMO_SERVER_PLUGINS
 DEMO_SERVER_ARGS=(${PLUGIN_DOCKER_ARGS[@]+"${PLUGIN_DOCKER_ARGS[@]}"} -e "DEMO_SERVER_PLUGINS=$DEMO_SERVER_PLUGINS")
@@ -80,4 +77,4 @@ echo "🧪 dev-server: starts with the container (log: $DEMO_SERVER_STATE/$RUN_I
 
 # demo_server_items and DEMO_SERVER_STATE stay defined for the hook.
 on_exit "kill $DEMO_SERVER_PID 2>/dev/null || true; docker rm -f sandbox-demo-$RUN_ID >/dev/null 2>&1 || true; rm -f '$DEMO_SERVER_STATE/$RUN_ID.log'; demo_server_items ."
-unset DEMO_SERVER_PORT DEMO_SERVER_SETUP DEMO_SERVER_EXTRA DEMO_SERVER_PLUGINS DEMO_SERVER_ARGS DEMO_SERVER_MIRROR DEMO_SERVER_BIND DEMO_SERVER_HOST DEMO_SERVER_PID
+unset DEMO_SERVER_PORT DEMO_SERVER_SETUP DEMO_SERVER_PLUGINS DEMO_SERVER_ARGS DEMO_SERVER_MIRROR DEMO_SERVER_BIND DEMO_SERVER_HOST DEMO_SERVER_PID

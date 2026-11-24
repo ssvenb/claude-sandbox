@@ -101,7 +101,9 @@ if have sysbox-runc && sysbox_registered; then ok sysbox-runc
 elif have sysbox-runc; then
   warn "sysbox-runc is installed but this Docker daemon ($(docker info --format '{{.OperatingSystem}}' 2>/dev/null)) does not list it as a runtime: the docker-cli plugin will refuse to start. Docker Desktop's daemon cannot use it; use Docker Engine on this host, or set ENABLE_DOCKER_CLI=0 in your projects."
 # Its package restarts Docker: never under running containers (the dashboard's sync runs this with --yes).
-elif have docker && have dpkg && [ -z "$(docker ps -q 2>/dev/null)" ] \
+elif have docker && have dpkg && [ -n "$(docker ps -q 2>/dev/null)" ]; then
+  warn "sysbox-runc is missing, and installing it restarts Docker: stop the running containers (docker ps) and run ./install.sh again, or set ENABLE_DOCKER_CLI=0 in your projects."
+elif have docker && have dpkg \
   && confirm "sysbox-runc is missing (the docker-cli plugin runs sandboxes under it). Install Sysbox's latest .deb from GitHub? It restarts Docker."; then
   deb=$(curl -fsSL https://api.github.com/repos/nestybox/sysbox/releases/latest \
     | jq -r --arg suffix "linux_$(dpkg --print-architecture).deb" '.assets[].browser_download_url | select(endswith($suffix))')

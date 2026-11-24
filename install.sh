@@ -101,8 +101,9 @@ elif have docker && have dpkg && [ -z "$(docker ps -q 2>/dev/null)" ] \
   && confirm "sysbox-runc is missing (the docker-cli plugin runs sandboxes under it). Install Sysbox's latest .deb from GitHub? It restarts Docker."; then
   deb=$(curl -fsSL https://api.github.com/repos/nestybox/sysbox/releases/latest \
     | jq -r --arg suffix "linux_$(dpkg --print-architecture).deb" '.assets[].browser_download_url | select(endswith($suffix))')
-  tmp=$(mktemp -d)
-  if [ -n "$deb" ] && curl -fsSLo "$tmp/sysbox.deb" "$deb" && $sudo apt-get install -y "$tmp/sysbox.deb" && have sysbox-runc; then
+  # Readable by apt's _apt user, or apt warns it downloads "unsandboxed as root".
+  tmp=$(mktemp -d) && chmod 755 "$tmp"
+  if [ -n "$deb" ] && curl -fsSLo "$tmp/sysbox.deb" "$deb" && chmod 644 "$tmp/sysbox.deb" && $sudo apt-get install -y "$tmp/sysbox.deb" && have sysbox-runc; then
     ok "sysbox-runc (installed)"
   else
     warn "Sysbox did not install (see above): sandboxes will not start until it does, or ENABLE_DOCKER_CLI=0 is set in their project."

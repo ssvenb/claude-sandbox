@@ -5,7 +5,7 @@ import { message } from '../../api/client';
 import { addProject, deleteProject } from '../../api/sessions';
 import type { AuthConfig, Json, JsonObject, SettingSpec } from '../../api/types';
 import { BusyButton } from '../common/BusyButton';
-import { CardGroup } from './Card';
+import { Card } from './Card';
 import { useForm } from './FormContext';
 import { isObject, type Slot } from './slots';
 
@@ -31,7 +31,7 @@ function entrySpec(types: AuthConfig['types']): SettingSpec {
     }
   return {
     type: 'object', title: 'name', fields: [
-      { key: 'name', label: 'Name', required: true, monospace: true, description: 'What a project or a plugin names it by.' },
+      { key: 'name', label: 'Name', required: true, monospace: true },
       { key: 'type', type: 'enum', label: 'Type', required: true, choices: Object.keys(types) },
       ...[...fields].map(([key, { of, requiredIn }]): SettingSpec => ({
         key, label: key, type: key.endsWith('File') ? 'path' : 'string', monospace: true,
@@ -85,8 +85,8 @@ export function AuthCards({ auth, projects, draft, query, onChanged }: Props) {
 
   return (
     <>
-      <h4 className={query && !'projects'.includes(query) ? 'hidden' : undefined}>Projects</h4>
       <div className={'card projects' + (query && !'projects'.includes(query) ? ' hidden' : '')}>
+        <div className="row"><b>Projects</b></div>
         <p>A file each in the projects folder. Added and deleted at once; its own settings are behind its gear.</p>
         <div className="entries">
           {listed.map(p => (
@@ -103,12 +103,12 @@ export function AuthCards({ auth, projects, draft, query, onChanged }: Props) {
         </div>
         <p className="error" role="alert">{error}</p>
       </div>
-      <CardGroup title="Authentications" query={query} cards={[{
+      <Card query={query} card={{
         key: 'auth', title: 'Authentications',
         description: 'Every identity, key and token a sandbox may use, each under a name; projects and plugins only name one. Saved readable by you alone; a saved key, token or client secret is never shown again, and kept while you leave it as it is.',
         more: ' ' + Object.keys(draft).join(' ').toLowerCase(),
         fields: [{ spec: { type: 'list', label: 'Entries', items: entrySpec(auth.types) }, slot: entries, name: 'auth' }],
-      }]} />
+      }} />
     </>
   );
 }

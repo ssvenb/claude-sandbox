@@ -95,14 +95,21 @@ if have docker && ! docker info >/dev/null 2>&1; then
   warn "docker is installed but its daemon does not answer: start it, and add yourself to the docker group if needed (sudo usermod -aG docker \$USER, then log in again)."
 fi
 # The docker-cli plugin (on by default) runs every sandbox under Sysbox, for a Docker daemon of its own.
-if have sysbox-runc; then ok sysbox-runc
+# The same check as plugins/docker-cli/host.sh: the binary alone is not enough, Docker must list the runtime.
+sysbox_registered() { docker info --format '{{range $name, $_ := .Runtimes}}{{$name}} {{end}}' 2>/dev/null | grep -qw sysbox-runc; }
+if have sysbox-runc && sysbox_registered; then ok sysbox-runc
+elif have sysbox-runc; then
+  warn "sysbox-runc is installed but this Docker daemon ($(docker info --format '{{.OperatingSystem}}' 2>/dev/null)) does not list it as a runtime: the docker-cli plugin will refuse to start. Docker Desktop's daemon cannot use it; use Docker Engine on this host, or set ENABLE_DOCKER_CLI=0 in your projects."
 # Its package restarts Docker: never under running containers (the dashboard's sync runs this with --yes).
-elif have docker && have dpkg && [ -z "$(docker ps -q 2>/dev/null)" ] \
+elif have docker && have dpkg && [ -n "$(docker ps -q 2>/dev/null)" ]; then
+  warn "sysbox-runc is missing, and installing it restarts Docker: stop the running containers (docker ps) and run ./install.sh again, or set ENABLE_DOCKER_CLI=0 in your projects."
+elif have docker && have dpkg \
   && confirm "sysbox-runc is missing (the docker-cli plugin runs sandboxes under it). Install Sysbox's latest .deb from GitHub? It restarts Docker."; then
   deb=$(curl -fsSL https://api.github.com/repos/nestybox/sysbox/releases/latest \
     | jq -r --arg suffix "linux_$(dpkg --print-architecture).deb" '.assets[].browser_download_url | select(endswith($suffix))')
-  tmp=$(mktemp -d)
-  if [ -n "$deb" ] && curl -fsSLo "$tmp/sysbox.deb" "$deb" && $sudo apt-get install -y "$tmp/sysbox.deb" && have sysbox-runc; then
+  # Readable by apt's _apt user, or apt warns it downloads "unsandboxed as root".
+  tmp=$(mktemp -d) && chmod 755 "$tmp"
+  if [ -n "$deb" ] && curl -fsSLo "$tmp/sysbox.deb" "$deb" && chmod 644 "$tmp/sysbox.deb" && $sudo apt-get install -y "$tmp/sysbox.deb" && sysbox_registered; then
     ok "sysbox-runc (installed)"
   else
     warn "Sysbox did not install (see above): sandboxes will not start until it does, or ENABLE_DOCKER_CLI=0 is set in their project."

@@ -1360,6 +1360,13 @@ def sign_in_code(agent, code):
         raise ValueError("the sign-in did not finish")
     if proc.returncode:
         raise ValueError(out.rsplit(">", 1)[-1].strip() or "the sign-in failed")
+    # The agent's own follow-up, its after-sign-in.sh: Claude's hands the new login to the sessions running.
+    if (after := AGENTS / agent / "after-sign-in.sh").is_file():
+        try:  # signed in all the same, whatever comes of it
+            subprocess.run(["sh", str(after)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=60, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
 
 
 def start(project, kind, run_id, task=None, ui=None, images=None, sets=None, once=False):

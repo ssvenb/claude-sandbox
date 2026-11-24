@@ -2,7 +2,7 @@
 set -e
 
 # The agent's user takes the uid of the host user who started the sandbox, so what the plugins
-# mount from the host is its own: claude-home's ~/.claude holds a .credentials.json only its owner
+# mount from the host is its own: Claude's ~/.claude (CLAUDE_HOME_MOUNT) holds a .credentials.json only its owner
 # may read, and a web server running as a service user (not uid 1000) signs that one in. -xdev: the
 # image's files only, never the mounts. Root (rootless docker maps it to the host user) keeps node.
 old=$(id -u node)

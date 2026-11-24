@@ -190,7 +190,7 @@ def run(opts: dict) -> int:
         container = subprocess.Popen(
             ["docker", "run", *tty, "--rm", "-e", f"RUN_ID={env['RUN_ID']}", "-e", f"RUN_DATE={env['RUN_DATE']}",
              "-e", f"RESUME={'1' if opts['resume'] else '0'}", "-e", f"AGENT={agent.name}",
-             # Whose the host's mounts are (claude-home's ~/.claude): the agent's user takes that uid.
+             # Whose the host's mounts are (Claude's ~/.claude): the agent's user takes that uid.
              "-e", f"HOST_UID={os.getuid()}",
              "-e", f"ENABLED_PLUGINS={' '.join(names)}", *task, *docker_args,
              "--name", f"sandbox-{env['RUN_ID']}", image], env=env)

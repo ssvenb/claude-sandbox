@@ -88,7 +88,7 @@ CLAUDE_SESSION = "5a4db0c0-0000-4000-8000-0000000a1b2c"
 
 @pytest.mark.parametrize("saved, flag", [(True, "--resume"), (False, "--session-id")])
 def test_claude_resume_continues_the_runs_conversation_when_it_was_kept(sb, saved, flag):
-    if saved:  # what claude-home's mounted ~/.claude holds after the run's first container
+    if saved:  # what the mounted ~/.claude holds after the run's first container
         transcripts = sb.home / ".claude/projects/-workspace"
         transcripts.mkdir(parents=True)
         (transcripts / f"{CLAUDE_SESSION}.jsonl").write_text("{}\n")

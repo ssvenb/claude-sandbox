@@ -1,4 +1,4 @@
-// Claude's part of the web UI: signing the server's claude (its ~/.claude, which claude-home hands
+// Claude's part of the web UI: signing the server's claude (its ~/.claude, which home.sh hands
 // sessions) in again, from the dashboard's menu: `signIn` in ../agent.json is what the server runs.
 import { SignInButton } from '@ui/components/common/SignInButton';
 import type { AgentUI } from '@ui/plugins';

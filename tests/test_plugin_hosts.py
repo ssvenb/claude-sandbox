@@ -18,22 +18,26 @@ from conftest import REPO
 
 # --- agents --------------------------------------------------------------------------------
 
-def test_claude_needs_a_token(sb):
-    sb.agent().dies("Claude Code needs credentials: set CLAUDE_AUTH")
-    assert sb.agent(CLAUDE_CODE_OAUTH_TOKEN="tok").ok().env == {"CLAUDE_CODE_OAUTH_TOKEN": "tok"}
+def test_claude_needs_a_token_without_its_home_mounted(sb):
+    for off in ("0", "false"):
+        sb.bash(CLAUDE_STAGE, CLAUDE_HOME_MOUNT=off).dies("Claude Code needs credentials: set CLAUDE_AUTH")
+    sb.bash(CLAUDE_STAGE, ENABLE_CLAUDE_HOME="0").dies("Claude Code needs credentials")  # the old plugin switch
+    assert sb.bash(CLAUDE_STAGE, CLAUDE_HOME_MOUNT="0", CLAUDE_CODE_OAUTH_TOKEN="tok").ok().env \
+        == {"CLAUDE_CODE_OAUTH_TOKEN": "tok"}
+    sb.bash(CLAUDE_STAGE, CLAUDE_HOME_MOUNT="maybe").dies("CLAUDE_HOME_MOUNT must be 0 or 1")
 
 
 def test_claude_token_is_optional_when_a_plugin_brings_credentials(sb):
-    assert sb.agent(AGENT_AUTH_PROVIDED=1).ok().args == []
+    assert sb.agent(CLAUDE_HOME_MOUNT="0", AGENT_AUTH_PROVIDED=1).ok().args == []
 
 
 @pytest.mark.parametrize("effort", ["low", "medium", "high", "xhigh", "max"])
 def test_claude_effort_is_forwarded(sb, effort):
-    assert sb.agent(AGENT_AUTH_PROVIDED=1, CLAUDE_EFFORT=effort).ok().env == {"CLAUDE_EFFORT": effort}
+    assert sb.agent(CLAUDE_HOME_MOUNT="0", AGENT_AUTH_PROVIDED=1, CLAUDE_EFFORT=effort).ok().env == {"CLAUDE_EFFORT": effort}
 
 
 def test_claude_effort_is_validated(sb):
-    sb.agent(AGENT_AUTH_PROVIDED=1, CLAUDE_EFFORT="turbo").dies("CLAUDE_EFFORT must be one of")
+    sb.agent(CLAUDE_HOME_MOUNT="0", AGENT_AUTH_PROVIDED=1, CLAUDE_EFFORT="turbo").dies("CLAUDE_EFFORT must be one of")
 
 
 def test_copilot_needs_its_own_token(sb):
@@ -62,7 +66,7 @@ mkdir -p {copy}/session-state && echo mine > {copy}/session-state/sandbox-abc123
     assert (copy / "session-state/sandbox-abc123.json").read_text() == "mine\n"
 
 
-CLAUDE_STAGE = "ENABLED_PLUGINS=claude-home\nplugins_host_stage\nagent_host_stage"
+CLAUDE_STAGE = "agent_home_stage\nagent_host_stage"
 
 
 def login(expires, token="t"):
@@ -146,9 +150,28 @@ def test_claude_home_keeps_your_login_when_the_runs_is_not_a_newer_one(sb, claud
     else:
         run.write_text(planted)
     before = (claude_home / ".credentials.json").read_text()
-    subprocess.run([REPO / "plugins/claude-home/host/keep-credentials.py", run, claude_home / ".credentials.json"],
+    subprocess.run([REPO / "agents/claude/host/keep-credentials.py", run, claude_home / ".credentials.json"],
                    check=True, timeout=10)
     assert (claude_home / ".credentials.json").read_text() == before
+
+
+
+def test_claude_home_sign_in_refreshes_the_login_of_the_runs_still_running(sb, claude_home):
+    state = sb.home / ".local/state/claude-sandbox/claude-home"
+    for run, creds in (("stale1", login(50, "old")), ("newer1", login(200, "own"))):
+        (state / run).mkdir(parents=True)
+        (state / run / ".credentials.json").write_text(json.dumps({**creds, "keep": run}))
+    (state / "ended1/projects").mkdir(parents=True)  # pruned at its exit: no login to refresh
+    outside = sb.tmp / "outside.json"
+    (state / "planted").mkdir()
+    (state / "planted/.credentials.json").write_text("{}")
+    (state / "planted/.credentials.json.sandbox.tmp").symlink_to(outside)  # left by the agent
+    subprocess.run(["sh", REPO / "agents/claude/after-sign-in.sh"], env={**os.environ, "HOME": str(sb.home)},
+                   check=True, timeout=10)
+    assert json.loads((state / "stale1/.credentials.json").read_text()) == {**login(100), "keep": "stale1"}
+    assert json.loads((state / "newer1/.credentials.json").read_text()) == {**login(200, "own"), "keep": "newer1"}
+    assert not (state / "ended1/.credentials.json").exists()
+    assert not outside.exists() and json.loads((state / "planted/.credentials.json").read_text()) == login(100)
 
 
 # --- agent-workspace -----------------------------------------------------------------------
@@ -521,17 +544,20 @@ case $1 in info) echo 'runc sysbox-runc' ;; inspect) echo sha256:img ;; port) ec
     items = sb.home / ".local/state/claude-sandbox/dev-server/items.json"
     sb.config(DEMO)
 
-    def demo_run(plugins):
+    def demo_run(plugins, home=False):
         calls.unlink(missing_ok=True)
-        sb.staged(f"ENABLED_PLUGINS='{plugins}'\nplugins_host_stage\n"
+        sb.staged(f"ENABLED_PLUGINS='{plugins}'\n" + ("agent_home_stage\n" if home else "") + "plugins_host_stage\n"
                   f'until grep -q abc123 "{items}" 2>/dev/null; do sleep 0.1; done').ok()
         return next(line for line in calls.read_text().splitlines() if line.startswith("run "))
 
-    both = demo_run("docker-cli claude-home herdr dev-server")
+    both = demo_run("docker-cli herdr dev-server")
     assert "--runtime=sysbox-runc" in both  # docker-cli: Sysbox, and the daemon it starts
+    assert "-e DEMO_SERVER_PLUGINS=docker-cli " in both  # herdr declares nothing
+    assert ".claude" not in both  # the agent's home only with .agentHome
+    sb.config({"plugins": {"dev-server": {**DEMO["plugins"]["dev-server"], "agentHome": True}}})
     copy = sb.home / ".local/state/claude-sandbox/claude-home/abc123"
-    assert f"-v {copy}:/home/node/.claude" in both  # the run's copy, never ~/.claude itself
-    assert "-e DEMO_SERVER_PLUGINS=docker-cli claude-home " in both  # herdr declares nothing
+    assert f"-v {copy}:/home/node/.claude" in demo_run("dev-server", home=True)  # the run's copy, never ~/.claude
+    sb.config(DEMO)
     alone = demo_run("dev-server")  # what the sandbox has not, the demo has not either
     assert "--runtime" not in alone and ".claude" not in alone and "-e DEMO_SERVER_PLUGINS= " in alone
 

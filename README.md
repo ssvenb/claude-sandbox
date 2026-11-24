@@ -713,10 +713,7 @@ their container stages: `upstream-proxy`'s routes, `ca-certs`' certificates, and
 and Docker daemon, so what it starts stays inside it. Nothing of yours goes in unless `demoPlugins`
 names it: with `claude-home` there, the demo gets the run's copy of your `~/.claude`, a real login
 for the agent's code to use (a refreshed one comes back to yours, as from the sandbox; hooks or
-settings written there never do). Never the App key or the host's Docker socket. This repo's own
-`.claude-sandbox.json` demos the web UI that way, its `demoSetup` installing a project of its own
-([demo/projects/demo.json](demo/projects/demo.json)) whose sessions run in the demo's Docker daemon,
-from a clone of the checkout, with your login.
+settings written there never do). Never the App key or the host's Docker socket.
 
 The host's own services are at `host.docker.internal` from inside, if they listen on an address
 other than loopback; the host's `localhost` is out of the agent's reach. Unix sockets created in a

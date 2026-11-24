@@ -20,10 +20,6 @@
     "dev-server": {
       "command": "npm run build --prefix web && exec src/server/serve.sh --port 8790 --bind 0.0.0.0 --allow-host claude-box --allow-host claude-box.local --allow-host claude-box.netbird.cloud --allow-host 192.168.2.109 --allow-host 100.108.236.184",
       "port": 8790,
-      "demoSetup": [
-        "git clone -q /workspace ~/demo-repo",
-        "mkdir -p ~/.config/claude-sandbox/projects && cp demo/projects/*.json ~/.config/claude-sandbox/projects/"
-      ],
       "demoPlugins": [
         "claude-home"
       ]

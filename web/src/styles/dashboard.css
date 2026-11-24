@@ -9,7 +9,8 @@
   /* Starting a session is writing its first message: the sandbox boots behind it. One card, as in
      a chat: the field on top, the project and the button that starts it on the line under it. */
   .top { display: flex; align-items: flex-start; justify-content: flex-end; gap: 10px; }
-  .starter { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--panel);
+  /* As wide as the chat's composer (its .column), centred, like a chat app's input. */
+  .starter { flex: 1; min-width: 0; max-width: 780px; margin-inline: auto; display: flex; flex-direction: column; background: var(--panel);
              border: 1.5px solid var(--rule); border-radius: 18px; box-shadow: var(--shadow); }
   .starter:focus-within { border-color: var(--lamp); }
   .starter .shots { padding: 12px 16px 0; }
@@ -26,21 +27,41 @@
   .starter select:hover { border-color: var(--muted); }
   .starter .project { display: inline-flex; align-items: center; padding-right: 12px; color: var(--muted); }
 
-  /* The rest, about this web UI as a whole, waits behind one button beside the card. */
-  .top .menu { margin-top: 8px; color: var(--muted); anchor-name: --board-menu; }
-  .top .menu:hover { color: var(--ink); }
-  #board-menu { position-anchor: --board-menu; inset: auto; top: anchor(bottom); right: anchor(right); margin: 6px 0 0;
-                display: none; flex-direction: column; gap: 4px; min-width: 230px; padding: 6px; color: var(--ink);
-                border: 1px solid var(--rule); border-radius: 14px; background: var(--panel); box-shadow: var(--shadow); }
-  #board-menu:popover-open { display: flex; animation: drop .15s ease-out; }
-  @media (prefers-reduced-motion: reduce) { #board-menu:popover-open { animation: none; } }
-  @supports not (anchor-name: --a) { #board-menu { position: fixed; top: 64px; right: 14px; margin: 0; } }
-  #board-menu .row { display: flex; justify-content: center; padding: 4px; }
+  /* The rest, about this web UI as a whole (components/dashboard/BoardMenu): on a desk a sidebar
+     down the page's left, the street the building stands on; on a phone a popover from a button
+     beside the card. */
+  #board-menu { flex-direction: column; gap: 2px; color: var(--ink); }
+  #board-menu .mark { display: flex; align-items: center; gap: 10px; padding: 4px 10px 18px; font-size: 17px; font-weight: 650; letter-spacing: -.015em; }
+  /* A lit window, the one thing in the sidebar with colour. */
+  #board-menu .mark .lamp { width: 10px; height: 13px; border-radius: 2px; background: var(--lamp-fill); box-shadow: 0 0 12px var(--lamp-fill); }
+  #board-menu .row { display: flex; padding: 4px; }
   #board-menu :is(.sync, .term) { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0; border-radius: 9px; padding: 8px 10px; }
   #board-menu :is(.sync, .term):hover { background: var(--sunk); }
   #board-menu :is(.sync, .term) svg { width: 16px; height: 16px; color: var(--muted); }
+  .top .menu { display: none; }
+  @media (min-width: 901px) {
+    main { display: grid; grid-template: auto minmax(0, 1fr) / 232px minmax(0, 1fr); padding: 0; }
+    main > :not(#board-menu) { grid-column: 2; margin-inline: 32px; }
+    main > :nth-child(2) { margin-top: 24px; }
+    /* Shown whether or not it is "open": the popover only matters on a phone. */
+    #board-menu { display: flex; position: static; grid-row: 1 / -1; inset: auto; width: auto; height: auto; margin: 0; overflow-y: auto;
+                  padding: 22px 12px 16px; border: 0; border-right: 1px solid var(--rule); background: var(--page); }
+    #board-menu .row { margin-top: auto; }
+  }
+  @media (max-width: 900px) {
+    .top .menu { display: inline-grid; margin-top: 8px; color: var(--muted); anchor-name: --board-menu; }
+    .top .menu:hover { color: var(--ink); }
+    #board-menu { position-anchor: --board-menu; inset: auto; top: anchor(bottom); right: anchor(right); margin: 6px 0 0;
+                  display: none; min-width: 230px; padding: 6px;
+                  border: 1px solid var(--rule); border-radius: 14px; background: var(--panel); box-shadow: var(--shadow); }
+    #board-menu:popover-open { display: flex; animation: drop .15s ease-out; }
+    #board-menu .mark { display: none; }
+    #board-menu .row { order: -1; justify-content: center; }
+  }
+  @media (max-width: 900px) and (prefers-reduced-motion: reduce) { #board-menu:popover-open { animation: none; } }
+  @supports not (anchor-name: --a) { @media (max-width: 900px) { #board-menu { position: fixed; top: 64px; right: 14px; margin: 0; } } }
 
-  .board { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  .board { flex: 1; min-height: 0; display: grid; grid-row: 2; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
            grid-template-rows: minmax(0, 1fr); gap: 12px 24px; margin-top: 20px; }
   /* A side clips what it scrolls: the room around it keeps a focus ring and a window's edge whole. */
   .board > * { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 8px 6px 48px; }

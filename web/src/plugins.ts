@@ -11,7 +11,7 @@ export interface ChatParts {
   /** With the header's buttons, which drop into a row of their own on a phone. */
   actions?: ReactNode;
   /** Beside the chat on a desk, in the panel on its left (as wide as the reader makes it, put away
-   *  from the header): an `<aside className="side" popover="auto">`, which a smaller screen shows
+   *  from its own button, back from the header's): an `<aside className="side" popover="auto">`, which a smaller screen shows
    *  as a popover under the header, from a `side-toggle` button in `bar`. */
   aside?: ReactNode;
 }
@@ -36,7 +36,7 @@ export const PLUGINS = Object.entries(found)
 
 /** An agent's page code: the default export of its web/index.tsx. */
 export interface AgentUI {
-  /** Its items in the dashboard's menu (⋯), e.g. signing its CLI on the server in again
+  /** Its items in the dashboard's sidebar (the ⋯ menu on a phone), e.g. signing its CLI on the server in again
    *  (components/common/SignInButton). `close` closes the menu. */
   Menu?: ComponentType<{ close: () => void }>;
 }

@@ -5,7 +5,7 @@ import { message } from '../api/client';
 import { getAuth, getConfig } from '../api/sessions';
 import type { Session } from '../api/types';
 import { Loading } from '../components/common/Spinner';
-import { BoardMenu } from '../components/dashboard/BoardMenu';
+import { BoardMenu, BoardMenuButton } from '../components/dashboard/BoardMenu';
 import { DashboardContext, type DashboardActions } from '../components/dashboard/DashboardContext';
 import { NewSession } from '../components/dashboard/NewSession';
 import { NoProjects } from '../components/dashboard/NoProjects';
@@ -48,11 +48,12 @@ export default function Dashboard() {
   return (
     <DashboardContext value={actions}>
       <main id="board">
+        <BoardMenu />
         {!loaded ? <Loading as="p" text="Reading your projects" /> : (
           <>
             <div className="top">
               {!!state.projects.length && <NewSession projects={state.projects} />}
-              <BoardMenu />
+              <BoardMenuButton />
             </div>
             {state.projects.length ? (
               <div className={'board' + (groups.length ? '' : ' quiet')}>

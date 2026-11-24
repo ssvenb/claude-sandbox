@@ -216,10 +216,11 @@
   /* The panels beside the chat (components/chat/Pane): on the left what the project's plugins show
      (plugins.ts, ChatParts.aside), on the right the side chats. What a panel holds is an
      aside.side: a popover under the header's button, and on a desk the panel itself, as wide as the
-     reader drags its edge and put away from its button in the header.
+     reader drags its edge, put away from its own button in its top corner and brought back from the
+     header's, which is there only while it is away.
      shortcut: the left panel is one column for one plugin's aside, a second would sit beside the first. */
   .pane { display: contents; }
-  .splitter, header .pane-toggle { display: none; }
+  .splitter, .pane > .pane-hide, header .pane-toggle { display: none; }
   aside.side { inset: auto; top: 58px; right: 10px; margin: 0; width: min(420px, calc(100vw - 20px)); max-height: 70dvh;
                padding: 0; color: var(--ink); border: 1px solid var(--rule); border-radius: 14px;
                background: var(--panel); box-shadow: var(--shadow); flex-direction: column; }
@@ -244,9 +245,11 @@
                        opacity: 0; transition: opacity .12s .08s; }
     .splitter:hover::after, .splitter:focus-visible::after, :root.resizing .splitter:focus::after { opacity: 1; }
     :root.resizing, :root.resizing * { cursor: col-resize !important; user-select: none; }
-    header .pane-toggle { display: inline-flex; }
+    /* Its hide button sits in the top corner, over the end of its own head, which leaves it room. */
+    .pane > .pane-hide { display: inline-flex; position: absolute; top: 7px; right: 8px; z-index: 1; }
+    :is(#pane-left, #pane-right) > .side > .head { padding-right: 46px; }  /* above a plugin's own #id .head */
+    header .pane-toggle[aria-expanded=false] { display: inline-flex; }
     header .pane-toggle.left { order: -3; }
-    header .pane-toggle[aria-expanded=true] { color: var(--ink); }
     body:not(:has(.pane.left aside)) header .pane-toggle.left { display: none; }
     header .side-toggle { display: none; }
   }

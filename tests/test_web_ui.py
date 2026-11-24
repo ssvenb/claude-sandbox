@@ -361,7 +361,12 @@ def test_the_first_message_is_a_card_with_its_project_and_start_button_under_the
     board.fill(".starter textarea", "one\ntwo\nthree\nfour")
     assert board.locator(".starter").bounding_box()["height"] > card["height"] + 40
     assert button()["y"] > before["y"] + 40  # it stays on the card's bottom line
-    # The rest is behind the menu beside it: closed until asked, and Esc closes it again.
+    # The rest is in a sidebar on the left on a desk, with no menu button.
+    menu = board.locator("#board-menu").bounding_box()
+    assert board.is_visible("#board-menu .theme") and board.is_visible("#board-menu .sync") and not board.is_visible("button[aria-label='Menu']")
+    assert menu["x"] == 0 and menu["x"] + menu["width"] <= card["x"]
+    # On a phone it is behind the menu button beside the card: closed until asked, and Esc closes it again.
+    board.set_viewport_size({"width": 400, "height": 800})
     assert not board.is_visible("#board-menu")
     board.click("button[aria-label='Menu']")
     assert board.is_visible("#board-menu .theme") and board.is_visible("#board-menu .sync")
@@ -582,7 +587,6 @@ def test_the_pages_follow_the_browsers_day_or_night_unless_one_is_pinned(board):
     board.emulate_media(color_scheme="dark")
     night = paper(board)
     assert day == "rgb(233, 234, 244)" and night == "rgb(27, 29, 54)"
-    board.click("button[aria-label='Menu']")
     board.click(".theme button[aria-label='Day']")  # pinned: the browser's setting no longer decides
     assert paper(board) == day and board.get_attribute(".theme button[aria-label='Day']", "aria-pressed") == "true"
     tab = opens_tab(board, lambda: board.click("button[aria-label='New session']"))
@@ -876,7 +880,6 @@ def test_the_menus_settings_add_and_delete_projects_and_edit_your_authentication
     auth = board.project.parent / ".config/claude-sandbox/auth.json"
     auth.parent.mkdir(parents=True)
     auth.write_text(json.dumps({"coder": {"type": "github-app", "appId": "1", "privateKeyFile": "~/k.pem", "extra": 1}}))
-    board.click("button[aria-label='Menu']")
     board.click("button[aria-label='Sandbox settings']")
     board.wait_for_selector("dialog[open] h2:has-text('Sandbox settings')")
 
@@ -907,7 +910,6 @@ def test_the_menus_settings_add_and_delete_projects_and_edit_your_authentication
     assert auth.stat().st_mode & 0o777 == 0o600
 
     # The JSON view edits the whole file.
-    board.click("button[aria-label='Menu']")
     board.click("button[aria-label='Sandbox settings']")
     board.click(".modes button:has-text('JSON')")
     board.fill("textarea[name='json']", json.dumps({"openai": {"type": "api-key", "key": "sk2"}}))
@@ -965,14 +967,12 @@ def test_the_menus_sign_in_to_claude_opens_its_page_and_takes_the_code_in_a_dial
     tool(tmp_path / "bin/claude", f"#!/bin/sh\necho 'visit: {page}'\nread c\n[ \"$c\" = good ] || {{ echo 'Bad code'; exit 1; }}\n")
 
     def sign_in():
-        board.click("button[aria-label='Menu']")
         with board.context.expect_page() as tab:
             board.click("#board-menu button[aria-label='Sign in to Claude']")
         tab.value.wait_for_url(page)  # the server sent the tab on to the page claude printed
         tab.value.close()
 
     sign_in()
-    assert not board.is_visible("#board-menu")
     code = board.get_by_role("textbox", name="Code")
     code.fill("bad")
     board.click("dialog button[type=submit]")
@@ -1061,17 +1061,22 @@ def test_side_chats_are_asked_beside_the_chat_and_the_panels_are_dragged_and_put
     assert width("#pane-left") == 200
     edge.dblclick()
     assert width("#pane-right") == 380
-    # Put away from the header, each from its own end of it, the chat takes its room; the browser keeps both.
+    # Put away from its own button in its top corner, the chat takes its room; the browser keeps both.
+    # The header's button, there only while a panel is away, brings it back; the focus goes between the two.
     before = width("#scroll")
-    tab.click("header button[aria-label='Hide side chats']")
+    assert tab.is_hidden("header .pane-toggle")
+    tab.click("#pane-right button[aria-label='Hide side chats']")
     assert tab.is_hidden("#sidechat") and width("#scroll") == before + 380
+    assert tab.evaluate("document.activeElement.getAttribute('aria-label')") == "Show side chats"
     tab.reload()
     tab.wait_for_selector("#changes .file")
     assert tab.is_hidden("#sidechat") and width("#pane-left") == 200
-    tab.click("header button[aria-label='Hide changed files']")
+    tab.click("#pane-left button[aria-label='Hide changed files']")
     assert tab.is_hidden("#changes") and width("#scroll") == 1400
     tab.click("header button[aria-label='Show side chats']")
     tab.wait_for_selector("#sidechat .say:has-text('About “why main?”')")
+    assert tab.evaluate("document.activeElement.getAttribute('aria-label')") == "Hide side chats"
+    assert tab.is_hidden("header button[aria-label='Show side chats']") and tab.is_visible("header button[aria-label='Show changed files']")
     # Narrower: no panels, the side chats open over the chat from their button in the header.
     tab.set_viewport_size({"width": 400, "height": 800})
     assert tab.is_hidden("#sidechat") and tab.is_hidden("header .pane-toggle")

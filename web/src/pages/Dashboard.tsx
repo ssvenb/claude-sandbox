@@ -5,6 +5,7 @@ import { message } from '../api/client';
 import { getAuth, getConfig } from '../api/sessions';
 import type { Session } from '../api/types';
 import { Loading } from '../components/common/Spinner';
+import { ThemeSwitch } from '../components/common/ThemeSwitch';
 import { BoardMenu, BoardMenuButton } from '../components/dashboard/BoardMenu';
 import { DashboardContext, type DashboardActions } from '../components/dashboard/DashboardContext';
 import { NewSession } from '../components/dashboard/NewSession';
@@ -54,6 +55,7 @@ export default function Dashboard() {
             <div className="top">
               {!!state.projects.length && <NewSession projects={state.projects} />}
               <BoardMenuButton />
+              <ThemeSwitch />
             </div>
             {state.projects.length ? (
               <div className={'board' + (groups.length ? '' : ' quiet')}>

@@ -38,6 +38,10 @@
   #board-menu :is(.sync, .term) { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0; border-radius: 9px; padding: 8px 10px; }
   #board-menu :is(.sync, .term):hover { background: var(--sunk); }
   #board-menu :is(.sync, .term) svg { width: 16px; height: 16px; color: var(--muted); }
+  /* Busy, the spinner takes the icon's place and the label stays. */
+  #board-menu :is(.sync, .term).busy { color: var(--ink) !important; }
+  #board-menu :is(.sync, .term).busy > span { visibility: visible; }
+  #board-menu :is(.sync, .term).busy::after { inset: 0 auto 0 11px; }
   .top .menu { display: none; }
   @media (min-width: 901px) {
     main { display: grid; grid-template: auto minmax(0, 1fr) / 232px minmax(0, 1fr); padding: 0; }

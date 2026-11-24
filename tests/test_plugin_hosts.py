@@ -606,12 +606,13 @@ def test_upstream_proxy_starts_a_proxy_and_hands_over_only_sockets_and_env(proxy
     file.chmod(0o600)
     proxy_sb.config({"plugins": {"upstream-proxy": {"routes": routes(
         auth={"credential": "api"},
-        containerEnv={"API_URL": "http://127.0.0.1:18080", "FROM_HOST": "${HOST_ONLY}", "MISSING": "x${NOPE}y"})}}})
+        containerEnv={"API_URL": "http://127.0.0.1:18080", "FROM_HOST": "${HOST_ONLY}", "MISSING": "x${NOPE}y"},
+        credentialEnv=["API_KEY"])}}})
     run = proxy_sb.plugin("upstream-proxy", HOST_ONLY="h", SANDBOX_AUTH_FILE=file).ok()
     [proxy_dir] = proxy_dirs(proxy_sb)
     assert run.mounts == [f"{proxy_dir}/sockets:/run/upstream-proxy:ro"]
     assert run.env == {"UPSTREAM_PROXY_PORTS": "api:18080", "API_URL": "http://127.0.0.1:18080",
-                       "FROM_HOST": "h", "MISSING": "xy"}
+                       "FROM_HOST": "h", "MISSING": "xy", "API_KEY": "proxied-on-the-host"}
     assert not any("hunter2" in a for a in run.args)
     # The last run.sh to leave stops the proxy and clears everything but the lock.
     assert os.listdir(proxy_dir) == ["lock"]

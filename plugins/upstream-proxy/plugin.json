@@ -96,6 +96,17 @@
             "placeholder": "API_URL"
           },
           {
+            "key": "credentialEnv",
+            "type": "list",
+            "items": {
+              "type": "string",
+              "placeholder": "API_KEY",
+              "monospace": true
+            },
+            "label": "Credential variables",
+            "description": "Variables set to the placeholder proxied-on-the-host in the container, for SDKs that insist on a key; the proxy adds the real one."
+          },
+          {
             "key": "maxBodyBytes",
             "type": "integer",
             "label": "Max request body (bytes)",

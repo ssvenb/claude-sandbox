@@ -4,8 +4,8 @@
 #
 #   ./install.sh [--yes] [--dev] [--no-web] [--no-launchers] [--project DIR]... [--bind HOST]
 #
-#   --yes           install what is missing (uv; jq, git, curl through the system's package
-#                   manager) without asking
+#   --yes           install what is missing without asking: jq, git, curl through the system's
+#                   package manager; uv, Docker, Sysbox (.deb hosts) and Node from their projects
 #   --dev           also what the tests need: pytest, Playwright and its Chromium
 #   --no-web        skip the web UI (no Node needed): run.sh alone
 #   --no-launchers  do not link `claude-sandbox` and `claude-sandbox-web` into ~/.local/bin
@@ -80,14 +80,36 @@ step "Checking what the host needs"
 [ "$(uname -s)" = Linux ] || warn "Only Linux hosts are tested; on $(uname -s) some plugins' host stages may not work."
 need git git "git-workspace reads the repo you launch from"
 need jq jq "the plugins' host stages read their settings with it"
-have uv || need curl curl "installing uv"
+need curl curl "downloading uv, Docker, Sysbox and Node when they are missing"
 if have docker; then ok docker
-else  # its package differs per distribution, and Docker's own repository is usually the better source
+# Its package differs per distribution, and Docker's own repository is usually the better source.
+elif [ "$(uname -s)" = Linux ] && confirm "docker is missing (sandboxes are containers). Install Docker Engine with Docker's script (https://get.docker.com)?"; then
+  curl -fsSL https://get.docker.com | $sudo sh && have docker || die "Docker's install script failed: see the error above."
+  [ "$(id -u)" = 0 ] || $sudo usermod -aG docker "$(id -un)"
+  ok "docker (installed; log in again for the docker group to apply)"
+else
   warn "docker is missing: sandboxes are containers. Install Docker Engine: https://docs.docker.com/engine/install/"
   MISSING+=(docker)
 fi
 if have docker && ! docker info >/dev/null 2>&1; then
   warn "docker is installed but its daemon does not answer: start it, and add yourself to the docker group if needed (sudo usermod -aG docker \$USER, then log in again)."
+fi
+# The docker-cli plugin (on by default) runs every sandbox under Sysbox, for a Docker daemon of its own.
+if have sysbox-runc; then ok sysbox-runc
+# Its package restarts Docker: never under running containers (the dashboard's sync runs this with --yes).
+elif have docker && have dpkg && [ -z "$(docker ps -q 2>/dev/null)" ] \
+  && confirm "sysbox-runc is missing (the docker-cli plugin runs sandboxes under it). Install Sysbox's latest .deb from GitHub? It restarts Docker."; then
+  deb=$(curl -fsSL https://api.github.com/repos/nestybox/sysbox/releases/latest \
+    | jq -r --arg suffix "linux_$(dpkg --print-architecture).deb" '.assets[].browser_download_url | select(endswith($suffix))')
+  tmp=$(mktemp -d)
+  if [ -n "$deb" ] && curl -fsSLo "$tmp/sysbox.deb" "$deb" && $sudo apt-get install -y "$tmp/sysbox.deb" && have sysbox-runc; then
+    ok "sysbox-runc (installed)"
+  else
+    warn "Sysbox did not install (see above): sandboxes will not start until it does, or ENABLE_DOCKER_CLI=0 is set in their project."
+  fi
+  rm -rf "$tmp"
+else
+  warn "sysbox-runc is missing: the docker-cli plugin runs sandboxes under it. Install Sysbox (https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md), or set ENABLE_DOCKER_CLI=0 in your projects."
 fi
 have flock || warn "flock (util-linux) is missing: the upstream-proxy plugin needs it."
 [ ${#MISSING[@]} -eq 0 ] || die "Install what is missing (${MISSING[*]}) and run ./install.sh again, or pass --yes to let it."
@@ -123,6 +145,19 @@ if [ "$WEB" = 1 ]; then
   fi
   node_ok=0
   have node && node_ok=$(node -p "const [a, b] = process.versions.node.split('.').map(Number), [x, y] = '$NODE_MIN'.split('.').map(Number); a > x || (a === x && b >= y) ? 1 : 0" 2>/dev/null || echo 0)
+  if { ! have npm || [ "$node_ok" != 1 ]; } \
+    && confirm "Node $NODE_MIN+ with npm is missing. Install the current Node 22 from nodejs.org into ~/.local/node?"; then
+    os=$(uname -s | tr '[:upper:]' '[:lower:]') arch=$(uname -m)
+    case "$arch" in x86_64) arch=x64 ;; aarch64) arch=arm64 ;; esac
+    dist=https://nodejs.org/dist/latest-v22.x
+    tarball=$(curl -fsSL "$dist/SHASUMS256.txt" | awk -v end="-$os-$arch.tar.gz" '$2 ~ end"$" {print $2}')
+    [ -n "$tarball" ] || die "nodejs.org has no Node 22 for $os-$arch: install Node $NODE_MIN+ yourself."
+    rm -rf "$HOME/.local/node" && mkdir -p "$HOME/.local/node" "$HOME/.local/bin"
+    curl -fsSL "$dist/$tarball" | tar -xz --strip-components=1 -C "$HOME/.local/node"
+    ln -sfn "$HOME/.local/node/bin/node" "$HOME/.local/node/bin/npm" "$HOME/.local/node/bin/npx" "$HOME/.local/bin/"
+    export PATH="$HOME/.local/bin:$PATH"
+    have node && node_ok=1
+  fi
   if ! have npm || [ "$node_ok" != 1 ]; then
     if have node; then found="node $(node --version) is too old"; else found="node is missing"; fi
     # Distribution packages are often older than that, so say where a current one comes from.

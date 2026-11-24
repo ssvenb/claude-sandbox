@@ -25,9 +25,12 @@ claude-sandbox --project my-repo                   # build + fresh run (generate
 claude-sandbox --project my-repo --resume a1b2c3   # re-attach to an existing run: its branch and its conversation
 ```
 
-The host needs Docker, `git`, `jq` and [uv](https://docs.astral.sh/uv/) (which brings Python),
-plus Node 20.19+ to build the web UI. `./install.sh` checks for each, offers to install what your
-package manager has (`--yes`: without asking) and uv itself, and is safe to run again;
+The host needs Docker with the [Sysbox](https://github.com/nestybox/sysbox) runtime (for the
+`docker-cli` plugin), `git`, `jq`, `curl` and [uv](https://docs.astral.sh/uv/) (which brings Python),
+plus Node 20.19+ to build the web UI. `./install.sh` checks for each and offers to install what is
+missing (`--yes`: without asking): `git`, `jq` and `curl` from your package manager, Docker with
+[its script](https://get.docker.com), Sysbox from its latest `.deb` (Debian/Ubuntu hosts), uv
+from its installer and Node 22 from nodejs.org into `~/.local/node`. It is safe to run again;
 `--no-web` sets up `run.sh` alone, `--dev` adds the test tools, `--project DIR` configures DIR as a
 project (`<its name>.json`, unless there is one), `--bind HOST` has the systemd service listen on HOST (a VPN name, say) rather than
 loopback. `run.sh` builds the image itself (tagged `claude-agent:$AGENT`), so

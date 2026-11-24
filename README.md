@@ -635,8 +635,12 @@ and its type says how the proxy authenticates with it:
 ```json
 { "name": "azure-openai", "port": 8082, "upstream": "https://my-resource.openai.azure.com",
   "auth": { "credential": "azure-openai", "header": "api-key" },
-  "containerEnv": { "AZURE_OPENAI_ENDPOINT": "http://127.0.0.1:8082", "AZURE_OPENAI_API_KEY": "proxied-on-the-host" } }
+  "containerEnv": { "AZURE_OPENAI_ENDPOINT": "http://127.0.0.1:8082" },
+  "credentialEnv": ["AZURE_OPENAI_API_KEY"] }
 ```
+
+Each variable `credentialEnv` names is set to the placeholder `proxied-on-the-host` in the
+container, for SDKs that refuse to start without a key; there is no value to configure.
 
 The credential stays in the host proxy, which reads it from the file itself, again on every
 request: the agent's SDK gets a placeholder and the loopback address. A name the file lacks, one

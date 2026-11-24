@@ -156,4 +156,10 @@ while IFS=$'\t' read -r key value; do
   pass_value "$key" "$(upstream_proxy_expand "$value")"
 done < <(jq -r '.[] | (.containerEnv // {}) | to_entries[] | "\(.key)\t\(.value)"' "$UPSTREAM_PROXY_ROUTE_FILE")
 
+# credentialEnv: the variables an SDK insists on holding a key in. The proxy adds the real one, so
+# the container only ever gets a fixed placeholder — nothing to configure, nothing to leak.
+while read -r key; do
+  pass_value "$key" proxied-on-the-host
+done < <(jq -r '.[] | (.credentialEnv // [])[]' "$UPSTREAM_PROXY_ROUTE_FILE")
+
 echo "🔒 upstream-proxy: $(jq -r '[.[].name] | join(", ")' "$UPSTREAM_PROXY_ROUTE_FILE") proxied from the host"

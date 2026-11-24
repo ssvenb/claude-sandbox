@@ -35,9 +35,11 @@
             "credential": "cribl"
           },
           "containerEnv": {
-            "CRIBL_SERVER_URL": "http://127.0.0.1:8081",
-            "CRIBL_BEARER_TOKEN": "proxied-on-the-host"
-          }
+            "CRIBL_SERVER_URL": "http://127.0.0.1:8081"
+          },
+          "credentialEnv": [
+            "CRIBL_BEARER_TOKEN"
+          ]
         },
         {
           "name": "azure-openai",
@@ -55,10 +57,12 @@
           },
           "containerEnv": {
             "AZURE_OPENAI_ENDPOINT": "http://127.0.0.1:8082",
-            "AZURE_OPENAI_API_KEY": "proxied-on-the-host",
             "AZURE_OPENAI_EMBEDDING_DEPLOYMENT": "${AZURE_OPENAI_EMBEDDING_DEPLOYMENT}",
             "AZURE_OPENAI_API_VERSION": "${AZURE_OPENAI_API_VERSION}"
-          }
+          },
+          "credentialEnv": [
+            "AZURE_OPENAI_API_KEY"
+          ]
         },
         {
           "name": "gcs",

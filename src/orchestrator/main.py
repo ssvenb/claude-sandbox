@@ -168,7 +168,7 @@ def run(opts: dict) -> int:
     try:
         env = stage.report.env
         # The host's own services, at host.docker.internal from inside: the container has a network
-        # of its own, and what it serves reaches you through the ports plugin.
+        # of its own, and nothing it serves is published (dev-server's demo container shows you the checkout).
         docker_args = [*stage.report.docker, "--add-host=host.docker.internal:host-gateway"]
         say(f"🤖 Agent: {agent.name}")
         say(f"🔌 Plugins: {' '.join(names) or '<none>'}")

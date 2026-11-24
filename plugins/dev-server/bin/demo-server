@@ -1,0 +1,42 @@
+#!/bin/sh
+# The demo container's entrypoint (host.sh starts it from the run's image): as root, take the host
+# user's uid for node, as entrypoint.sh does, so the checkout mounted at /workspace is node's, and
+# start a Docker daemon of its own when asked (under Sysbox, root is no one on the host). Then, as
+# node: run the demo's own setup commands ($DEMO_SERVER_SETUP, a JSON array) once, then
+# $DEMO_SERVER_COMMAND in /workspace, restarted whenever a file there changes, and every 10 seconds
+# while it is not running (the agent may still be installing what it needs).
+set -eu
+
+if [ "${1:-}" != watch ]; then
+  old=$(id -u node)
+  if [ -n "${HOST_UID:-}" ] && [ "$HOST_UID" != 0 ] && [ "$HOST_UID" != "$old" ]; then
+    sed -i "s/^node:\([^:]*\):$old:/node:\1:$HOST_UID:/" /etc/passwd
+    find /home/node -xdev -user "$old" -exec chown -h node {} +
+  fi
+  # shellcheck disable=SC1091  # in the image
+  [ "${DEMO_SERVER_DOCKER:-}" != 1 ] || . /opt/plugins/docker-cli/root-init.sh
+  HOME=/home/node exec setpriv --reuid=node --regid=node --init-groups "$0" watch
+fi
+
+cd "${DEMO_SERVER_DIR:-/workspace}"
+until [ -e .git ]; do sleep 2; done  # git-workspace clones into the mirror once the sandbox boots
+printf '%s' "${DEMO_SERVER_SETUP:-[]}" | jq -r '.[]' | while IFS= read -r cmd; do
+  echo "🔧 demo setup: $cmd"
+  sh -c "$cmd" </dev/null || echo "⚠️  demo setup command failed: $cmd" >&2
+done
+stamp=$(mktemp)
+# What the agent edits, not what tools write: git's own files, dependencies, caches.
+changed() {
+  [ -n "$(find . \( -name .git -o -name node_modules -o -name .venv -o -name __pycache__ -o -name dist \) -prune \
+            -o -type f -newer "$stamp" -print 2>/dev/null | head -n 1)" ]
+}
+while :; do
+  touch "$stamp"
+  echo "--- $(date '+%F %T') $DEMO_SERVER_COMMAND"
+  setsid sh -c "$DEMO_SERVER_COMMAND" </dev/null &
+  pid=$!
+  n=0
+  until changed || { [ $n -ge 5 ] && ! kill -0 "$pid" 2>/dev/null; }; do sleep 2; n=$((n + 1)); done
+  kill -TERM "-$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+done

@@ -271,25 +271,6 @@ def test_upstream_proxy_reaches_the_upstream_with_the_hosts_credential(image):
     assert "- `api` at http://127.0.0.1:8099" in b.briefing
 
 
-def test_ports_the_agent_listens_on_are_offered_to_the_host(image, tmp_path):
-    """The ports plugin's bin/publish-ports.py, the agent's own: a server of the agent's, on localhost
-    only, shows up as a socket in the directory its host.sh mounts."""
-    sockets = tmp_path / "sockets"
-    sockets.mkdir()
-    sockets.chmod(0o777)  # as host/lease.py makes it: the agent's to write, whichever uid it has
-    probe = ("python3 -m http.server 8123 --bind 127.0.0.1 >/dev/null 2>&1 &\n"
-             "python3 -m http.server 8125 --bind 127.0.0.1 >/dev/null 2>&1 & sleep 3")
-    b = boot(image, "ports", probe, mounts=[f"{sockets}:/run/ports/sockets"], PORTS="8123 9229")
-    assert (sockets / "8123.sock").is_socket()
-    assert not (sockets / "8125.sock").exists()  # not configured: never published
-    assert "## Ports" in b.briefing and "host.docker.internal" in b.briefing
-    assert "TCP ports: 8123, 9229." in b.briefing
-
-
-def test_without_the_ports_mount_nothing_is_published_or_said(image):
-    assert "## Ports" not in boot(image, "ports").briefing
-
-
 def test_dev_server_starts_the_projects_server_at_boot(image):
     probe = ("sleep 2; /opt/plugins/dev-server/bin/sandbox-server status >/dev/null && echo running\n"
              "curl -fsS -o /dev/null http://127.0.0.1:8124/ && echo serving")

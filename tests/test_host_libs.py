@@ -105,8 +105,8 @@ def test_an_unknown_name_in_the_config_env_block_is_a_typo(sb):
 
 
 def test_config_env_scalars_become_strings(sb):
-    sb.config({"env": {"ENABLE_KVM": 0, "ENABLE_HERDR": True, "AGENT_VERSION": 1.5, "PORTS": 3000.0}})
-    run = sb.staged('echo "$ENABLE_KVM $ENABLE_HERDR $AGENT_VERSION $PORTS"').ok()
+    sb.config({"env": {"ENABLE_KVM": 0, "ENABLE_HERDR": True, "AGENT_VERSION": 1.5, "CLAUDE_MODEL": 3000.0}})
+    run = sb.staged('echo "$ENABLE_KVM $ENABLE_HERDR $AGENT_VERSION $CLAUDE_MODEL"').ok()
     assert run.out.endswith("0 true 1.5 3000\n")
 
 

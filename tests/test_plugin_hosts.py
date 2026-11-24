@@ -8,6 +8,7 @@ import shutil
 import signal
 import subprocess
 import threading
+import time
 import types
 
 import pytest
@@ -493,6 +494,87 @@ def test_dev_server_passes_its_command_only_when_configured(sb):
     sb.config({"plugins": {"dev-server": {"command": "pnpm dev --port 3000"}}})
     run = sb.plugin("dev-server").ok()
     assert run.env == {"DEV_SERVER_COMMAND": "pnpm dev --port 3000"}
+
+
+# --- dev-server's demo container ----------------------------------------------------------
+
+DEMO = {"plugins": {"dev-server": {"command": "npm run dev -- --host 0.0.0.0 --port 5173", "port": 5173,
+                                   "demoSetup": ["echo $DEMO_TOKEN >.token"]}}}
+
+
+def test_dev_server_demo_needs_a_port_number_valid_setup_and_the_mirror(sb):
+    sb.config({"plugins": {"dev-server": {"command": "make serve", "port": "web"}}})
+    sb.plugin("dev-server").dies("port must be a port number")
+    sb.config({"plugins": {"dev-server": {"command": "make serve", "port": 80, "demoSetup": "make creds"}}})
+    sb.plugin("dev-server").dies("demoSetup must be an array of strings")
+    sb.config(DEMO)
+    sb.plugin("dev-server").dies("needs agent-workspace's mirror")
+
+
+def test_dev_server_demo_needs_sysbox_for_a_docker_daemon(sb):
+    (sb.home / ".agent-workspaces/project-20260102-abc123").mkdir(parents=True)
+    sb.stub("docker", "echo 'runc '")
+    sb.config({"plugins": {"dev-server": {**DEMO["plugins"]["dev-server"], "docker": True}}})
+    sb.plugin("dev-server").dies("needs the Sysbox runtime")
+
+
+@pytest.mark.parametrize("bind, name, url", [(None, None, "http://{host}:49153/"),
+                                              ("100.64.0.1", "box.vpn", "http://box.vpn:49153/")])
+def test_dev_server_demo_runs_the_checkout_in_a_sibling_container_and_links_it(sb, bind, name, url):
+    mirror = sb.home / ".agent-workspaces/project-20260102-abc123"
+    mirror.mkdir(parents=True)
+    calls = sb.tmp / "calls"
+    sb.stub("docker", f'''echo "$*" >>"{calls}"
+case $1 in
+  inspect) echo sha256:img ;;
+  port) echo "${{SANDBOX_WEB_BIND:-127.0.0.1}}:49153" ;;
+esac
+''')
+    sb.config(DEMO)
+    items = sb.home / ".local/state/claude-sandbox/dev-server/items.json"
+    # The container comes up in the background: wait for its link, then the run ends (exit hooks).
+    run = sb.staged(f'ENABLED_PLUGINS=dev-server\nplugins_host_stage\n'
+                    f'until grep -q abc123 "{items}" 2>/dev/null; do sleep 0.1; done; cat "{items}"',
+                    SANDBOX_WEB_BIND=bind, SANDBOX_WEB_NAME=name).ok()
+    assert run.env == {"DEV_SERVER_COMMAND": DEMO["plugins"]["dev-server"]["command"]}  # the sandbox's own
+    [item] = json.loads(run.out.splitlines()[-1])
+    assert item["run_id"] == "abc123" and item["url"] == url
+    docker_run = next(line for line in calls.read_text().splitlines() if line.startswith("run "))
+    assert f"-v {mirror}:/workspace -p {bind or '127.0.0.1'}::5173" in docker_run
+    assert '-e DEMO_SERVER_SETUP=["echo $DEMO_TOKEN >.token"]' in docker_run
+    assert "--name sandbox-demo-abc123" in docker_run and docker_run.endswith(" sha256:img")
+    assert "--runtime" not in docker_run and "docker.sock" not in docker_run and ".claude" not in docker_run
+    assert "rm -f sandbox-demo-abc123" in calls.read_text()  # gone with the run
+    assert json.loads(items.read_text()) == []
+
+
+def test_dev_server_demo_runs_its_setup_then_restarts_the_command_when_a_file_changes(sb):
+    work, starts = sb.tmp / "checkout", sb.tmp / "starts"
+    (work / ".git").mkdir(parents=True)
+    (work / "node_modules").mkdir()
+    proc = subprocess.Popen([REPO / "plugins/dev-server/bin/demo-server", "watch"], start_new_session=True,
+                            env=sb._env({"DEMO_SERVER_DIR": work,
+                                         "DEMO_SERVER_COMMAND": f"echo x >>{starts}; exec sleep 60",
+                                         "DEMO_SERVER_SETUP": json.dumps(["echo set-up >.token"])}),
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def count(n):
+        for _ in range(100):
+            if starts.exists() and len(starts.read_text().split()) == n:
+                return True
+            time.sleep(0.1)
+
+    try:
+        assert count(1)
+        assert (work / ".token").read_text() == "set-up\n"  # before the command, in the checkout
+        time.sleep(1.1)  # past the start's mtime
+        (work / "node_modules/dep.js").write_text("x")
+        time.sleep(3)
+        assert count(1)  # what tools write does not count
+        (work / "app.py").write_text("x")
+        assert count(2)
+    finally:
+        os.killpg(proc.pid, signal.SIGKILL)
 
 
 def test_screenshots_mounts_read_only(sb):

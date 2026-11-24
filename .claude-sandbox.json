@@ -3,8 +3,7 @@
     "GH_USERNAME": "ssvenb",
     "GH_APP_ID": "5713280",
     "GH_PRIVATE_KEY_FILE": "/var/lib/agent-sandbox-app/agent-sandbox-app.2026-11-11.private-key.pem",
-    "CLAUDE_EFFORT": "medium",
-    "PORTS": "8790"
+    "CLAUDE_EFFORT": "medium"
   },
   "plugins": {
     "project-deps": {
@@ -19,7 +18,13 @@
       ]
     },
     "dev-server": {
-      "command": "src/server/serve.sh --port 8790 --allow-host claude-box --allow-host claude-box.local --allow-host claude-box.netbird.cloud --allow-host 192.168.2.109 --allow-host 100.108.236.184"
+      "command": "npm run build --prefix web && exec src/server/serve.sh --port 8790 --bind 0.0.0.0 --allow-host claude-box --allow-host claude-box.local --allow-host claude-box.netbird.cloud --allow-host 192.168.2.109 --allow-host 100.108.236.184",
+      "port": 8790,
+      "demoSetup": [
+        "git clone -q /workspace ~/demo-repo",
+        "mkdir -p ~/.config/claude-sandbox/projects && cp demo/projects/*.json ~/.config/claude-sandbox/projects/"
+      ],
+      "docker": true
     }
   }
 }

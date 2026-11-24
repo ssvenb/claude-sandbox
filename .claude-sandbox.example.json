@@ -1,8 +1,6 @@
 {
   "repo": "https://github.com/owner/repo",
-  "env": {
-    "PORTS": "3000"
-  },
+  "env": {},
   "plugins": {
     "data-mounts": {
       "mounts": [
@@ -93,7 +91,8 @@
       ]
     },
     "dev-server": {
-      "command": "pnpm dev --port 3000"
+      "command": "pnpm dev --host 0.0.0.0 --port 3000",
+      "port": 3000
     },
     "project-deps": {
       "apt": [

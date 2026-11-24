@@ -9,8 +9,8 @@
 # sibling one from the same image serves the agent's checkout (agent-workspace's mirror), runs
 # demoSetup first, restarts the command on every change (bin/demo-server), and its port is published
 # as a button on the run's session. The agent's code runs in there, never on this machine. It gets
-# what the sibling plugins hand the sandbox (claude-home: the run's copy of your ~/.claude, when the
-# sandbox has it too), never the App key or the host's Docker socket.
+# what the sibling plugins hand the sandbox, and with .agentHome true the agent's home (the run's
+# copy of your ~/.claude, when the sandbox has it too), never the App key or the host's Docker socket.
 # No command → the plugin does nothing, which is why it can stay on by default.
 
 DEV_SERVER_COMMAND=$(plugin_config '.command' '')
@@ -27,12 +27,18 @@ printf '%s' "$DEMO_SERVER_SETUP" | jq -e 'type == "array" and all(type == "strin
   || die "dev-server: .plugins[\"dev-server\"].demoSetup must be an array of strings."
 
 # What the sibling plugins hand the sandbox (plugin_siblings: a proxy's sockets, certificates,
-# Sysbox and its Docker daemon, claude-home's copy of your ~/.claude): the demo container takes
-# their args and runs their container stages (bin/demo-server).
+# Sysbox and its Docker daemon): the demo container takes their args and runs their container stages
+# (bin/demo-server). And, with .agentHome true, the agent's home (AGENT_HOME_ARGS: Claude's copy of
+# your ~/.claude).
 DEMO_SERVER_PLUGINS=$(plugin_siblings | xargs)
 # shellcheck disable=SC2086  # one argument per plugin name
 plugin_docker_args $DEMO_SERVER_PLUGINS
 DEMO_SERVER_ARGS=(${PLUGIN_DOCKER_ARGS[@]+"${PLUGIN_DOCKER_ARGS[@]}"} -e "DEMO_SERVER_PLUGINS=$DEMO_SERVER_PLUGINS")
+case $(plugin_config '.agentHome' 'false') in
+  true) DEMO_SERVER_ARGS+=(${AGENT_HOME_ARGS[@]+"${AGENT_HOME_ARGS[@]}"}) ;;
+  false) ;;
+  *) die "dev-server: .plugins[\"dev-server\"].agentHome must be true or false." ;;
+esac
 
 # agent-workspace (priority 15) made the mirror already.
 DEMO_SERVER_MIRROR=$(ls -d "${AGENT_WORKSPACE_DIR:-$HOME/.agent-workspaces}"/*-"$RUN_ID" 2>/dev/null | head -n 1) || true

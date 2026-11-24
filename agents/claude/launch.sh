@@ -8,7 +8,7 @@
 # Every run's conversation gets an id derived from its RUN_ID, so `run.sh --resume` picks the
 # same conversation back up. Every sandbox works in /workspace, so all their transcripts share one
 # project directory and `--continue` would grab whichever run was last, not this one. The
-# transcript only outlives the container when ~/.claude is mounted (claude-home); without it a
+# transcript only outlives the container when ~/.claude is mounted (CLAUDE_HOME_MOUNT); without it a
 # resumed run starts a fresh conversation under the same id.
 #
 # $AGENT_TASK (run.sh --task) is the conversation's first message: the agent starts on it at once.

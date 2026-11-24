@@ -1,16 +1,23 @@
 # shellcheck shell=bash
-# Host stage: hand the agent a copy of your Claude config directory, credentials included — so no
-# OAuth token is needed. A copy, not the directory itself: the agent may write anything into what it
-# is given, and hooks, plugins or settings it left in your own ~/.claude would run on this machine
-# the next time Claude starts here, and in every later sandbox. The copy is the run's own, so a
-# resumed run finds its conversation in it again; of what the agent changed, only a refreshed login
-# comes back to yours (host/keep-credentials.py).
+# Home stage, before the plugins' (src/contract/host/agents.sh). CLAUDE_HOME_MOUNT (default on):
+# hand the agent a copy of your Claude config directory, credentials included — so no OAuth token is
+# needed. A copy, not the directory itself: the agent may write anything into what it is given, and
+# hooks, plugins or settings it left in your own ~/.claude would run on this machine the next time
+# Claude starts here, and in every later sandbox. The copy is the run's own, so a resumed run finds
+# its conversation in it again; of what the agent changed, only a refreshed login comes back to yours
+# (host/keep-credentials.py). The copies live at claude-sandbox/claude-home/<RUN_ID>, where a sign-in
+# on the dashboard reaches those of the runs still going (after-sign-in.sh).
+case "${CLAUDE_HOME_MOUNT:-${ENABLE_CLAUDE_HOME:-1}}" in  # ENABLE_CLAUDE_HOME: when it was a plugin
+  1|true|yes|on) ;;
+  0|false|no|off) return 0 ;;
+  *) die "CLAUDE_HOME_MOUNT must be 0 or 1 (got: $CLAUDE_HOME_MOUNT)" ;;
+esac
 AGENT_AUTH_PROVIDED=1
 
 CLAUDE_HOME_SRC=${CLAUDE_HOME_DIR:-$HOME/.claude}
-[ -d "$CLAUDE_HOME_SRC" ] || die "claude-home: there is no Claude config directory at $CLAUDE_HOME_SRC (CLAUDE_HOME_DIR)."
+[ -d "$CLAUDE_HOME_SRC" ] || die "claude: there is no Claude config directory at $CLAUDE_HOME_SRC (CLAUDE_HOME_DIR), or turn CLAUDE_HOME_MOUNT off."
 CLAUDE_HOME_RUN="${XDG_STATE_HOME:-$HOME/.local/state}/claude-sandbox/claude-home/$RUN_ID"
-CLAUDE_HOME_KEEP="$PLUGIN_DIR/host/keep-credentials.py"   # $PLUGIN_DIR is gone by the time the exit hook runs
+CLAUDE_HOME_KEEP="$AGENT_DIR/host/keep-credentials.py"
 
 # A directory at $1 that is really one: whatever else the agent left there (a symlink out of the
 # copy, say) goes first, so nothing written into it lands elsewhere on this machine.
@@ -36,7 +43,7 @@ claude_home_prune
   for entry in "$CLAUDE_HOME_SRC"/*; do
     [ "${entry##*/}" = projects ] || cp -a -- "$entry" "$CLAUDE_HOME_RUN/" || exit 1
   done
-) || die "claude-home: could not copy $CLAUDE_HOME_SRC to $CLAUDE_HOME_RUN"
+) || die "claude: could not copy $CLAUDE_HOME_SRC to $CLAUDE_HOME_RUN"
 claude_home_dir "$CLAUDE_HOME_RUN/projects"
 claude_home_dir "$CLAUDE_HOME_RUN/projects/-workspace"
 rm -rf -- "$CLAUDE_HOME_RUN/projects/-workspace/memory"

@@ -26,11 +26,25 @@
       "placeholder": "opus"
     },
     {
+      "env": "CLAUDE_HOME_MOUNT",
+      "type": "boolean",
+      "label": "Mount ~/.claude",
+      "description": "Hands the agent a per-run copy of your Claude config directory, login included, so no token is needed. Off: the agent starts on a fresh config with CLAUDE_AUTH's token.",
+      "default": true
+    },
+    {
+      "env": "CLAUDE_HOME_DIR",
+      "type": "path",
+      "label": "Claude config directory",
+      "description": "Host directory copied as the agent's ~/.claude, for each run, while it is mounted.",
+      "placeholder": "~/.claude"
+    },
+    {
       "env": "CLAUDE_AUTH",
       "type": "auth",
       "auth": "claude-token",
       "label": "OAuth token",
-      "description": "The claude-token (from `claude setup-token`) Claude Code runs with; not needed while claude-home mounts a logged-in ~/.claude.",
+      "description": "The claude-token (from `claude setup-token`) Claude Code runs with; not needed while CLAUDE_HOME_MOUNT mounts a logged-in ~/.claude.",
       "fills": {
         "token": "CLAUDE_CODE_OAUTH_TOKEN"
       }

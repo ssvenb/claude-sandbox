@@ -6,7 +6,7 @@
 # $SANDBOX_STAGE_REPORT (NUL-separated lists: docker, build, env; or web.json), and then one line,
 # "done", on $SANDBOX_STAGE_REPORT_FD.
 #
-#   stage.sh host                           plugins' host.sh, the agent's host.sh, credentials;
+#   stage.sh host                           the agent's home.sh, plugins' host.sh, the agent's host.sh, credentials;
 #                                                then waits on stdin, and runs the exit hooks at EOF
 #   stage.sh web                            plugins' web.sh: the page's WEB_JSON
 #   stage.sh web-action <plugin> <action> <arg>
@@ -37,6 +37,7 @@ reported() { echo 'done' >&"$REPORT_FD"; exec {REPORT_FD}>&-; }
 
 case "${1:-}" in
   host)
+    agent_home_stage
     plugins_host_stage
     agent_host_stage
     # After every host stage, so a credential may depend on what any of them set up.

@@ -1,9 +1,9 @@
 # shellcheck shell=bash
-# Host stage: hand Claude Code its API credentials. Runs after the plugin host stage, so a plugin
-# that brings its own credentials (claude-home) has already set AGENT_AUTH_PROVIDED.
+# Host stage: hand Claude Code its credentials. Runs after the plugin host stage, so home.sh (your
+# ~/.claude) or a plugin that brings its own credentials has already set AGENT_AUTH_PROVIDED.
 
 [ "${AGENT_AUTH_PROVIDED:-0}" = 1 ] \
-  || : "${CLAUDE_CODE_OAUTH_TOKEN:?Claude Code needs credentials: set CLAUDE_AUTH to a claude-token authentication (from 'claude setup-token'), or enable claude-home}"
+  || : "${CLAUDE_CODE_OAUTH_TOKEN:?Claude Code needs credentials: set CLAUDE_AUTH to a claude-token authentication (from 'claude setup-token'), or turn CLAUDE_HOME_MOUNT on}"
 
 pass_env CLAUDE_CODE_OAUTH_TOKEN
 

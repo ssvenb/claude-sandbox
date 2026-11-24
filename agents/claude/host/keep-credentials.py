@@ -3,7 +3,8 @@
 
     keep-credentials.py RUN_COPY/.credentials.json ~/.claude/.credentials.json
 
-Runs on the HOST, after the container is gone. The run's file is the agent's to write, so it counts
+Runs on the HOST, after the container is gone. after-sign-in.sh runs it the other way round, your
+login into a running copy; the temporary file is then in the agent's reach, so it is made afresh. The run's file is the agent's to write, so it counts
 only as a regular file (not a symlink, not a FIFO to hang on) of valid JSON whose claudeAiOauth holds
 string tokens and a numeric expiresAt later than yours. Only that claudeAiOauth is taken; the rest
 of your file stays as it is.
@@ -45,7 +46,11 @@ def keep(run_file, own_file):
         return False
     data = mine[0] if mine is not None else {}
     tmp = f"{own_file}.sandbox.tmp"
-    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+    try:
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
+    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
         json.dump({**data, "claudeAiOauth": theirs[1]}, f)
     os.replace(tmp, own_file)
     return True

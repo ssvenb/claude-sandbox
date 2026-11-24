@@ -15,10 +15,10 @@ from conftest import REPO
 
 # Everything that needs the network, a GitHub App or a Docker socket is off; what is left on is
 # the default set minus those.
-BASE = {"env": {"AGENT_VERSION": "1.2.3"}, "plugins": {
+BASE = {"env": {"AGENT_VERSION": "1.2.3", "CLAUDE_HOME_MOUNT": "0"}, "plugins": {
     "github-auth": {"enabled": False}, "git-workspace": {"enabled": False},
     "agent-workspace": {"enabled": False}, "docker-cli": {"enabled": False},
-    "claude-home": {"enabled": False}, "cwd-workspace": {"enabled": True}}}
+    "cwd-workspace": {"enabled": True}}}
 
 
 @pytest.fixture
@@ -114,7 +114,7 @@ def test_the_agent_is_chosen_per_project(sb, run_sh):
     [build], [run] = calls(done, "build"), calls(done, "run")
     assert build[:5] == ["build", "-t", "claude-agent:copilot", "--build-arg", "AGENT=copilot"]
     plugins = dict(a.split("=", 1) for a in build if a.startswith("ENABLED_PLUGINS="))["ENABLED_PLUGINS"].split()
-    assert "copilot-home" in plugins and "branch-guard" not in plugins and "claude-home" not in plugins
+    assert "copilot-home" in plugins and "branch-guard" not in plugins
     assert any(a.startswith(f"{sb.home}/.local/state/claude-sandbox/copilot-home/") and a.endswith(":/home/node/.copilot")
                for a in run)  # the run's copy of ~/.copilot, not yours
     assert run[-1] == "claude-agent:copilot"

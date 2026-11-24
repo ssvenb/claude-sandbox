@@ -85,8 +85,9 @@ repo) and deleted (its file only, refused while it has sessions) at once, and yo
 [authentications](#authentications--configclaude-sandboxauthjson) as the same form — an entry each,
 its fields those of its type — or JSON, saved readable by you alone. Agents add to the menu too:
 Claude's **Sign in to Claude** runs `claude auth login` on the server (its `~/.claude`, which
-`claude-home` mounts): a new tab goes on to claude.com's sign-in, and the code that page ends on,
-pasted into the dialog on the dashboard, signs it in (see an agent's [`signIn`](#agents)).
+`CLAUDE_HOME_MOUNT` copies for each session): a new tab goes on to claude.com's sign-in, and the code that page ends on,
+pasted into the dialog on the dashboard, signs it in (see an agent's [`signIn`](#agents)), and
+the sessions running too: their copies of `~/.claude` take the new login.
 When the server's Claude is signed out (`claude auth status` fails, checked as the dashboard loads
 and each time it comes back into view), the dashboard asks whether to sign in again; **Not now**
 holds until it is seen signed in once more.
@@ -179,7 +180,7 @@ web UI itself, so there is no second port to open or to forward over an SSH tunn
 
 Resuming brings back the agent's conversation as well as the branch: each run's conversation is
 keyed to its RUN_ID (Claude Code `--session-id`, Copilot `--name`). The transcript lives in the
-agent's home directory, so it only outlives the container while `claude-home` (the run's copy) / `copilot-home`
+agent's home directory, so it only outlives the container while Claude's `CLAUDE_HOME_MOUNT` (the run's copy) / `copilot-home`
 mounts it from the host (both on by default); without them a resumed run starts a new conversation
 on the old branch.
 
@@ -240,7 +241,7 @@ stay out of it; the image is tagged per agent, so switching back and forth doesn
 
 | Agent | CLI | Credentials | Launched as |
 |-------|-----|-------------|-------------|
-| `claude` | Claude Code (`@anthropic-ai/claude-code`, npm) | a `claude-token` authentication named by `CLAUDE_AUTH`, or the `claude-home` plugin | `claude --dangerously-skip-permissions --effort ${CLAUDE_EFFORT:-medium} [--append-system-prompt briefing]` |
+| `claude` | Claude Code (`@anthropic-ai/claude-code`, npm) | a `claude-token` authentication named by `CLAUDE_AUTH`, or `CLAUDE_HOME_MOUNT` (on by default) | `claude --dangerously-skip-permissions --effort ${CLAUDE_EFFORT:-medium} [--append-system-prompt briefing]` |
 | `copilot` | GitHub Copilot CLI (`@github/copilot`, npm) | a `copilot-token` authentication named by `COPILOT_AUTH`, or the `copilot-home` plugin | `copilot --allow-all [-i briefing]` |
 
 ### Anatomy of an agent
@@ -288,6 +289,16 @@ starts the command and redirects to its link, `POST` with `{"code": …}` hands 
 An optional `signedIn` is a command that exits 0 while the CLI is signed in
 (`["claude", "auth", "status"]`): with it, `GET /api/agents/<name>/signed-in` answers
 `{"signedIn": …}`, and the `SignInButton` asks to sign in again when it is not.
+An optional `after-sign-in.sh` in the agent's directory is what the server runs (`sh`, as its own
+user) once a sign-in succeeded: Claude's puts the new login into the `~/.claude` copy of every
+session still running, so none stays signed out.
+
+Claude's `home.sh` mounts a copy of the host's `~/.claude` (or `$CLAUDE_HOME_DIR`) at
+`/home/node/.claude` while `CLAUDE_HOME_MOUNT` is on (the default; `0` leaves it out, and
+`CLAUDE_AUTH` is needed): the run's own, at `~/.local/state/claude-sandbox/claude-home/<RUN_ID>`,
+taken afresh at every start without your projects' conversations (`/workspace`'s memory included),
+and cut back to the run's conversation when it exits. Only a login the run refreshed goes back to
+yours (`host/keep-credentials.py`), so hooks or settings the agent writes never run on this machine.
 
 Because `host.sh` runs after the plugin host stage, it can see `AGENT_AUTH_PROVIDED=1` from a
 plugin that supplies credentials itself and skip its own token check:
@@ -314,7 +325,6 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | Plugin | Priority | Default | Agent | Provides | Requires | Owns |
 |--------|---------:|---------|-------|----------|----------|------|
 | `ca-certs` | 1 | off | any | `ca-certs` | — | installs the host's extra root CAs (or `$CA_CERTS_DIR`) into the container trust store; sets `NODE_EXTRA_CA_CERTS` / `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` |
-| `claude-home` | 5 | on | claude | `claude-home` | — | mounts a copy of the host's `~/.claude` (or `$CLAUDE_HOME_DIR`) at `/home/node/.claude`: the run's own, at `~/.local/state/claude-sandbox/claude-home/<RUN_ID>`, taken afresh at every start without your projects' conversations (`/workspace`'s memory included), and cut back to the run's conversation when it exits. Only a login the run refreshed goes back to yours, so hooks or settings the agent writes never run on this machine; sets `AGENT_AUTH_PROVIDED=1` |
 | `copilot-home` | 5 | on | copilot | `copilot-home` | — | mounts a copy of the host's `~/.copilot` (or `$COPILOT_HOME_DIR`) at `/home/node/.copilot`: the run's own, at `~/.local/state/claude-sandbox/copilot-home/<RUN_ID>`, taken afresh at every start but for the run's sessions (`session-state/`), cut back to those when it exits; nothing goes back to yours; sets `AGENT_AUTH_PROVIDED=1` |
 | `docker-cli` | 5 | on | any | `docker-cli` | — | Docker Engine, CLI, compose and buildx install; runs the sandbox under the host's [Sysbox](https://github.com/nestybox/sysbox) runtime (`--runtime=sysbox-runc`, refuses to start without it) and starts a Docker daemon of its own inside, so the agent sees neither the host's containers nor another sandbox's |
 | `netbird` | 5 | off | any | `mesh-network` | — | NetBird client install; enrols the container as its own peer (`sandbox-<RUN_ID>`) from the `netbird-setup-key` authentication `NB_AUTH` names, adding `NET_ADMIN` + `/dev/net/tun` |
@@ -328,7 +338,7 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | `agent-workspace` | 15 | on | any | `workspace-mirror` | — | bind-mounts `$AGENT_WORKSPACE_DIR/<project>-<date>-<RUN_ID>` (default `~/.agent-workspaces/<project>-<date>-<RUN_ID>`, created if missing) at `/workspace`, so the agent's checkout is visible on the host; removed when the container exits, unless `AGENT_WORKSPACE_CLEANUP=0`; complements `git-workspace`, conflicts with `cwd-workspace` |
 | `package-managers` | 25 | on | any | `package-managers` | — | lets the agent install packages itself, without root or `sudo` — `npm -g`/`pip` into its home, and `apt-home <pkg>...`, which downloads Debian packages with the dependencies the image lacks and unpacks them into `~/.local` (on `PATH` and `LD_LIBRARY_PATH`) without running their maintainer scripts |
 | `project-deps` | 25 | on | any | `project-deps` | — | installs the dependencies the target repo declares in the project config: apt/npm/pip packages (as root, at boot) and `setup` shell commands (as the agent user, in the provisioned `/workspace`); nothing configured → does nothing |
-| `dev-server` | 28 | on | any | `dev-server` | — | starts the project's server (`.plugins["dev-server"].command`) in `/workspace` at every boot, after `project-deps`, for the agent's own checks (`bin/sandbox-server` restarts it), unpublished; with a `.port`, runs the same command in a sibling container on the HOST from the run's checkout (`agent-workspace`'s mirror), after `.demoSetup`, restarted on every change, with what the [sibling plugins](#sibling-plugins) hand the sandbox (`claude-home`: your login), and publishes that port as a button on the run's session; see [Dev server](#dev-server); nothing configured → does nothing |
+| `dev-server` | 28 | on | any | `dev-server` | — | starts the project's server (`.plugins["dev-server"].command`) in `/workspace` at every boot, after `project-deps`, for the agent's own checks (`bin/sandbox-server` restarts it), unpublished; with a `.port`, runs the same command in a sibling container on the HOST from the run's checkout (`agent-workspace`'s mirror), after `.demoSetup`, restarted on every change, with what the [sibling plugins](#sibling-plugins) hand the sandbox (and, with `.agentHome` true, the agent's home: your Claude login), and publishes that port as a button on the run's session; see [Dev server](#dev-server); nothing configured → does nothing |
 | `branch-guard` | 30 | on | claude | — | `workspace` | `guard-branch.py` PreToolUse hook |
 
 Disable them all and the agent starts plain, in an empty `/workspace` with no GitHub access.
@@ -395,8 +405,10 @@ the enabled plugins whose manifest says `"sibling": true` (and whose host stage 
 priority), and `plugin_docker_args <plugin>...` puts their args into `PLUGIN_DOCKER_ARGS`; the
 container runs their `root-init.sh` and `agent-init.sh` itself, from `/usr/local/lib/sandbox/plugins.sh`
 with `ENABLED_PLUGINS` set to them. Declare `sibling` only for what any such container may have:
-`upstream-proxy` (sockets, no secret), `ca-certs`, `docker-cli`, and `claude-home`, whose login the
-agent has in the sandbox anyway.
+`upstream-proxy` (sockets, no secret), `ca-certs` and `docker-cli`. The agent's home is offered
+apart: an agent's `home.sh` runs before every plugin's host stage, and what it adds to the
+`docker run` args is kept in `AGENT_HOME_ARGS` (Claude's: the run's copy of `~/.claude`, login
+included). `dev-server`'s demo takes it only with `.agentHome` true.
 
 ### Declaring settings
 
@@ -714,9 +726,9 @@ and in its chat. It goes with the run; `docker logs sandbox-demo-<RUN_ID>` has i
 In the demo container the command must listen on all addresses. The agent's code runs there, never
 on this machine. It takes what the [sibling plugins](#sibling-plugins) hand the sandbox, and runs
 their container stages: `upstream-proxy`'s routes, `ca-certs`' certificates, and `docker-cli`'s Sysbox
-and Docker daemon, so what it starts stays inside it, and `claude-home`'s copy of your `~/.claude`:
-the same login the sandbox has (a refreshed one comes back to yours; hooks or settings written there
-never do). Never the App key or the host's Docker socket.
+and Docker daemon, so what it starts stays inside it. With `.agentHome` true (off by default) it mounts the agent's
+home as well, Claude's copy of your `~/.claude`: the same login the sandbox has (a refreshed one
+comes back to yours; hooks or settings written there never do). Never the App key or the host's Docker socket.
 
 The host's own services are at `host.docker.internal` from inside, if they listen on an address
 other than loopback; the host's `localhost` is out of the agent's reach. Unix sockets created in a
@@ -906,11 +918,11 @@ only required while that agent or plugin is in use.
 | `PROJECT_CONFIG_FILE` | core | The project's file; `--project <name>` sets it to `~/.config/claude-sandbox/projects/<name>.json` (optional) |
 | `SANDBOX_AUTH_FILE` | core | Your named authentications (default `~/.config/claude-sandbox/auth.json`), see [Authentications](#authentications--configclaude-sandboxauthjson); shell only |
 | `SANDBOX_WEB_BIND` / `SANDBOX_WEB_NAME` | core | Set by the web UI for every `run.sh` it starts: the address it listens on, and the host name its `--bind` gave for it (plugins that publish what a session serves default to it) |
-| `CLAUDE_AUTH` | agents/claude | Name of the `claude-token` authentication Claude Code runs with. Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `claude-home` does |
+| `CLAUDE_AUTH` | agents/claude | Name of the `claude-token` authentication Claude Code runs with. Required unless `CLAUDE_HOME_MOUNT` is on, or a plugin sets `AGENT_AUTH_PROVIDED=1` |
 | `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low`, `medium` (the sandbox default), `high`, `xhigh`, `max` |
 | `CLAUDE_MODEL` | agents/claude | Model Claude Code starts on, an alias (`opus`) or a full id (default: Claude Code's own default) |
 | `COPILOT_AUTH` | agents/copilot | Name of the `copilot-token` authentication Copilot runs with. Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_CLAUDE_HOME` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_CA_CERTS` / `ENABLE_DEV_SERVER` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_NETBIRD` / `ENABLE_GCP_AUTH` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_PR_REVIEW` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `gcp-auth`, `netbird`, `pr-review` and `ssh-credentials`) |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_CA_CERTS` / `ENABLE_DEV_SERVER` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_NETBIRD` / `ENABLE_GCP_AUTH` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_PR_REVIEW` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `gcp-auth`, `netbird`, `pr-review` and `ssh-credentials`) |
 | `GH_AUTH` | github-auth | Name of the `github-app` authentication the sandbox authenticates as |
 | `BASE_BRANCH` | git-workspace | Branch to cut from (default: the repo's own default branch, via `origin/HEAD`) |
 | `HOST_WORKSPACE_DIR` | cwd-workspace | Host dir mounted at `/workspace` (default: `run.sh`'s cwd) |
@@ -918,7 +930,8 @@ only required while that agent or plugin is in use.
 | `AGENT_WORKSPACE_DIR` | agent-workspace | Host dir holding the per-run mirrors of `/workspace`, created if missing (default: `$HOME/.agent-workspaces`; each run uses `<dir>/<project>-<date>-<RUN_ID>`) |
 | `AGENT_WORKSPACE_CLEANUP` | agent-workspace | Delete the run's mirror directory when the container exits; 0 keeps it for inspection, at one leftover directory per run (default: 1) |
 | `CA_CERTS_DIR` | ca-certs | Host dir holding extra root certificates, PEM or DER (default `/usr/local/share/ca-certificates`) |
-| `CLAUDE_HOME_DIR` | claude-home | Host dir mounted as the agent's `~/.claude` (default `$HOME/.claude`) |
+| `CLAUDE_HOME_MOUNT` | agents/claude | `1` (default) mounts a per-run copy of `~/.claude`, login included; `0` leaves it out |
+| `CLAUDE_HOME_DIR` | agents/claude | Host dir copied as the agent's `~/.claude` (default `$HOME/.claude`) |
 | `COPILOT_HOME_DIR` | copilot-home | Host dir copied as the agent's `~/.copilot` for each run (default `$HOME/.copilot`) |
 
 Volume mounts are contributed by plugins via `pass_mount`; the core `docker run` has none. The agent's
@@ -949,7 +962,7 @@ of it as hostile:
   mounted read-only.
 - Nothing on the host runs what the container wrote: the changes a run made are listed by git
   inside its container (`docker exec`), never in its mirror here, whose `.git/config` is the
-  agent's; `claude-home` mounts a copy of `~/.claude` per run and takes back only a validated login.
+  agent's; Claude's `CLAUDE_HOME_MOUNT` mounts a copy of `~/.claude` per run and takes back only a validated login.
 - What the host connects to, it checks each time: upstream-proxy's sockets are mounted
   read-only, so no sandbox can put itself between another one and the proxy.
 - Plugins that hand the container a part of your machine by design — `cwd-workspace` (your

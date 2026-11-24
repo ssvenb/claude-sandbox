@@ -1170,6 +1170,19 @@ def test_an_agents_sign_in_gives_the_link_and_takes_back_its_code(signing_agent,
             web.sign_in(agent)
 
 
+
+def test_an_agents_sign_in_runs_its_after_sign_in_sh_once_signed_in(signing_agent, tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
+    (tmp_path / "agents/a/after-sign-in.sh").write_text('echo "$0" >> "${0%/*}/ran"\n')
+    web.sign_in("a")
+    with pytest.raises(ValueError, match="Bad code"):
+        web.sign_in_code("a", "bad")
+    assert not (tmp_path / "agents/a/ran").exists()
+    web.sign_in("a")
+    web.sign_in_code("a", "good")
+    assert (tmp_path / "agents/a/ran").read_text() == f"{tmp_path}/agents/a/after-sign-in.sh\n"
+
+
 def test_an_agents_sign_in_check_is_its_signed_in_command_exiting_0(signing_agent, tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
     (tmp_path / "agents/a/agent.json").write_text(json.dumps({"signedIn": ["cli", "status"]}))

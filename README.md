@@ -328,7 +328,7 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | `agent-workspace` | 15 | on | any | `workspace-mirror` | — | bind-mounts `$AGENT_WORKSPACE_DIR/<project>-<date>-<RUN_ID>` (default `~/.agent-workspaces/<project>-<date>-<RUN_ID>`, created if missing) at `/workspace`, so the agent's checkout is visible on the host; removed when the container exits, unless `AGENT_WORKSPACE_CLEANUP=0`; complements `git-workspace`, conflicts with `cwd-workspace` |
 | `package-managers` | 25 | on | any | `package-managers` | — | lets the agent install packages itself, without root or `sudo` — `npm -g`/`pip` into its home, and `apt-home <pkg>...`, which downloads Debian packages with the dependencies the image lacks and unpacks them into `~/.local` (on `PATH` and `LD_LIBRARY_PATH`) without running their maintainer scripts |
 | `project-deps` | 25 | on | any | `project-deps` | — | installs the dependencies the target repo declares in the project config: apt/npm/pip packages (as root, at boot) and `setup` shell commands (as the agent user, in the provisioned `/workspace`); nothing configured → does nothing |
-| `dev-server` | 28 | on | any | `dev-server` | — | starts the project's server (`.plugins["dev-server"].command`) in `/workspace` at every boot, after `project-deps`, for the agent's own checks (`bin/sandbox-server` restarts it), unpublished; with a `.port`, runs the same command in a sibling container on the HOST from the run's checkout (`agent-workspace`'s mirror), after `.demoSetup`, restarted on every change, and publishes that port as a button on the run's session; see [Dev server](#dev-server); nothing configured → does nothing |
+| `dev-server` | 28 | on | any | `dev-server` | — | starts the project's server (`.plugins["dev-server"].command`) in `/workspace` at every boot, after `project-deps`, for the agent's own checks (`bin/sandbox-server` restarts it), unpublished; with a `.port`, runs the same command in a sibling container on the HOST from the run's checkout (`agent-workspace`'s mirror), after `.demoSetup`, restarted on every change, with what the [sibling plugins](#sibling-plugins) and `.demoPlugins` (`claude-home`: your login) hand the sandbox, and publishes that port as a button on the run's session; see [Dev server](#dev-server); nothing configured → does nothing |
 | `branch-guard` | 30 | on | claude | — | `workspace` | `guard-branch.py` PreToolUse hook |
 
 Disable them all and the agent starts plain, in an empty `/workspace` with no GitHub access.
@@ -380,10 +380,22 @@ group), so nothing in the image holds against it.
 | `requires` | string[] | `[]` | Capabilities that must be provided by *some* enabled plugin. Otherwise the run aborts on the host, listing the plugins that could provide it. |
 | `conflicts` | string[] | `[]` | Plugin names that must not be enabled at the same time. |
 | `requiredEnv` | string[] | `[]` | Env vars that must be non-empty while this plugin is enabled. |
+| `sibling` | bool | `false` | Its `docker run` args and container stages fit any container of the run's own beside the sandbox too, which then takes them; see [Sibling plugins](#sibling-plugins). |
 | `settings` | object[] | `[]` | The settings this plugin reads, for the web UI's settings form. See [Declaring settings](#declaring-settings). |
 
 Validation (`conflicts`, `requiredEnv`, `requires`) runs on the host **before** the image is
 built, so misconfiguration fails fast and cheaply.
+
+### Sibling plugins
+
+A plugin may start a container of the run's own beside the sandbox (`dev-server`'s demo
+container) without knowing which other plugins it should take from, and they need not know it.
+The host stage keeps which `docker run` args each plugin's `host.sh` added. `plugin_siblings` lists
+the enabled plugins whose manifest says `"sibling": true` (and whose host stage ran already: a lower
+priority), and `plugin_docker_args <plugin>...` puts their args into `PLUGIN_DOCKER_ARGS`; the
+container runs their `root-init.sh` and `agent-init.sh` itself, from `/usr/local/lib/sandbox/plugins.sh`
+with `ENABLED_PLUGINS` set to them. Declare `sibling` only for what any such container may have:
+`upstream-proxy` (sockets, no secret), `ca-certs`, `docker-cli`; never a credential.
 
 ### Declaring settings
 
@@ -691,16 +703,20 @@ and in its chat. It goes with the run; `docker logs sandbox-demo-<RUN_ID>` has i
 
 ```json
 { "plugins": { "dev-server": { "command": "pnpm dev --host 0.0.0.0 --port 3000", "port": 3000,
-                               "demoSetup": ["./scripts/seed-demo-data"] } } }
+                               "demoSetup": ["./scripts/seed-demo-data"],
+                               "demoPlugins": ["claude-home"] } } }
 ```
 
 In the demo container the command must listen on all addresses. The agent's code runs there, never
-on this machine, and nothing of yours goes into it: no `~/.claude`, no App key, never the host's
-Docker socket. With `"docker": true` it runs under Sysbox with a Docker daemon of its own (the image
-has one when `docker-cli` is enabled), so what it starts stays inside it: this repo's own
+on this machine. It takes what the [sibling plugins](#sibling-plugins) hand the sandbox, and runs
+their container stages: `upstream-proxy`'s routes, `ca-certs`' certificates, and `docker-cli`'s Sysbox
+and Docker daemon, so what it starts stays inside it. Nothing of yours goes in unless `demoPlugins`
+names it: with `claude-home` there, the demo gets the run's copy of your `~/.claude`, a real login
+for the agent's code to use (a refreshed one comes back to yours, as from the sandbox; hooks or
+settings written there never do). Never the App key or the host's Docker socket. This repo's own
 `.claude-sandbox.json` demos the web UI that way, its `demoSetup` installing a project of its own
-([demo/projects/demo.json](demo/projects/demo.json)) whose sessions run in that daemon, from a clone of
-the checkout, signed in to Claude only if you sign in on that dashboard.
+([demo/projects/demo.json](demo/projects/demo.json)) whose sessions run in the demo's Docker daemon,
+from a clone of the checkout, with your login.
 
 The host's own services are at `host.docker.internal` from inside, if they listen on an address
 other than loopback; the host's `localhost` is out of the agent's reach. Unix sockets created in a

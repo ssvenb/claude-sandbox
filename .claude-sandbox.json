@@ -24,7 +24,9 @@
         "git clone -q /workspace ~/demo-repo",
         "mkdir -p ~/.config/claude-sandbox/projects && cp demo/projects/*.json ~/.config/claude-sandbox/projects/"
       ],
-      "docker": true
+      "demoPlugins": [
+        "claude-home"
+      ]
     }
   }
 }

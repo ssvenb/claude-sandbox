@@ -190,17 +190,49 @@ web_server() {
 # --- framework -----------------------------------------------------------------------------
 
 # Source each enabled plugin's host.sh so it can validate its config and contribute docker args.
+# Which of DOCKER_ARGS each one added is kept, for plugin_docker_args.
+declare -A PLUGIN_ARGS_FROM=() PLUGIN_ARGS_TO=()
 plugins_host_stage() {
-  local name
-  for name in $ENABLED_PLUGINS; do
-    PLUGIN_NAME="$name"
-    PLUGIN_DIR="$PLUGIN_ROOT/$name"
+  # A name no host.sh uses: they are sourced into this function, and may set any other.
+  local _plugins_host_name
+  for _plugins_host_name in $ENABLED_PLUGINS; do
+    PLUGIN_NAME="$_plugins_host_name"
+    PLUGIN_DIR="$PLUGIN_ROOT/$_plugins_host_name"
+    PLUGIN_ARGS_FROM[$_plugins_host_name]=${#DOCKER_ARGS[@]}
     if [ -f "$PLUGIN_DIR/host.sh" ]; then
       # shellcheck disable=SC1091  # path resolved at runtime
       . "$PLUGIN_DIR/host.sh"
     fi
+    PLUGIN_ARGS_TO[$_plugins_host_name]=${#DOCKER_ARGS[@]}
   done
   unset PLUGIN_NAME PLUGIN_DIR
+}
+
+# A container of the run's own beside the sandbox (dev-server's demo container) may take what some
+# plugins hand the sandbox, without either knowing the other: a plugin whose manifest says
+# "sibling": true declares its `docker run` args and its container stages fit any such container
+# (a proxy's sockets, certificates, Sysbox), and the sibling's owner may add others it was told to.
+
+# plugin_siblings: the enabled plugins that declare "sibling": true and whose host stage ran already.
+plugin_siblings() {
+  local name
+  for name in $ENABLED_PLUGINS; do
+    [ -n "${PLUGIN_ARGS_TO[$name]:-}" ] && jq -e '.sibling == true' "$PLUGIN_ROOT/$name/plugin.json" >/dev/null \
+      && printf '%s\n' "$name"
+  done
+  return 0
+}
+
+# plugin_docker_args <plugin>...: the `docker run` args those plugins' host stages added, into
+# PLUGIN_DOCKER_ARGS. Only a plugin whose host stage ran already (an enabled one of a lower priority).
+plugin_docker_args() {
+  local name
+  PLUGIN_DOCKER_ARGS=()
+  for name in "$@"; do
+    [ -n "${PLUGIN_ARGS_TO[$name]:-}" ] \
+      || die "Plugin '${PLUGIN_NAME:-?}' wants what '$name' hands the sandbox, but '$name' is not enabled or comes after it."
+    PLUGIN_DOCKER_ARGS+=(${DOCKER_ARGS[@]+"${DOCKER_ARGS[@]:${PLUGIN_ARGS_FROM[$name]}:$((PLUGIN_ARGS_TO[$name] - PLUGIN_ARGS_FROM[$name]))}"})
+  done
 }
 
 # Source each enabled plugin's web.sh, in priority order, so it can describe its part of the page.

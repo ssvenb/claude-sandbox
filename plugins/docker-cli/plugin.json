@@ -2,6 +2,7 @@
   "name": "docker-cli",
   "description": "Docker Engine, CLI + compose inside the sandbox, run under the host's Sysbox runtime, so the agent's containers are its own: not the host's, nor another sandbox's.",
   "priority": 5,
+  "sibling": true,
   "defaultEnabled": true,
   "provides": ["docker-cli"],
   "requires": [],

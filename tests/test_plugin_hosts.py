@@ -511,11 +511,31 @@ def test_dev_server_demo_needs_a_port_number_valid_setup_and_the_mirror(sb):
     sb.plugin("dev-server").dies("needs agent-workspace's mirror")
 
 
-def test_dev_server_demo_needs_sysbox_for_a_docker_daemon(sb):
+def test_dev_server_demo_takes_what_sibling_plugins_and_demo_plugins_hand_the_sandbox(sb):
     (sb.home / ".agent-workspaces/project-20260102-abc123").mkdir(parents=True)
-    sb.stub("docker", "echo 'runc '")
-    sb.config({"plugins": {"dev-server": {**DEMO["plugins"]["dev-server"], "docker": True}}})
-    sb.plugin("dev-server").dies("needs the Sysbox runtime")
+    (sb.home / ".claude").mkdir()
+    calls = sb.tmp / "calls"
+    sb.stub("docker", f'''echo "$*" >>"{calls}"
+case $1 in info) echo 'runc sysbox-runc' ;; inspect) echo sha256:img ;; port) echo 127.0.0.1:49153 ;; esac
+''')
+    items = sb.home / ".local/state/claude-sandbox/dev-server/items.json"
+
+    def demo_run(extra):
+        calls.unlink(missing_ok=True)
+        sb.config({"plugins": {"dev-server": {**DEMO["plugins"]["dev-server"], **extra}}})
+        sb.staged("ENABLED_PLUGINS='docker-cli claude-home dev-server'\nplugins_host_stage\n"
+                  f'until grep -q abc123 "{items}" 2>/dev/null; do sleep 0.1; done').ok()
+        return next(line for line in calls.read_text().splitlines() if line.startswith("run "))
+
+    plain = demo_run({})  # docker-cli declares itself a sibling: Sysbox, and the daemon it starts
+    assert "--runtime=sysbox-runc" in plain and "-e DEMO_SERVER_PLUGINS=docker-cli " in plain
+    assert ".claude" not in plain  # your login only when asked for
+    with_home = demo_run({"demoPlugins": ["claude-home"]})
+    copy = sb.home / ".local/state/claude-sandbox/claude-home/abc123"
+    assert f"-v {copy}:/home/node/.claude" in with_home  # the run's copy, never ~/.claude itself
+    assert "-e DEMO_SERVER_PLUGINS=docker-cli claude-home " in with_home
+    sb.config({"plugins": {"dev-server": {**DEMO["plugins"]["dev-server"], "demoPlugins": ["kvm"]}}})
+    sb.staged("ENABLED_PLUGINS='docker-cli dev-server'\nplugins_host_stage").dies("'kvm' is not enabled or comes after it")
 
 
 @pytest.mark.parametrize("bind, name, url", [(None, None, "http://{host}:49153/"),
@@ -548,12 +568,17 @@ esac
     assert json.loads(items.read_text()) == []
 
 
-def test_dev_server_demo_runs_its_setup_then_restarts_the_command_when_a_file_changes(sb):
+def test_dev_server_demo_runs_shared_stages_and_its_setup_then_restarts_on_changes(sb):
     work, starts = sb.tmp / "checkout", sb.tmp / "starts"
     (work / ".git").mkdir(parents=True)
     (work / "node_modules").mkdir()
+    shared = sb.tmp / "plugins/a-proxy"  # a plugin host.sh shared with the demo container
+    shared.mkdir(parents=True)
+    (shared / "agent-init.sh").write_text(f'echo "$ENABLED_PLUGINS" >{sb.tmp}/stage; [ ! -e {work}/.token ]\n')
     proc = subprocess.Popen([REPO / "plugins/dev-server/bin/demo-server", "watch"], start_new_session=True,
-                            env=sb._env({"DEMO_SERVER_DIR": work,
+                            env=sb._env({"DEMO_SERVER_DIR": work, "DEMO_SERVER_PLUGINS": "a-proxy",
+                                         "SANDBOX_LIB": REPO / "src/contract/container",
+                                         "PLUGIN_ROOT": sb.tmp / "plugins",
                                          "DEMO_SERVER_COMMAND": f"echo x >>{starts}; exec sleep 60",
                                          "DEMO_SERVER_SETUP": json.dumps(["echo set-up >.token"])}),
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -567,6 +592,7 @@ def test_dev_server_demo_runs_its_setup_then_restarts_the_command_when_a_file_ch
     try:
         assert count(1)
         assert (work / ".token").read_text() == "set-up\n"  # before the command, in the checkout
+        assert (sb.tmp / "stage").read_text() == "a-proxy\n"  # the shared plugins' agent stage, before the setup
         time.sleep(1.1)  # past the start's mtime
         (work / "node_modules/dep.js").write_text("x")
         time.sleep(3)

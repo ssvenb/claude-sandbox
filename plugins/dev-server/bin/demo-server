@@ -1,11 +1,12 @@
 #!/bin/sh
 # The demo container's entrypoint (host.sh starts it from the run's image): as root, take the host
-# user's uid for node, as entrypoint.sh does, so the checkout mounted at /workspace is node's, and
-# start a Docker daemon of its own when asked (under Sysbox, root is no one on the host). Then, as
-# node: run the demo's own setup commands ($DEMO_SERVER_SETUP, a JSON array) once, then
-# $DEMO_SERVER_COMMAND in /workspace, restarted whenever a file there changes, and every 10 seconds
-# while it is not running (the agent may still be installing what it needs).
-set -eu
+# user's uid for node, as entrypoint.sh does, so the checkout mounted at /workspace is node's, and run
+# the root stage of the plugins host.sh shared with it ($DEMO_SERVER_PLUGINS: Sysbox's Docker daemon,
+# certificates). Then, as node: their agent stage (a proxy's forwarder), the demo's own setup
+# commands ($DEMO_SERVER_SETUP, a JSON array) once, then $DEMO_SERVER_COMMAND in /workspace,
+# restarted whenever a file there changes, and every 10 seconds while it is not running (the agent
+# may still be installing what it needs).
+set -e  # not -u: the plugins' stages are sourced
 
 if [ "${1:-}" != watch ]; then
   old=$(id -u node)
@@ -13,9 +14,21 @@ if [ "${1:-}" != watch ]; then
     sed -i "s/^node:\([^:]*\):$old:/node:\1:$HOST_UID:/" /etc/passwd
     find /home/node -xdev -user "$old" -exec chown -h node {} +
   fi
-  # shellcheck disable=SC1091  # in the image
-  [ "${DEMO_SERVER_DOCKER:-}" != 1 ] || . /opt/plugins/docker-cli/root-init.sh
+  if [ -n "${DEMO_SERVER_PLUGINS:-}" ]; then
+    # shellcheck source=/dev/null  # in the image
+    . /usr/local/lib/sandbox/plugins.sh
+    export ENABLED_PLUGINS="$DEMO_SERVER_PLUGINS"
+    plugin_run_stage root-init
+  fi
   HOME=/home/node exec setpriv --reuid=node --regid=node --init-groups "$0" watch
+fi
+
+if [ -n "${DEMO_SERVER_PLUGINS:-}" ]; then
+  # shellcheck source=/dev/null  # in the image
+  . "${SANDBOX_LIB:-/usr/local/lib/sandbox}/plugins.sh"
+  AGENT_PROMPT_FILE=$(mktemp)  # a briefing nobody reads: there is no agent here
+  export AGENT_PROMPT_FILE ENABLED_PLUGINS="$DEMO_SERVER_PLUGINS"
+  plugin_run_stage agent-init
 fi
 
 cd "${DEMO_SERVER_DIR:-/workspace}"

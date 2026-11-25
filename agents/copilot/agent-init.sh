@@ -8,5 +8,5 @@ mkdir -p "$COPILOT_HOME"
 
 # Blanket folder trust, matching launch.sh's --allow-all — otherwise the CLI opens with a "do you
 # trust the files in this folder?" prompt that stalls an unattended run. An env var rather than
-# $COPILOT_HOME/config.json, which the copilot-home plugin may have bind-mounted from the host.
+# $COPILOT_HOME/config.json, which home.sh may have bind-mounted from the host.
 export COPILOT_ALLOW_ALL=true

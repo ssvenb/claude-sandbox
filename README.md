@@ -180,7 +180,7 @@ web UI itself, so there is no second port to open or to forward over an SSH tunn
 
 Resuming brings back the agent's conversation as well as the branch: each run's conversation is
 keyed to its RUN_ID (Claude Code `--session-id`, Copilot `--name`). The transcript lives in the
-agent's home directory, so it only outlives the container while Claude's `CLAUDE_HOME_MOUNT` (the run's copy) / `copilot-home`
+agent's home directory, so it only outlives the container while Claude's `CLAUDE_HOME_MOUNT` / Copilot's `COPILOT_HOME_MOUNT` (the run's copy)
 mounts it from the host (both on by default); without them a resumed run starts a new conversation
 on the old branch.
 
@@ -242,7 +242,7 @@ stay out of it; the image is tagged per agent, so switching back and forth doesn
 | Agent | CLI | Credentials | Launched as |
 |-------|-----|-------------|-------------|
 | `claude` | Claude Code (`@anthropic-ai/claude-code`, npm) | a `claude-token` authentication named by `CLAUDE_AUTH`, or `CLAUDE_HOME_MOUNT` (on by default) | `claude --dangerously-skip-permissions --effort ${CLAUDE_EFFORT:-medium} [--append-system-prompt briefing]` |
-| `copilot` | GitHub Copilot CLI (`@github/copilot`, npm) | a `copilot-token` authentication named by `COPILOT_AUTH`, or the `copilot-home` plugin | `copilot --allow-all [-i briefing]` |
+| `copilot` | GitHub Copilot CLI (`@github/copilot`, npm) | a `copilot-token` authentication named by `COPILOT_AUTH`, or `COPILOT_HOME_MOUNT` (on by default) | `copilot --allow-all [-i briefing]` |
 
 ### Anatomy of an agent
 
@@ -299,6 +299,10 @@ Claude's `home.sh` mounts a copy of the host's `~/.claude` (or `$CLAUDE_HOME_DIR
 taken afresh at every start without your projects' conversations (`/workspace`'s memory included),
 and cut back to the run's conversation when it exits. Only a login the run refreshed goes back to
 yours (`host/keep-credentials.py`), so hooks or settings the agent writes never run on this machine.
+Copilot's `home.sh` does the same with `~/.copilot` (or `$COPILOT_HOME_DIR`) at `/home/node/.copilot`
+while `COPILOT_HOME_MOUNT` is on (`0`: `COPILOT_AUTH` is needed), at
+`~/.local/state/claude-sandbox/copilot-home/<RUN_ID>`, keeping the run's sessions (`session-state/`)
+across starts; nothing of it goes back to yours.
 
 Because `host.sh` runs after the plugin host stage, it can see `AGENT_AUTH_PROVIDED=1` from a
 plugin that supplies credentials itself and skip its own token check:
@@ -325,7 +329,6 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | Plugin | Priority | Default | Agent | Provides | Requires | Owns |
 |--------|---------:|---------|-------|----------|----------|------|
 | `ca-certs` | 1 | off | any | `ca-certs` | — | installs the host's extra root CAs (or `$CA_CERTS_DIR`) into the container trust store; sets `NODE_EXTRA_CA_CERTS` / `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` |
-| `copilot-home` | 5 | on | copilot | `copilot-home` | — | mounts a copy of the host's `~/.copilot` (or `$COPILOT_HOME_DIR`) at `/home/node/.copilot`: the run's own, at `~/.local/state/claude-sandbox/copilot-home/<RUN_ID>`, taken afresh at every start but for the run's sessions (`session-state/`), cut back to those when it exits; nothing goes back to yours; sets `AGENT_AUTH_PROVIDED=1` |
 | `docker-cli` | 5 | on | any | `docker-cli` | — | Docker Engine, CLI, compose and buildx install; runs the sandbox under the host's [Sysbox](https://github.com/nestybox/sysbox) runtime (`--runtime=sysbox-runc`, refuses to start without it) and starts a Docker daemon of its own inside, so the agent sees neither the host's containers nor another sandbox's |
 | `netbird` | 5 | off | any | `mesh-network` | — | NetBird client install; enrols the container as its own peer (`sandbox-<RUN_ID>`) from the `netbird-setup-key` authentication `NB_AUTH` names, adding `NET_ADMIN` + `/dev/net/tun` |
 | `github-auth` | 10 | on | any | `git-credentials` | — | `gh` CLI install; mints App installation tokens on the host (re-minted every 40 min): `github-token`, scoped to the run's repo (push, pull requests, issues), and `github-token-all`, every repo of the App read-only plus issues; `gh auth login` with the first, and `gh` (`bin/gh`) and git use the second for any other repo; briefs the agent to open a pull request for its work and fix whatever fails until its CI is green |
@@ -407,7 +410,7 @@ container runs their `root-init.sh` and `agent-init.sh` itself, from `/usr/local
 with `ENABLED_PLUGINS` set to them. Declare `sibling` only for what any such container may have:
 `upstream-proxy` (sockets, no secret), `ca-certs` and `docker-cli`. The agent's home is offered
 apart: an agent's `home.sh` runs before every plugin's host stage, and what it adds to the
-`docker run` args is kept in `AGENT_HOME_ARGS` (Claude's: the run's copy of `~/.claude`, login
+`docker run` args is kept in `AGENT_HOME_ARGS` (the run's copy of `~/.claude` or `~/.copilot`, login
 included). `dev-server`'s demo takes it only with `.agentHome` true.
 
 ### Declaring settings
@@ -922,8 +925,8 @@ only required while that agent or plugin is in use.
 | `CLAUDE_AUTH` | agents/claude | Name of the `claude-token` authentication Claude Code runs with. Required unless `CLAUDE_HOME_MOUNT` is on, or a plugin sets `AGENT_AUTH_PROVIDED=1` |
 | `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low`, `medium` (the sandbox default), `high`, `xhigh`, `max` |
 | `CLAUDE_MODEL` | agents/claude | Model Claude Code starts on, an alias (`opus`) or a full id (default: Claude Code's own default) |
-| `COPILOT_AUTH` | agents/copilot | Name of the `copilot-token` authentication Copilot runs with. Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_CA_CERTS` / `ENABLE_DEV_SERVER` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_SETUP` / `ENABLE_NETBIRD` / `ENABLE_GCP_AUTH` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_PR_REVIEW` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `gcp-auth`, `netbird`, `pr-review` and `ssh-credentials`) |
+| `COPILOT_AUTH` | agents/copilot | Name of the `copilot-token` authentication Copilot runs with. Required unless `COPILOT_HOME_MOUNT` is on, or a plugin sets `AGENT_AUTH_PROVIDED=1` |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_DOCKER_CLI` / `ENABLE_CA_CERTS` / `ENABLE_DEV_SERVER` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_SETUP` / `ENABLE_NETBIRD` / `ENABLE_GCP_AUTH` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_PR_REVIEW` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `gcp-auth`, `netbird`, `pr-review` and `ssh-credentials`) |
 | `GH_AUTH` | github-auth | Name of the `github-app` authentication the sandbox authenticates as |
 | `BASE_BRANCH` | git-workspace | Branch to cut from (default: the repo's own default branch, via `origin/HEAD`) |
 | `HOST_WORKSPACE_DIR` | cwd-workspace | Host dir mounted at `/workspace` (default: `run.sh`'s cwd) |
@@ -933,7 +936,8 @@ only required while that agent or plugin is in use.
 | `CA_CERTS_DIR` | ca-certs | Host dir holding extra root certificates, PEM or DER (default `/usr/local/share/ca-certificates`) |
 | `CLAUDE_HOME_MOUNT` | agents/claude | `1` (default) mounts a per-run copy of `~/.claude`, login included; `0` leaves it out |
 | `CLAUDE_HOME_DIR` | agents/claude | Host dir copied as the agent's `~/.claude` (default `$HOME/.claude`) |
-| `COPILOT_HOME_DIR` | copilot-home | Host dir copied as the agent's `~/.copilot` for each run (default `$HOME/.copilot`) |
+| `COPILOT_HOME_MOUNT` | agents/copilot | `1` (default) mounts a per-run copy of `~/.copilot`, login included; `0` leaves it out |
+| `COPILOT_HOME_DIR` | agents/copilot | Host dir copied as the agent's `~/.copilot` (default `$HOME/.copilot`) |
 
 Volume mounts are contributed by plugins via `pass_mount`; the core `docker run` has none. The agent's
 user, `node`, takes the uid of whoever runs `run.sh` (`HOST_UID`, set by the boot in

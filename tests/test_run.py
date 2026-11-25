@@ -114,7 +114,7 @@ def test_the_agent_is_chosen_per_project(sb, run_sh):
     [build], [run] = calls(done, "build"), calls(done, "run")
     assert build[:5] == ["build", "-t", "claude-agent:copilot", "--build-arg", "AGENT=copilot"]
     plugins = dict(a.split("=", 1) for a in build if a.startswith("ENABLED_PLUGINS="))["ENABLED_PLUGINS"].split()
-    assert "copilot-home" in plugins and "branch-guard" not in plugins
+    assert "branch-guard" not in plugins
     assert any(a.startswith(f"{sb.home}/.local/state/claude-sandbox/copilot-home/") and a.endswith(":/home/node/.copilot")
                for a in run)  # the run's copy of ~/.copilot, not yours
     assert run[-1] == "claude-agent:copilot"

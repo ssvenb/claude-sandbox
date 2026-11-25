@@ -9,11 +9,25 @@
   },
   "settings": [
     {
+      "env": "COPILOT_HOME_MOUNT",
+      "type": "boolean",
+      "label": "Mount ~/.copilot",
+      "description": "Hands the agent a per-run copy of your Copilot CLI config directory, login included, so no token is needed. Off: the agent starts on a fresh config with COPILOT_AUTH's token.",
+      "default": true
+    },
+    {
+      "env": "COPILOT_HOME_DIR",
+      "type": "path",
+      "label": "Copilot config directory",
+      "description": "Host directory copied as the agent's ~/.copilot, for each run, while it is mounted.",
+      "placeholder": "~/.copilot"
+    },
+    {
       "env": "COPILOT_AUTH",
       "type": "auth",
       "auth": "copilot-token",
       "label": "GitHub token",
-      "description": "The copilot-token (a fine-grained PAT with \"Copilot Requests\", or a Copilot/gh OAuth token) Copilot runs with; not needed while copilot-home mounts a logged-in ~/.copilot.",
+      "description": "The copilot-token (a fine-grained PAT with \"Copilot Requests\", or a Copilot/gh OAuth token) Copilot runs with; not needed while COPILOT_HOME_MOUNT mounts a logged-in ~/.copilot.",
       "fills": {
         "token": "COPILOT_GITHUB_TOKEN"
       }

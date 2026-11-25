@@ -307,7 +307,7 @@ def test_a_projects_settings_are_read_and_saved_to_its_file(ui):
     assert saved["exists"] and saved["config"] == config == json.loads(file.read_text())
     assert file.read_text().endswith("}\n") and list((ui.tmp / "projects").iterdir()) == [file]
 
-    for bad in ([], {}, {"repo": " "}, {"repo": 1}, {"plugins": []}, {"plugins": {"kvm": "on"}}, {"plugins": {"kvm": {"enabled": "maybe"}}},
+    for bad in ([], {"repo": 1}, {"plugins": []}, {"plugins": {"kvm": "on"}}, {"plugins": {"kvm": {"enabled": "maybe"}}},
                 {"agents": []}, {"agents": {"claude": "high"}},
                 # declared settings are checked against their type, wherever their owner keeps them
                 {"agent": ["claude"]}, {"agents": {"claude": {"effort": "huge"}}},
@@ -335,8 +335,11 @@ def test_projects_are_added_and_deleted_and_authentications_saved_readable_by_yo
     assert post("/api/projects", {"name": "new", "repo": "~/code/new"}).status == 200
     assert json.loads((ui.tmp / "projects/new.json").read_text()) == {"repo": "~/code/new"}
     assert json.load(ui("/api/state"))["projects"] == ["new", ui.project]
-    for bad in ({"name": "new", "repo": "/r"}, {"name": "../x", "repo": "/r"}, {"name": ".x", "repo": "/r"}, {"name": "x", "repo": " "}):
+    for bad in ({"name": "new", "repo": "/r"}, {"name": "../x", "repo": "/r"}, {"name": ".x", "repo": "/r"}, {"name": "x", "repo": 1}):
         assert post("/api/projects", bad).status == 400
+    assert post("/api/projects", {"name": "scratch", "repo": " "}).status == 200  # no repo: an empty one in the container
+    assert json.loads((ui.tmp / "projects/scratch.json").read_text()) == {}
+    assert post("/api/projects/delete", {"name": "scratch"}).status == 200
     assert post("/api/projects/delete", {"name": "new"}).status == 200
     assert post("/api/projects/delete", {"name": "new"}).status == 400  # not there any more
     assert json.load(ui("/api/state"))["projects"] == [ui.project]

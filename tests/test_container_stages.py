@@ -36,8 +36,9 @@ def test_stages_run_in_the_order_the_host_resolved(sb):
 
 
 def test_settings_fragments_of_enabled_plugins(sb):
-    run = sb.sh("plugin_settings_files", ENABLED_PLUGINS="github-auth branch-guard netbird gcp-auth").ok()
-    assert run.out == f"{REPO}/plugins/branch-guard/settings.json\n"
+    run = sb.sh("plugin_settings_files", ENABLED_PLUGINS="github-auth git-workspace netbird gcp-auth", AGENT="claude").ok()
+    assert run.out == f"{REPO}/plugins/git-workspace/settings.claude.json\n"
+    assert sb.sh("plugin_settings_files", ENABLED_PLUGINS="git-workspace", AGENT="copilot").ok().out == ""
     assert sb.sh("plugin_settings_files", ENABLED_PLUGINS="").ok().out == ""
 
 

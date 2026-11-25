@@ -23,11 +23,15 @@ plugin_run_stage() {
   unset _stage PLUGIN_NAME PLUGIN_DIR
 }
 
-# The settings.json fragments contributed by enabled plugins, in order.
+# The settings.json fragments contributed by enabled plugins, in order: settings.json for every
+# agent, settings.<agent>.json for that agent only.
 plugin_settings_files() {
   for _name in ${ENABLED_PLUGINS:-}; do
-    [ -f "$PLUGIN_ROOT/$_name/settings.json" ] && echo "$PLUGIN_ROOT/$_name/settings.json"
+    for _f in settings.json "settings.${AGENT:-}.json"; do
+      [ -f "$PLUGIN_ROOT/$_name/$_f" ] && echo "$PLUGIN_ROOT/$_name/$_f"
+    done
   done
+  unset _f
   unset _name
   return 0
 }

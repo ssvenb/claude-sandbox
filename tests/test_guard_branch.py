@@ -1,4 +1,4 @@
-"""plugins/branch-guard/bin/guard-branch.py: the PreToolUse hook that pins the agent to its branch."""
+"""plugins/git-workspace/bin/guard-branch.py: the PreToolUse hook that pins the agent to its branch."""
 import json
 import subprocess
 
@@ -6,12 +6,12 @@ import pytest
 
 from conftest import REPO
 
-HOOK = REPO / "plugins/branch-guard/bin/guard-branch.py"
+HOOK = REPO / "plugins/git-workspace/bin/guard-branch.py"
 BRANCH = "claude-code/20260102-abc123"
 
 
 def guard(command, **env):
-    env = {"AGENT_BRANCH": BRANCH, "AGENT_BRANCH_PREFIX": "claude-code", **env}
+    env = {"AGENT_BRANCH": BRANCH, "AGENT_BRANCH_PREFIX": "claude-code", "BRANCH_GUARD": "1", **env}
     env = {k: v for k, v in env.items() if v is not None}
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
     return subprocess.run([HOOK], input=payload, capture_output=True, text=True, env=env)
@@ -88,3 +88,7 @@ def test_an_unparsable_push_is_blocked_not_waved_through():
     done = guard("git push origin main && echo it's done")
     assert done.returncode == 2
     assert "could not parse" in done.stderr
+
+
+def test_switched_off_it_allows_everything():
+    assert guard("git checkout main", BRANCH_GUARD=None).returncode == 0

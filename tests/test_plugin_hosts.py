@@ -403,16 +403,25 @@ def test_git_workspace_needs_a_checkout_with_an_origin(sb):
 
 def test_git_workspace_hands_over_the_repo_and_its_default_branch(sb):
     origin = checkout_with_origin(sb)
-    assert sb.plugin("git-workspace").ok().env == {"REPO_URL": str(origin), "BASE_BRANCH": "main"}
+    assert sb.plugin("git-workspace").ok().env == {"REPO_URL": str(origin), "BASE_BRANCH": "main", "BRANCH_GUARD": "1"}
 
 
 def test_git_workspace_takes_a_url_repo_without_a_checkout(sb):
     """A project whose repo is a git URL: no HOST_CWD; the container finds the default branch."""
     url = "git@github.com:acme/w.git"
-    assert sb.plugin("git-workspace", HOST_CWD="", REPO_URL=url).ok().env == {"REPO_URL": url}
+    assert sb.plugin("git-workspace", HOST_CWD="", REPO_URL=url).ok().env == {"REPO_URL": url, "BRANCH_GUARD": "1"}
     assert sb.plugin("git-workspace", HOST_CWD="", REPO_URL=url, BASE_BRANCH="dev").ok().env == {
-        "REPO_URL": url, "BASE_BRANCH": "dev"}
-    sb.plugin("git-workspace", HOST_CWD="").dies("no REPO_URL to clone")
+        "REPO_URL": url, "BASE_BRANCH": "dev", "BRANCH_GUARD": "1"}
+
+
+def test_git_workspace_without_a_repo_hands_over_none(sb):
+    """A project with no repo: the container starts an empty one."""
+    assert sb.plugin("git-workspace", HOST_CWD="").ok().env == {"BRANCH_GUARD": "1"}
+
+
+def test_git_workspace_branch_guard_can_be_switched_off(sb):
+    sb.config({"plugins": {"git-workspace": {"branchGuard": False}}})
+    assert sb.plugin("git-workspace", HOST_CWD="").ok().env == {}
 
 
 def test_git_workspace_finds_a_default_branch_not_called_main(sb):

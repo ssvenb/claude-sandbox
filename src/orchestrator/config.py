@@ -117,9 +117,12 @@ _URL = re.compile(r"[a-z][a-z0-9+.-]*://|[\w.-]+@[\w.-]+:")  # https://…, ssh:
 
 def repo_dir(env: dict, name: str, repo) -> str:
     """The project's repo on this machine: its path, or "" for a git URL — nothing is cloned on the
-    host; git-workspace clones the URL in the container, with the project's credentials."""
-    if not isinstance(repo, str) or not repo.strip():
-        raise Die(f"Project '{name}' names no repo: set \"repo\" in its file to a path on this machine or a git URL.")
+    host; git-workspace clones the URL in the container, with the project's credentials — or for
+    none, where git-workspace starts an empty repo in the container."""
+    if repo is None or (isinstance(repo, str) and not repo.strip()):
+        return ""
+    if not isinstance(repo, str):
+        raise Die(f"Project '{name}': \"repo\" must be a path on this machine or a git URL.")
     if _URL.match(repo):
         return ""
     path = Path(repo).expanduser()

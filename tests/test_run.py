@@ -18,8 +18,7 @@ from conftest import REPO
 # The agent runs on a token: an authentication of the fixture's auth.json the project only names.
 BASE = {"agentVersion": "1.2.3", "agents": {"claude": {"homeMount": False, "auth": "tok"}}, "plugins": {
     "github-auth": {"enabled": False}, "git-workspace": {"enabled": False},
-    "agent-workspace": {"enabled": False}, "docker-cli": {"enabled": False},
-    "branch-guard": {"enabled": False}}}
+    "agent-workspace": {"enabled": False}, "docker-cli": {"enabled": False}}}
 
 
 @pytest.fixture
@@ -114,7 +113,7 @@ def test_the_agent_is_chosen_per_project(sb, run_sh):
     [build], [run] = calls(done, "build"), calls(done, "run")
     assert build[:5] == ["build", "-t", "claude-agent:copilot", "--build-arg", "AGENT=copilot"]
     plugins = dict(a.split("=", 1) for a in build if a.startswith("ENABLED_PLUGINS="))["ENABLED_PLUGINS"].split()
-    assert "branch-guard" not in plugins
+    assert "agent-status" not in plugins
     assert any(a.startswith(f"{sb.home}/.local/state/claude-sandbox/copilot-home/") and a.endswith(":/home/node/.copilot")
                for a in run)  # the run's copy of ~/.copilot, not yours
     assert run[-1] == "claude-agent:copilot"
@@ -128,10 +127,10 @@ def test_configuration_errors_stop_the_run_before_docker(run_sh):
 
 def test_unmet_capabilities_stop_the_run_before_docker(run_sh):
     config = json.loads(json.dumps(BASE))
-    config["plugins"]["branch-guard"]["enabled"] = True
+    config["plugins"]["pr-review"] = {"enabled": True}
     done = run_sh(config=config)
     assert done.returncode == 1 and done.calls == []
-    assert "Plugin 'branch-guard' requires the 'workspace' capability. Enable one of: git-workspace" \
+    assert "Plugin 'pr-review' requires the 'git-credentials' capability. Enable one of: github-auth" \
         in done.stderr
 
 
@@ -277,9 +276,10 @@ def test_project_names_its_file_and_the_repo_it_works_on(sb, run_sh):
     for name, message in (("nope", "No project 'nope'"), ("../app", "is not a project name")):
         done = run_sh("--project", name, config=None)
         assert done.returncode and message in done.stderr
-    (listing / "app.json").write_text(json.dumps(BASE))
+    (listing / "app.json").write_text(json.dumps(BASE))  # no repo: git-workspace starts an empty one
     done = run_sh("--project", "app", config=None)
-    assert done.returncode and "names no repo" in done.stderr
+    assert done.returncode == 0, done.stderr
+    assert not any(a.startswith("REPO_URL=") for a in calls(done, "run")[0])
 
 
 def test_a_projects_repo_may_be_a_git_url_never_cloned_on_this_machine(sb, run_sh):

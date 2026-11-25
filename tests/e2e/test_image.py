@@ -102,8 +102,8 @@ def test_the_agent_does_not_edit_its_guardrails_by_accident(image):
     probe = f"""touch /opt/plugins/x 2>/dev/null && echo plugins writable
 touch /opt/agents/x 2>/dev/null && echo agents writable
 rm -f {MANAGED} 2>/dev/null; [ -f {MANAGED} ] || echo policy removed
-[ -x /opt/plugins/branch-guard/bin/guard-branch.py ] || echo hook not executable"""
-    assert boot(image, "branch-guard", probe).out == ""
+[ -x /opt/plugins/git-workspace/bin/guard-branch.py ] || echo hook not executable"""
+    assert boot(image, "git-workspace", probe).out == ""
 
 
 def test_netbird_enrols_with_the_setup_key_and_leaves_it_out_of_the_agents_env(image):
@@ -125,14 +125,21 @@ GIT_PROBE = ("cd /workspace; git rev-parse --abbrev-ref HEAD; git config user.na
 
 
 def test_git_workspace_creates_the_runs_branch(image):
-    plugins = "git-workspace branch-guard" if AGENT == "claude" else "git-workspace"
-    b = boot(image, plugins, GIT_PROBE, REPO_URL="/srv/origin.git", BASE_BRANCH="main")
+    b = boot(image, "git-workspace", GIT_PROBE, REPO_URL="/srv/origin.git", BASE_BRANCH="main", BRANCH_GUARD="1")
     branch = f"{PREFIX}/20260102-abc123"
     name = json.loads((REPO / "agents" / AGENT / "agent.json").read_text())["git"]["userName"]
     assert b.out.splitlines() == [branch, name, f"{AGENT}@sandbox.local", "initial", "node"]
     assert (b.env["AGENT_BRANCH"], b.env["AGENT_BRANCH_PREFIX"]) == (branch, PREFIX)
     assert f"on the branch {branch}, created for this sandbox run (RUN_ID=abc123) off main" in b.briefing
     assert ("You cannot leave this branch" if AGENT == "claude" else "Stay on this branch") in b.briefing
+
+
+def test_without_a_repo_the_run_gets_an_empty_one_of_its_own(image):
+    b = boot(image, "git-workspace", "cd /workspace; git rev-parse --abbrev-ref HEAD; git remote; git config user.email; stat -c %U .",
+             BRANCH_GUARD="1")
+    assert b.out.splitlines() == [f"{PREFIX}/20260102-abc123", f"{AGENT}@sandbox.local", "node"]
+    assert "a new git repository at /workspace, with no remote" in b.briefing
+    assert "allows pushes" not in b.briefing
 
 
 def test_an_explicit_branch_prefix_is_also_the_identity(image):
@@ -159,12 +166,12 @@ def test_resume_finds_the_runs_branch_and_its_pull_request(image):
 
 @claude_only
 def test_branch_guard_hook_is_installed_and_enforces_the_branch(image):
-    hook = "/opt/plugins/branch-guard/bin/guard-branch.py"
+    hook = "/opt/plugins/git-workspace/bin/guard-branch.py"
     probe = f"""cat {MANAGED}; echo
 printf '%s' '{{"tool_input": {{"command": "git checkout main"}}}}' | {hook} 2>/dev/null; echo "checkout=$?"
 printf '{{"tool_input": {{"command": "git push origin %s"}}}}' "$AGENT_BRANCH" | {hook}; echo "own=$?"
 printf '%s' '{{"tool_input": {{"command": "git push origin main"}}}}' | {hook} 2>/dev/null; echo "main=$?" """
-    b = boot(image, "git-workspace branch-guard", probe, REPO_URL="/srv/origin.git", BASE_BRANCH="main")
+    b = boot(image, "git-workspace", probe, REPO_URL="/srv/origin.git", BASE_BRANCH="main", BRANCH_GUARD="1")
     *settings, checkout, own, main = b.out.strip().splitlines()
     assert json.loads("\n".join(settings))["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == hook
     assert (checkout, own, main) == ("checkout=2", "own=0", "main=2")

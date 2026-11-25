@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/opt/plugins/branch-guard/bin/guard-branch.py"
+            "command": "/opt/plugins/git-workspace/bin/guard-branch.py"
           }
         ]
       }

@@ -13,7 +13,7 @@ TYPES lists what each type holds. Projects and plugins never hold any of it: a p
 declares a setting of type "auth" that only names an entry, and which of its own (internal)
 variables each field of the entry fills:
 
-    {"env": "GH_AUTH", "type": "auth", "auth": "github-app",
+    {"key": "auth", "env": "GH_AUTH", "type": "auth", "auth": "github-app",
      "fills": {"appId": "GH_APP_ID", "privateKeyFile": "GH_PRIVATE_KEY_FILE"}}
 
 With GH_AUTH=reviewer its stages run with GH_APP_ID and GH_PRIVATE_KEY_FILE set from that entry, so

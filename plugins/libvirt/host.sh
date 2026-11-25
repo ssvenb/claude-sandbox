@@ -22,7 +22,7 @@ if [ "$_libvirt_mounted" = 0 ] && [ -S /run/libvirt/libvirt-sock ]; then
   _libvirt_mounted=1
 fi
 [ "$_libvirt_mounted" = 1 ] \
-  || die "no libvirt socket under /run/libvirt — libvirt not installed, or its sockets (virtqemud.socket, or libvirtd.socket) not enabled (disable the plugin with ENABLE_LIBVIRT=0)"
+  || die "no libvirt socket under /run/libvirt — libvirt not installed, or its sockets (virtqemud.socket, or libvirtd.socket) not enabled (switch the plugin off in the project's settings)"
 unset _libvirt_mounted _sock
 
 pass_value LIBVIRT_DEFAULT_URI qemu:///system

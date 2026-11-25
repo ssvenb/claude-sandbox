@@ -296,20 +296,22 @@ def test_a_projects_settings_are_read_and_saved_to_its_file(ui):
     kvm = next(p for p in got["plugins"] if p["name"] == "kvm")  # every plugin, as its manifest says
     assert kvm["defaultEnabled"] is False and kvm["description"] and "briefing" in kvm["example"]
     assert [s["key"] for s in kvm["settings"]] == ["briefing"]  # the settings it declares
-    assert any(s["env"] == "AGENT" for s in got["kernel"]["settings"])  # and the sandbox's own
+    assert any(s["key"] == "agent" for s in got["kernel"]["settings"])  # and the sandbox's own
     claude = next(a for a in got["agents"] if a["name"] == "claude")
-    assert any(s["env"] == "CLAUDE_EFFORT" for s in claude["settings"])
+    assert any(s["key"] == "effort" for s in claude["settings"])
 
-    config = {"repo": "https://github.com/o/r", "env": {"CLAUDE_EFFORT": "high"}, "plugins": {"kvm": {"enabled": True, "briefing": "VMs"}},
+    config = {"repo": "https://github.com/o/r", "agent": "claude", "agents": {"claude": {"effort": "high"}},
+              "plugins": {"kvm": {"enabled": True, "briefing": "VMs"}},
               "mine": [1]}  # whatever else the file holds is the page's to keep
     saved = json.load(ui("/api/config", json.dumps({"project": ui.project, "config": config}).encode()))
     assert saved["exists"] and saved["config"] == config == json.loads(file.read_text())
     assert file.read_text().endswith("}\n") and list((ui.tmp / "projects").iterdir()) == [file]
 
     for bad in ([], {}, {"repo": " "}, {"repo": 1}, {"plugins": []}, {"plugins": {"kvm": "on"}}, {"plugins": {"kvm": {"enabled": "maybe"}}},
-                {"env": {"AGENT": ["claude"]}},
-                # declared settings are checked against their type
-                {"env": {"CLAUDE_EFFORT": "huge"}}, {"env": {"AGENT_WORKSPACE_CLEANUP": "yes"}},
+                {"agents": []}, {"agents": {"claude": "high"}},
+                # declared settings are checked against their type, wherever their owner keeps them
+                {"agent": ["claude"]}, {"agents": {"claude": {"effort": "huge"}}},
+                {"plugins": {"agent-workspace": {"cleanup": "yes"}}}, {"plugins": {"git-workspace": {"baseBranch": 1}}},
                 {"plugins": {"dev-server": {"command": "make", "port": "80"}}}, {"plugins": {"project-setup": {"apt": "ripgrep"}}},
                 {"plugins": {"dev-server": {"command": ["make"]}}},
                 {"plugins": {"upstream-proxy": {"routes": [{"name": "a", "upstream": "https://x"}]}}},

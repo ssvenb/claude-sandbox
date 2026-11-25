@@ -18,7 +18,7 @@ import sys
 from . import SANDBOX, Die, say
 from .agents import resolve_agent, resolve_version
 from .auth import apply_auth, auth_file
-from .config import STARTED_BY, apply_settings, load_project, repo_dir, project_file
+from .config import STARTED_BY, apply_settings, declared, load_project, repo_dir, project_file, without_settings
 from .plugins import discover, plugin_root, resolve, validate
 from .stage import Stage, StageFailed, environ
 
@@ -72,7 +72,7 @@ def parse(argv: list[str]) -> dict:
         elif arg == "--chat":
             opts["chat"] = True
             i += 1
-        # A setting for this run alone, over the project's own (config.py, layer 5).
+        # A setting for this run alone, by the variable it is read from, over the project's own (config.py).
         elif arg == "--set":
             name, eq, value = (argv[i + 1] if i + 1 < len(argv) else "").partition("=")
             if not name or not eq:
@@ -94,7 +94,8 @@ def parse(argv: list[str]) -> dict:
 
 
 def run(opts: dict) -> int:
-    env = dict(os.environ)
+    # Your environment, but none of the sandbox's settings: those come from the project's file alone.
+    env = without_settings(dict(os.environ), declared(os.environ))
     # The repo the agent works on: the project's, or the directory you launched from — plugins read
     # it as $HOST_CWD, never as $PWD.
     env["HOST_CWD"] = os.getcwd()

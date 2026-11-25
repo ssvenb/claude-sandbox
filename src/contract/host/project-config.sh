@@ -8,10 +8,10 @@
 #   ~/.config/claude-sandbox/projects/my-app.json
 #   {
 #     "repo": "~/code/my-app",
-#     "env": { "AGENT": "copilot", "ENABLE_GIT_WORKSPACE": 0 },
+#     "agent": "copilot",
 #     "plugins": {
 #       "upstream-proxy": { "routes": [ ... ] },
-#       "git-workspace": { "enabled": false }
+#       "git-workspace": { "enabled": false, "baseBranch": "trunk" }
 #     }
 #   }
 #

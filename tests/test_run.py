@@ -15,7 +15,8 @@ from conftest import REPO
 
 # Everything that needs the network, a GitHub App or a Docker socket is off; what is left on is
 # the default set minus those.
-BASE = {"env": {"AGENT_VERSION": "1.2.3", "CLAUDE_HOME_MOUNT": "0"}, "plugins": {
+# The agent runs on a token: an authentication of the fixture's auth.json the project only names.
+BASE = {"agentVersion": "1.2.3", "agents": {"claude": {"homeMount": False, "auth": "tok"}}, "plugins": {
     "github-auth": {"enabled": False}, "git-workspace": {"enabled": False},
     "agent-workspace": {"enabled": False}, "docker-cli": {"enabled": False},
     "cwd-workspace": {"enabled": True}}}
@@ -28,6 +29,11 @@ def run_sh(sb, short_tmp):
     sb.stub("docker", f'n=$(ls "{log}" | wc -l)\nprintf "%s\\0" "$@" >"{log}/$n"\n'
                       '[ "$1" != info ] || echo "Ubuntu 24.04 LTS"\n')
     sb.env["TMPDIR"] = str(short_tmp)
+    auth = sb.tmp / "auth.json"
+    auth.write_text(json.dumps({"tok": {"type": "claude-token", "token": "t"},
+                                "max": {"type": "claude-token", "token": "oauth-tok"}}))
+    auth.chmod(0o600)
+    sb.env["SANDBOX_AUTH_FILE"] = str(auth)
 
     def run(*args, config=BASE, timeout=60, **env):
         if config is not None:
@@ -45,11 +51,8 @@ def calls(done, command):
 
 def test_the_host_pipeline_builds_and_runs_the_image(sb, run_sh):
     sb.dotenv("API_SECRET=hunter2\nCLAUDE_EFFORT=low\n")  # the repo's own: not read
-    auth = sb.tmp / "auth.json"  # the token is an authentication the project only names
-    auth.write_text(json.dumps({"max": {"type": "claude-token", "token": "oauth-tok"}}))
-    auth.chmod(0o600)
-    done = run_sh(config={**BASE, "env": {**BASE["env"], "CLAUDE_AUTH": "max", "CLAUDE_EFFORT": "high"}},
-                  SANDBOX_AUTH_FILE=auth)
+    done = run_sh(config={**BASE, "agents": {"claude": {"homeMount": False, "auth": "max", "effort": "high"}}},
+                  CLAUDE_EFFORT="low")  # your shell's: not read
     assert done.returncode == 0, done.stderr
     [build], [run] = calls(done, "build"), calls(done, "run")
     plugins = ("herdr data-mounts upstream-proxy cwd-workspace package-managers "
@@ -74,13 +77,13 @@ def test_the_host_pipeline_builds_and_runs_the_image(sb, run_sh):
 
 
 def test_resume_reuses_the_run_id(sb, run_sh):
-    done = run_sh("--resume", "0a1b2c", CLAUDE_CODE_OAUTH_TOKEN="t")
+    done = run_sh("--resume", "0a1b2c")
     [run] = calls(done, "run")
     assert "RUN_ID=0a1b2c" in run and "RESUME=1" in run
 
 
 def test_run_id_starts_a_fresh_run_under_the_given_id(sb, run_sh):
-    done = run_sh("--run-id", "0a1b2c", CLAUDE_CODE_OAUTH_TOKEN="t")
+    done = run_sh("--run-id", "0a1b2c")
     [run] = calls(done, "run")
     assert "RUN_ID=0a1b2c" in run and "RESUME=0" in run
     assert run[-3:-1] == ["--name", "sandbox-0a1b2c"]
@@ -108,7 +111,7 @@ def test_command_line(run_sh, args, code, message):
 def test_the_agent_is_chosen_per_project(sb, run_sh):
     (sb.home / ".copilot").mkdir()
     config = json.loads(json.dumps(BASE))
-    config["env"]["AGENT"] = "copilot"
+    config["agent"] = "copilot"
     done = run_sh(config=config)
     assert done.returncode == 0, done.stderr
     [build], [run] = calls(done, "build"), calls(done, "run")
@@ -121,15 +124,15 @@ def test_the_agent_is_chosen_per_project(sb, run_sh):
 
 
 def test_configuration_errors_stop_the_run_before_docker(run_sh):
-    done = run_sh(config={"env": {"NOT_A_SETTING": "1"}})
+    done = run_sh(config={"agents": {"claude": "high"}})
     assert done.returncode == 1 and done.calls == []
-    assert "is not a sandbox setting" in done.stderr
+    assert ".agents must be an object of objects" in done.stderr
 
 
 def test_unmet_capabilities_stop_the_run_before_docker(run_sh):
     config = json.loads(json.dumps(BASE))
     config["plugins"]["cwd-workspace"]["enabled"] = False
-    done = run_sh(config=config, CLAUDE_CODE_OAUTH_TOKEN="t")
+    done = run_sh(config=config)
     assert done.returncode == 1 and done.calls == []
     assert "Plugin 'branch-guard' requires the 'workspace' capability. Enable one of: cwd-workspace,git-workspace" \
         in done.stderr
@@ -142,7 +145,7 @@ def test_host_proxy_runs_exactly_as_long_as_the_container(sb, run_sh, short_tmp)
     config = json.loads(json.dumps(BASE))
     config["plugins"]["upstream-proxy"] = {"routes": [{"name": "api", "port": port,
                                                        "upstream": "http://127.0.0.1:9"}]}
-    done = run_sh(config=config, CLAUDE_CODE_OAUTH_TOKEN="t")
+    done = run_sh(config=config)
     assert done.returncode == 0, done.stderr
     [run] = calls(done, "run")
     assert "UPSTREAM_PROXY_PORTS=api:" + str(port) in run
@@ -152,7 +155,7 @@ def test_host_proxy_runs_exactly_as_long_as_the_container(sb, run_sh, short_tmp)
 
 def test_web_describes_the_project_and_starts_nothing(sb, run_sh):
     # Its settings are announced on a normal run: that must not leak into the JSON.
-    done = run_sh("--web", config={**BASE, "env": {**BASE["env"], "CLAUDE_EFFORT": "high"}})
+    done = run_sh("--web", config={**BASE, "agents": {"claude": {**BASE["agents"]["claude"], "effort": "high"}}})
     assert done.returncode == 0, done.stderr
     said = json.loads(done.stdout)
     assert said["agent"] == "claude" and "cwd-workspace" in said["plugins"]
@@ -162,42 +165,39 @@ def test_web_describes_the_project_and_starts_nothing(sb, run_sh):
 
 
 def test_a_task_reaches_the_agent_as_agent_task(sb, run_sh):
-    done = run_sh("--run-id", "0a1b2c", "--task", "Fix #7: it's \"broken\"", CLAUDE_CODE_OAUTH_TOKEN="t")
+    done = run_sh("--run-id", "0a1b2c", "--task", "Fix #7: it's \"broken\"")
     [run] = calls(done, "run")
     assert "AGENT_TASK=Fix #7: it's \"broken\"" in run
-    run = calls(run_sh("--run-id", "0a1b2c", CLAUDE_CODE_OAUTH_TOKEN="t"), "run")[-1]  # the log is shared
+    run = calls(run_sh("--run-id", "0a1b2c"), "run")[-1]  # the log is shared
     assert not any(arg.startswith("AGENT_TASK=") for arg in run)  # no task, no variable
 
 
 def test_set_is_a_setting_of_this_run_alone_over_the_projects_own(sb, run_sh):
     """--set: what a plugin's web_start starts a run with, and SANDBOX_STARTED_BY only that way."""
-    project = {**BASE, "env": {**BASE["env"], "CLAUDE_EFFORT": "high"}}
+    project = {**BASE, "agents": {"claude": {**BASE["agents"]["claude"], "effort": "high"}}}
     seen = sb.tmp / "by"
     sb.stub("docker", f'[ "$1" != run ] || {{ printf "%s\\n" "$@" | grep EFFORT; echo "${{SANDBOX_STARTED_BY-unset}}"; }} >"{seen}"\n')
-    assert run_sh("--set", "CLAUDE_EFFORT=low", "--set", "SANDBOX_STARTED_BY=pr-review", config=project,
-                  CLAUDE_CODE_OAUTH_TOKEN="t").returncode == 0
+    assert run_sh("--set", "CLAUDE_EFFORT=low", "--set", "SANDBOX_STARTED_BY=pr-review", config=project).returncode == 0
     assert seen.read_text() == "CLAUDE_EFFORT=low\npr-review\n"
-    assert run_sh(config=project, CLAUDE_CODE_OAUTH_TOKEN="t", SANDBOX_STARTED_BY="someone").returncode == 0
+    assert run_sh(config=project, SANDBOX_STARTED_BY="someone").returncode == 0
     assert seen.read_text() == "CLAUDE_EFFORT=high\nunset\n"  # not from your shell
 
 
 def test_a_chat_runs_without_a_terminal_behind_the_agents_bridge(sb, run_sh):
     """--chat (what the web UI starts): stdin stays open and no pty is allocated, since the
     container's stdio is the chat bridge's wire; the launch stage reads AGENT_UI."""
-    run = calls(run_sh("--resume", "0a1b2c", "--chat", CLAUDE_CODE_OAUTH_TOKEN="t"), "run")[-1]
+    run = calls(run_sh("--resume", "0a1b2c", "--chat"), "run")[-1]
     assert run[:5] == ["run", "-i", "-e", "AGENT_UI=chat", "--rm"] and "-it" not in run
     assert "RESUME=1" in run
-    run = calls(run_sh("--run-id", "0a1b2c", CLAUDE_CODE_OAUTH_TOKEN="t"), "run")[-1]
+    run = calls(run_sh("--run-id", "0a1b2c"), "run")[-1]
     assert run[:3] == ["run", "-it", "--rm"] and "AGENT_UI=chat" not in run
 
 
 def test_a_plugin_refusing_stops_the_run_before_docker(run_sh):
-    done = run_sh()  # no CLAUDE_CODE_OAUTH_TOKEN: the agent's host.sh dies
+    # No token named, and one exported in your shell is not read: the agent's host.sh dies.
+    done = run_sh(config={**BASE, "agents": {"claude": {"homeMount": False}}})
     assert done.returncode == 1 and done.calls == []
-    assert "Claude Code needs credentials: set CLAUDE_AUTH" in done.stderr and "Traceback" not in done.stderr
-    # A token is not a setting a project makes: it only names one.
-    done = run_sh(config={**BASE, "env": {**BASE["env"], "CLAUDE_CODE_OAUTH_TOKEN": "t"}})
-    assert ".env.CLAUDE_CODE_OAUTH_TOKEN is not a sandbox setting" in done.stderr
+    assert "Claude Code needs credentials: pick a claude-token" in done.stderr and "Traceback" not in done.stderr
 
 
 def test_what_a_host_stage_exports_reaches_docker(sb, run_sh):
@@ -205,15 +205,15 @@ def test_what_a_host_stage_exports_reaches_docker(sb, run_sh):
     sourced into run.sh."""
     seen = sb.tmp / "herdr"
     sb.stub("docker", f'[ "$1" != run ] || echo "${{HERDR_AGENT-unset}}" >"{seen}"\n')
-    assert run_sh(CLAUDE_CODE_OAUTH_TOKEN="t", HERDR_ENV="1").returncode == 0
+    assert run_sh(HERDR_ENV="1").returncode == 0
     assert seen.read_text() == "claude\n"
 
 
 def test_the_container_exit_status_is_the_runs(sb, run_sh):
     sb.stub("docker", '[ "$1" != run ] || exit 3\n')
-    assert run_sh(CLAUDE_CODE_OAUTH_TOKEN="t").returncode == 3
+    assert run_sh().returncode == 3
     sb.stub("docker", '[ "$1" != build ] || exit 5\n')
-    assert run_sh(CLAUDE_CODE_OAUTH_TOKEN="t").returncode == 5
+    assert run_sh().returncode == 5
 
 
 def test_a_hangup_cleans_up_and_leaves_the_docker_client_be(sb, run_sh, short_tmp):
@@ -227,7 +227,7 @@ def test_a_hangup_cleans_up_and_leaves_the_docker_client_be(sb, run_sh, short_tm
     config = json.loads(json.dumps(BASE))  # upstream-proxy: a proxy on this machine, stopped by an exit hook
     config["plugins"]["upstream-proxy"] = {"routes": [{"name": "api", "port": port, "upstream": "http://127.0.0.1:9"}]}
     sb.config(config)
-    env = sb._env({"CLAUDE_CODE_OAUTH_TOKEN": "t", "TMPDIR": str(short_tmp)})
+    env = sb._env({"TMPDIR": str(short_tmp)})
     # Files, not pipes: the docker client, left running, would hold a pipe open past run.sh.
     out, err = open(sb.tmp / "out", "w"), open(sb.tmp / "err", "w")
     proc = subprocess.Popen([REPO / "run.sh", "--run-id", "0a1b2c", "--chat"], cwd=sb.cwd, env=env,
@@ -271,7 +271,7 @@ def test_project_names_its_file_and_the_repo_it_works_on(sb, run_sh):
     repo = sb.tmp / "repo"
     repo.mkdir()
     (listing / "app.json").write_text(json.dumps({"repo": str(repo), **BASE}))
-    done = run_sh("--project", "app", config=None, CLAUDE_CODE_OAUTH_TOKEN="t")
+    done = run_sh("--project", "app", config=None)
     assert done.returncode == 0, done.stderr
     [run] = calls(done, "run")
     assert f"{repo}:/workspace" in run and f"📄 Project config: {listing / 'app.json'}" in done.stdout
@@ -292,10 +292,10 @@ def test_a_projects_repo_may_be_a_git_url_never_cloned_on_this_machine(sb, run_s
     plugins = {**BASE["plugins"], "cwd-workspace": {"enabled": False}, "agent-workspace": {"enabled": True},
                "branch-guard": {"enabled": False}}
     (listing / "app.json").write_text(json.dumps({**BASE, "repo": url, "plugins": plugins}))
-    done = run_sh("--project", "app", config=None, CLAUDE_CODE_OAUTH_TOKEN="t", GIT_TERMINAL_PROMPT="0")
+    done = run_sh("--project", "app", config=None, GIT_TERMINAL_PROMPT="0")
     assert done.returncode == 0, done.stderr
     assert any("/private-widgets-" in a and a.endswith(":/workspace") for a in calls(done, "run")[0])
     assert not (sb.home / ".cache/claude-sandbox/repos").exists()
     (listing / "app.json").write_text(json.dumps({**BASE, "repo": url}))  # cwd-workspace on
-    done = run_sh("--project", "app", config=None, CLAUDE_CODE_OAUTH_TOKEN="t")
+    done = run_sh("--project", "app", config=None)
     assert done.returncode and "no checkout on this machine to mount" in done.stderr

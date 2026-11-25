@@ -8,6 +8,7 @@
   "requiredEnv": ["GCP_AUTH"],
   "settings": [
     {
+      "key": "auth",
       "env": "GCP_AUTH",
       "type": "auth",
       "auth": "gcp-service-account",

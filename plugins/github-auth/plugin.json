@@ -8,6 +8,7 @@
   "requiredEnv": ["GH_AUTH"],
   "settings": [
     {
+      "key": "auth",
       "env": "GH_AUTH",
       "type": "auth",
       "auth": "github-app",

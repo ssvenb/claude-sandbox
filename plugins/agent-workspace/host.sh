@@ -24,7 +24,7 @@ if [ -n "$(ls -A "$run_dir" 2>/dev/null)" ]; then
   rm -rf -- "${run_dir:?}"
 fi
 
-mkdir -p "$run_dir" || die "Cannot create AGENT_WORKSPACE_DIR: $run_dir"
+mkdir -p "$run_dir" || die "agent-workspace: cannot create $run_dir in its workspaces directory"
 
 pass_mount "$(cd "$run_dir" && pwd)" /workspace
 

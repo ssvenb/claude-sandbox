@@ -24,13 +24,6 @@ export const slot = (obj: Holder, key: string): Slot => ({
 
 export const ON: Value[] = [true, 1, '1', 'true'];
 
-/** Values of the env block are exported as strings, so a switch writes 1/0 there and reads either spelling. */
-export const envSlot = (s: Slot, spec: SettingSpec): Slot =>
-  spec.type !== 'boolean' ? s : {
-    get: () => (s.get() === undefined ? undefined : ON.includes(s.get())),
-    set: v => s.set(v === undefined ? v : v ? 1 : 0),
-  };
-
 export const clone = <T extends Value>(v: T): T => (v === undefined ? v : (JSON.parse(JSON.stringify(v)) as T));
 export const pretty = (v: Value): string => JSON.stringify(v, null, 2);
 export const isObject = (v: Value): v is JsonObject => !!v && typeof v === 'object' && !Array.isArray(v);

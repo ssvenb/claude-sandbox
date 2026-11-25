@@ -795,27 +795,31 @@ def test_the_gear_configures_the_projects_plugins_in_its_file(board):
                                 "openai": {"type": "api-key", "key": "never-shown"}, "gcs": {"type": "gcp-service-account"}}))
     auth.chmod(0o600)
     file = board.project.parent / "projects/proj.json"
-    file.write_text(json.dumps({"repo": str(board.project), "env": {"CLAUDE_EFFORT": "high", "GH_AUTH": "coder"},
-                                "plugins": {"git-workspace": {"branchPrefix": "bot", "extra": 1}, "retired": {"x": 1}}}))
+    file.write_text(json.dumps({"repo": str(board.project), "agents": {"claude": {"effort": "high"}},
+                                "plugins": {"github-auth": {"auth": "coder"}, "git-workspace": {"branchPrefix": "bot", "extra": 1},
+                                            "retired": {"x": 1}}}))
     board.click("button[aria-label='Settings']")
     board.wait_for_selector("dialog[open] b:has-text('docker-cli')")
     assert board.input_value("input[name='plugins.git-workspace.branchPrefix']") == "bot"
     assert board.input_value("input[name='repo']") == str(board.project)  # the repo it works on
     options = lambda sel: board.eval_on_selector_all(sel + " option", "os => os.map(o => o.value)")  # noqa: E731
-    assert board.input_value("select[name='env.GH_AUTH']") == "coder"
-    assert options("select[name='env.GH_AUTH']") == ["", "coder", "reviewer"]  # github-apps only
+    assert board.input_value("select[name='plugins.github-auth.auth']") == "coder"
+    assert options("select[name='plugins.github-auth.auth']") == ["", "coder", "reviewer"]  # github-apps only
     assert "never-shown" not in board.content()  # names, never what they hold
-    assert board.input_value("select[name='env.CLAUDE_EFFORT']") == "high"
+    assert board.input_value("select[name='agents.claude.effort']") == "high"
     assert "extra" in board.text_content(".card:has(button[name='enabled-git-workspace']) .kept")
+    assert not board.is_visible("input[name='repo']")  # each card folded to its head
 
     # Plugins: a switch each, its settings shown while it is on.
     assert board.get_attribute("button[name='enabled-docker-cli']", "aria-checked") == "true"  # the default
     board.click("button[name='enabled-docker-cli']")
     assert not board.is_visible("textarea[name='plugins.kvm.briefing']")  # kvm is off by default
     board.click("button[name='enabled-kvm']")
+    for card in ("plugin-kvm", "agents", "agent-claude", "plugin-github-auth", "plugin-project-setup", "plugin-upstream-proxy"):
+        board.click(f"[data-card='{card}'] > .head .toggle")  # a card shows only its head until clicked
     board.fill("textarea[name='plugins.kvm.briefing']", "VMs in /data")
-    board.select_option("select[name='env.CLAUDE_EFFORT']", "max")
-    board.select_option("select[name='env.GH_AUTH']", "")  # unset
+    board.select_option("select[name='agents.claude.effort']", "max")
+    board.select_option("select[name='plugins.github-auth.auth']", "")  # unset
 
     # Lists: + Add a row each; one left empty is not saved.
     deps = ".card:has(button[name='enabled-project-setup']) .field:has(label:text-is('apt packages'))"
@@ -838,13 +842,13 @@ def test_the_gear_configures_the_projects_plugins_in_its_file(board):
     board.fill("input[name='plugins.upstream-proxy.routes.0.containerEnv.0.value']", "http://127.0.0.1:8081")
     board.click("dialog button[type=submit]")
     board.wait_for_selector("dialog .error:has-text('routes[0].port is required')")  # the server's check
-    assert json.loads(file.read_text())["env"]["GH_AUTH"] == "coder"  # nothing saved
+    assert json.loads(file.read_text())["plugins"]["github-auth"]["auth"] == "coder"  # nothing saved
     board.fill("input[name='plugins.upstream-proxy.routes.0.port']", "8081")
 
     board.click("dialog button[type=submit]")
     board.wait_for_selector("dialog[open]", state="detached")
     assert json.loads(file.read_text()) == {
-        "repo": str(board.project), "env": {"CLAUDE_EFFORT": "max"},
+        "repo": str(board.project), "agents": {"claude": {"effort": "max"}},
         "plugins": {"git-workspace": {"branchPrefix": "bot", "extra": 1}, "retired": {"x": 1},
                     "docker-cli": {"enabled": False}, "kvm": {"enabled": True, "briefing": "VMs in /data"},
                     "project-setup": {"apt": ["ripgrep"]},
@@ -856,17 +860,20 @@ def test_the_gear_configures_the_projects_plugins_in_its_file(board):
     board.click("button[aria-label='Settings']")  # opens on what the file holds now
     board.wait_for_selector("dialog[open]")
     assert board.get_attribute("button[name='enabled-docker-cli']", "aria-checked") == "false"
-    board.click(".card:has(button[name='enabled-docker-cli']) .reset")  # back to its default: no entry
+    board.click("button.reset-all")  # every plugin back to its defaults: no entries
     assert board.get_attribute("button[name='enabled-docker-cli']", "aria-checked") == "true"
     board.fill("input[type=search]", "branch prefix")  # the filter keeps the matching settings
-    assert board.is_visible("input[name='plugins.git-workspace.branchPrefix']")
+    board.wait_for_selector("input[name='plugins.git-workspace.branchPrefix']", state="visible")  # its card unfolded
     assert not board.is_visible("button[name='enabled-kvm']")
 
     # The JSON view edits the whole file; a typo there is reported, not saved.
     board.click(".modes button:has-text('JSON')")
     text = board.input_value("textarea[name='json']")
-    assert '"retired"' in text and "docker-cli" not in text
-    board.fill("textarea[name='json']", text.replace('"bot"', '"robot"'))
+    assert json.loads(text)["plugins"] == {"git-workspace": {"extra": 1}, "retired": {"x": 1}}  # what no form control holds stays
+    edited = json.loads(text)
+    edited["plugins"]["git-workspace"]["branchPrefix"] = "robot"
+    text = json.dumps(edited)
+    board.fill("textarea[name='json']", text)
     board.click(".modes button:has-text('Form')")
     assert board.input_value("input[name='plugins.git-workspace.branchPrefix']") == "robot"
     board.click(".modes button:has-text('JSON')")
@@ -876,7 +883,7 @@ def test_the_gear_configures_the_projects_plugins_in_its_file(board):
     board.fill("textarea[name='json']", text)
     board.click("dialog button[type=submit]")
     board.wait_for_selector("dialog[open]", state="detached")
-    assert "docker-cli" not in json.loads(file.read_text())["plugins"]
+    assert json.loads(file.read_text())["plugins"] == {"git-workspace": {"branchPrefix": "robot", "extra": 1}, "retired": {"x": 1}}
 
 
 def test_the_menus_settings_add_and_delete_projects_and_edit_your_authentications(board):
@@ -886,10 +893,13 @@ def test_the_menus_settings_add_and_delete_projects_and_edit_your_authentication
     board.click("button[aria-label='Sandbox settings']")
     board.wait_for_selector("dialog[open] h2:has-text('Sandbox settings')")
 
+    for card in ("projects", "auth"):  # folded to their heads until clicked
+        board.click(f"[data-card={card}] > .head .toggle")
+
     # Projects: added and deleted at once.
     board.fill("input[name='new-project.name']", "other")
     board.fill("input[name='new-project.repo']", "~/code/other")
-    board.click(".card.projects button.add")
+    board.click("[data-card=projects] button.add")
     board.wait_for_selector("button[aria-label='Delete project other']")
     assert json.loads((board.project.parent / "projects/other.json").read_text()) == {"repo": "~/code/other"}
     board.once("dialog", lambda d: d.accept())
@@ -899,6 +909,7 @@ def test_the_menus_settings_add_and_delete_projects_and_edit_your_authentication
 
     # Authentications: an entry each, its fields those of its type; what the form has none for is kept.
     assert board.input_value("input[name='auth.0.appId']") == "1"
+    assert board.text_content("[data-card=auth] .kind h5") == "github-app"  # grouped by type
     board.click(".field:has(label:text-is('Entries')) > .control > .entries > button.add")
     board.fill("input[name='auth.1.name']", "openai")
     board.select_option("select[name='auth.1.type']", "api-key")

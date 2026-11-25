@@ -8,8 +8,8 @@ import { clone, isObject, pretty, tidy } from './slots';
 
 interface Props {
   title: string;
-  /** Where the file is, whether it is there yet, and what it holds. */
-  file: string;
+  /** Where the file is (shown under the title, when given), whether it is there yet, and what it holds. */
+  file?: string;
   exists: boolean;
   config: JsonObject;
   /** Writes the file. */
@@ -23,17 +23,16 @@ interface Props {
 
 type Mode = 'form' | 'json';
 
-/** What the draft becomes as a file: entries left empty, and blocks and sections left without
- *  anything, are not written. */
+/** What the draft becomes as a file: entries left empty, and owners' sections (and their blocks)
+ *  left without anything, are not written. */
 function fileOf(draft: JsonObject): JsonObject {
   const next = tidy(clone(draft));
-  const plugins = next.plugins;
-  if (isObject(plugins))
-    for (const [plugin, section] of Object.entries(plugins))
-      if (isObject(section) && !Object.keys(section).length) delete plugins[plugin];
-  for (const key of ['env', 'plugins']) {
-    const block = next[key];
-    if (isObject(block) && !Object.keys(block).length) delete next[key];
+  for (const key of ['agents', 'plugins']) {
+    const owners = next[key];
+    if (isObject(owners))
+      for (const [name, section] of Object.entries(owners))
+        if (isObject(section) && !Object.keys(section).length) delete owners[name];
+    if (isObject(owners) && !Object.keys(owners).length) delete next[key];
   }
   return next;
 }
@@ -99,7 +98,7 @@ export function SettingsForm({ title, file, exists, config, save: write, cards, 
       <form onSubmit={save}>
         <header>
           <h2>{title}</h2>
-          <p>{file + (exists ? '' : ' (not there yet: saving creates it)')}</p>
+          {file && <p>{file + (exists ? '' : ' (not there yet: saving creates it)')}</p>}
           <div className="tools">
             <input type="search" placeholder="Filter settings…" aria-label="Filter" disabled={mode === 'json'}
               onChange={e => setQuery(e.target.value)} />

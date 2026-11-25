@@ -5,7 +5,7 @@
 # your own ~/.copilot (an MCP server, a hook) would run on this machine the next time Copilot starts
 # here. The copy is the run's own, so a resumed run finds its session in it again (session-state/);
 # nothing of it comes back to yours.
-case "${COPILOT_HOME_MOUNT:-${ENABLE_COPILOT_HOME:-1}}" in  # ENABLE_COPILOT_HOME: when it was a plugin
+case "${COPILOT_HOME_MOUNT:-1}" in
   1|true|yes|on) ;;
   0|false|no|off) return 0 ;;
   *) die "COPILOT_HOME_MOUNT must be 0 or 1 (got: $COPILOT_HOME_MOUNT)" ;;

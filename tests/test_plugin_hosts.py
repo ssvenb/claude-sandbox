@@ -20,8 +20,7 @@ from conftest import REPO
 
 def test_claude_needs_a_token_without_its_home_mounted(sb):
     for off in ("0", "false"):
-        sb.bash(CLAUDE_STAGE, CLAUDE_HOME_MOUNT=off).dies("Claude Code needs credentials: set CLAUDE_AUTH")
-    sb.bash(CLAUDE_STAGE, ENABLE_CLAUDE_HOME="0").dies("Claude Code needs credentials")  # the old plugin switch
+        sb.bash(CLAUDE_STAGE, CLAUDE_HOME_MOUNT=off).dies("Claude Code needs credentials: pick a claude-token")
     assert sb.bash(CLAUDE_STAGE, CLAUDE_HOME_MOUNT="0", CLAUDE_CODE_OAUTH_TOKEN="tok").ok().env \
         == {"CLAUDE_CODE_OAUTH_TOKEN": "tok"}
     sb.bash(CLAUDE_STAGE, CLAUDE_HOME_MOUNT="maybe").dies("CLAUDE_HOME_MOUNT must be 0 or 1")
@@ -37,7 +36,7 @@ def test_claude_effort_is_forwarded(sb, effort):
 
 
 def test_claude_effort_is_validated(sb):
-    sb.agent(CLAUDE_HOME_MOUNT="0", AGENT_AUTH_PROVIDED=1, CLAUDE_EFFORT="turbo").dies("CLAUDE_EFFORT must be one of")
+    sb.agent(CLAUDE_HOME_MOUNT="0", AGENT_AUTH_PROVIDED=1, CLAUDE_EFFORT="turbo").dies("reasoning effort must be one of")
 
 
 COPILOT_STAGE = "agent_home_stage\nagent_host_stage"
@@ -45,8 +44,7 @@ COPILOT_STAGE = "agent_home_stage\nagent_host_stage"
 
 def test_copilot_needs_its_own_token_without_its_home_mounted(sb):
     for off in ("0", "false"):
-        sb.bash(COPILOT_STAGE, AGENT="copilot", COPILOT_HOME_MOUNT=off).dies("Copilot needs credentials: set COPILOT_AUTH")
-    sb.bash(COPILOT_STAGE, AGENT="copilot", ENABLE_COPILOT_HOME="0").dies("Copilot needs credentials")  # the old plugin switch
+        sb.bash(COPILOT_STAGE, AGENT="copilot", COPILOT_HOME_MOUNT=off).dies("Copilot needs credentials: pick a copilot-token")
     assert sb.bash(COPILOT_STAGE, AGENT="copilot", COPILOT_HOME_MOUNT="0", COPILOT_GITHUB_TOKEN="pat").ok().env \
         == {"COPILOT_GITHUB_TOKEN": "pat"}
     assert sb.agent(AGENT="copilot", AGENT_AUTH_PROVIDED=1).ok().args == []
@@ -217,7 +215,7 @@ def test_agent_workspace_resume_reuses_and_empties_the_runs_dir(sb):
 # --- ca-certs ------------------------------------------------------------------------------
 
 def test_ca_certs_needs_certificates(sb):
-    sb.plugin("ca-certs", CA_CERTS_DIR=sb.tmp / "none").dies("CA_CERTS_DIR not found")
+    sb.plugin("ca-certs", CA_CERTS_DIR=sb.tmp / "none").dies("its certificates directory is not there")
     (sb.tmp / "empty").mkdir()
     sb.plugin("ca-certs", CA_CERTS_DIR=sb.tmp / "empty").dies("No certificates")
     (sb.tmp / "empty/README").write_text("not a certificate")
@@ -460,13 +458,10 @@ def test_git_workspace_base_branch_must_exist_on_origin(sb):
     sb.plugin("git-workspace", BASE_BRANCH="nope").dies("origin has no branch 'nope'")
 
 
-def test_git_workspace_branch_prefix_precedence(sb):
+def test_git_workspace_branch_prefix_comes_from_the_projects_file_alone(sb):
     checkout_with_origin(sb)
     prefix = lambda **env: sb.plugin("git-workspace", **env).ok().env.get("BRANCH_PREFIX")  # noqa: E731
-    assert prefix() is None
-    assert prefix(BRANCH_PREFIX="from-shell") == "from-shell"
-    sb.dotenv("BRANCH_PREFIX=from-dotenv\n")
-    assert prefix(BRANCH_PREFIX="from-shell") == "from-shell"  # the repo's .env sets nothing
+    assert prefix(BRANCH_PREFIX="from-shell") is None
     sb.config({"plugins": {"git-workspace": {"branchPrefix": "from-config"}}})
     assert prefix(BRANCH_PREFIX="from-shell") == "from-config"
 
@@ -1066,13 +1061,13 @@ def test_git_workspace_lists_a_runs_changes_in_its_container_not_on_the_host(sb)
 def test_git_workspace_tells_the_page_how_to_list_a_runs_changes(sb, described):
     changes = lambda: described("git-workspace")["commands"]["git-workspace"]["changes"]  # noqa: E731
     assert [c.endswith("/plugins/git-workspace/host/changes.py") for c in changes()] == [True]
-    sb.config({"env": {"BASE_BRANCH": "trunk"}})
+    sb.config({"plugins": {"git-workspace": {"baseBranch": "trunk"}}})
     assert changes()[1:] == ["trunk"]
 
 
 def test_agent_workspace_tells_the_page_where_a_runs_checkout_is(sb, described):
     assert described("agent-workspace")["checkout"] == f"{sb.home}/.agent-workspaces/*-{{run_id}}"
-    sb.config({"env": {"AGENT_WORKSPACE_DIR": "/srv/mirrors"}})  # the project's own setting, as for a run
+    sb.config({"plugins": {"agent-workspace": {"dir": "/srv/mirrors"}}})  # the project's own setting, as for a run
     assert described("agent-workspace")["checkout"] == "/srv/mirrors/*-{run_id}"
     server, mirrors = described("agent-workspace")["servers"]["agent-workspace"]  # VS Code, on its first use
     assert server.endswith("/plugins/agent-workspace/host/vscode.py") and mirrors == "/srv/mirrors"

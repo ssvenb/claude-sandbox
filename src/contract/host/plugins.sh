@@ -11,7 +11,7 @@
 #   agent-init.sh  sourced by agent-setup.sh as the unprivileged 'node' user
 #
 # Enablement is resolved ONCE, by src/orchestrator/plugins.py, and handed to the stages and the container
-# as $ENABLED_PLUGINS, so neither re-interprets the ENABLE_* flags.
+# as $ENABLED_PLUGINS, so neither re-reads the project's file for it.
 
 PLUGIN_ROOT="${PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/plugins}"
 

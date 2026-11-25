@@ -30,7 +30,7 @@ function entrySpec(types: AuthConfig['types']): SettingSpec {
       fields.set(f, seen);
     }
   return {
-    type: 'object', title: 'name', fields: [
+    type: 'object', title: 'name', groupBy: 'type', fields: [
       { key: 'name', label: 'Name', required: true, monospace: true },
       { key: 'type', type: 'enum', label: 'Type', required: true, choices: Object.keys(types) },
       ...[...fields].map(([key, { of, requiredIn }]): SettingSpec => ({
@@ -84,31 +84,34 @@ export function AuthCards({ auth, projects, draft, query, onChanged }: Props) {
     confirm(`Delete the project ${p}? Its file goes; its repo stays where it is.`) && act(() => deleteProject(p), l => l.filter(x => x !== p));
 
   return (
-    <>
-      <div className={'card projects' + (query && !'projects'.includes(query) ? ' hidden' : '')}>
-        <div className="row"><b>Projects</b></div>
-        <p>A file each in the projects folder. Added and deleted at once; its own settings are behind its gear.</p>
-        <div className="entries">
-          {listed.map(p => (
-            <div className="entry" key={p}>
-              <span className="mono">{p}</span>
-              <BusyButton className="remove" title="Delete" aria-label={'Delete project ' + p} onClick={() => remove(p)}>✕</BusyButton>
+    <div className="stack">
+      <Card query={query} card={{
+        key: 'projects', title: 'Projects', fields: [],
+        description: 'A file each in the projects folder. Added and deleted at once; its own settings are behind its gear.',
+        more: ' ' + listed.join(' ').toLowerCase(),
+        after: <>
+          <div className="entries">
+            <div className="entry">
+              <input ref={name} className="key mono" name="new-project.name" placeholder="name" aria-label="New project's name" spellCheck={false} />
+              <input ref={repo} className="mono" name="new-project.repo" placeholder="~/code/my-app or a git URL" aria-label="New project's repo" spellCheck={false} />
+              <BusyButton className="add" onClick={add}>+ Add</BusyButton>
             </div>
-          ))}
-          <div className="entry">
-            <input ref={name} className="key mono" name="new-project.name" placeholder="name" aria-label="New project's name" spellCheck={false} />
-            <input ref={repo} className="mono" name="new-project.repo" placeholder="~/code/my-app or a git URL" aria-label="New project's repo" spellCheck={false} />
-            <BusyButton className="add" onClick={add}>+ Add</BusyButton>
+            <p className="error" role="alert">{error}</p>
+            {listed.map(p => (
+              <div className="entry" key={p}>
+                <span className="mono">{p}</span>
+                <BusyButton className="remove" title="Delete" aria-label={'Delete project ' + p} onClick={() => remove(p)}>✕</BusyButton>
+              </div>
+            ))}
           </div>
-        </div>
-        <p className="error" role="alert">{error}</p>
-      </div>
+        </>,
+      }} />
       <Card query={query} card={{
         key: 'auth', title: 'Authentications',
         description: 'Every identity, key and token a sandbox may use, each under a name; projects and plugins only name one. Saved readable by you alone; a saved key, token or client secret is never shown again, and kept while you leave it as it is.',
         more: ' ' + Object.keys(draft).join(' ').toLowerCase(),
         fields: [{ spec: { type: 'list', label: 'Entries', items: entrySpec(auth.types) }, slot: entries, name: 'auth' }],
       }} />
-    </>
+    </div>
   );
 }

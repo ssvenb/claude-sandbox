@@ -17,9 +17,9 @@ token — and each run works on its own
 ./install.sh              # once: checks the host, creates the uv environment, builds the web UI,
                           # links `claude-sandbox` and `claude-sandbox-web` into ~/.local/bin
 # a project is a file: ~/.config/claude-sandbox/projects/<name>.json, its repo (a git URL or a
-# path on this machine) and its settings (.env.example lists them, the web UI's gear edits the
-# file). No .env is read.
-echo '{"repo": "https://github.com/me/my-repo", "env": {"GH_AUTH": "coder"}}' \
+# path on this machine) and its settings (the web UI's gear edits the file). It is the only place
+# a project, its agent and its plugins are configured.
+echo '{"repo": "https://github.com/me/my-repo", "plugins": {"github-auth": {"auth": "coder"}}}' \
   > ~/.config/claude-sandbox/projects/my-repo.json   # see "Authentications"
 claude-sandbox --project my-repo                   # build + fresh run (generates a RUN_ID); the same as <checkout>/run.sh
 claude-sandbox --project my-repo --resume a1b2c3   # re-attach to an existing run: its branch and its conversation
@@ -208,7 +208,7 @@ runs in a scope of its own (`systemd-run --user --scope`), outside the server un
 
 ```
 run.sh (host: src/orchestrator, Python)
-  ├─ loads the worked-on repo's config, resolves AGENT and the ENABLE_<PLUGIN> flags, validates config + capabilities
+  ├─ loads the project's file, resolves the agent and the enabled plugins, validates config + capabilities
   ├─ src/contract/host/stage.sh (one bash, alive until the container is gone; its exit hooks run then)
   │    ├─ each enabled plugin's host.sh, then the agent's host.sh, contribute `docker run` args
   │    └─ mints the credentials plugins registered, mounts them at /run/credentials (ro), refreshes them in the background
@@ -316,11 +316,10 @@ pass_env CLAUDE_CODE_OAUTH_TOKEN
 ## Plugins
 
 All plugins ship in the image; a project's file decides which ones run
-(`.plugins["<name>"].enabled`, or an `ENABLE_<NAME>` flag in its `env` block). The flag
-name uppercases the directory name and turns `-` into `_` (`github-auth` → `ENABLE_GITHUB_AUTH`);
-an unset flag falls back to the manifest's `defaultEnabled`. Accepted values are
-`1|true|yes|on` / `0|false|no|off`; anything else aborts the run. A plugin whose `requiredAgent`
-is not the running agent is skipped, however its flag is set.
+(`.plugins["<name>"].enabled`); unset, the manifest's `defaultEnabled` decides. Accepted values
+are `true`/`false` (or `1|yes|on` / `0|no|off`); anything else aborts the run. A plugin whose
+`requiredAgent` is not the running agent is skipped, however it is set; its settings stay in the
+file for when that agent runs again.
 
 `run.sh` passes the resolved set to `docker build` as the `ENABLED_PLUGINS` build arg, so only
 enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay out of the image
@@ -387,12 +386,12 @@ group), so nothing in the image holds against it.
 | `name` | string | — | Informational; the directory name is what actually identifies the plugin. |
 | `description` | string | — | Informational. |
 | `priority` | number | `50` | Ordering for *all* stages. Lower runs first; ties break alphabetically. Auth (10) before workspace (20) before guards (30) before launch wrappers (40). |
-| `defaultEnabled` | bool | `false` | Used when no `ENABLE_<NAME>` flag is set. |
-| `requiredAgent` | string | — | Agent this plugin only makes sense for (`claude`, `copilot`, …). Under any other agent the plugin is skipped silently, even if its flag is on. Omit for agent-agnostic plugins. |
+| `defaultEnabled` | bool | `false` | Used while the project's file does not set `.plugins["<name>"].enabled`. |
+| `requiredAgent` | string | — | Agent this plugin only makes sense for (`claude`, `copilot`, …). Under any other agent the plugin is skipped silently, even if it is enabled. Omit for agent-agnostic plugins. |
 | `provides` | string[] | `[]` | Capability names this plugin satisfies (`workspace`, `git-credentials`, …). Free-form strings; matching is by exact name. |
 | `requires` | string[] | `[]` | Capabilities that must be provided by *some* enabled plugin. Otherwise the run aborts on the host, listing the plugins that could provide it. |
 | `conflicts` | string[] | `[]` | Plugin names that must not be enabled at the same time. |
-| `requiredEnv` | string[] | `[]` | Env vars that must be non-empty while this plugin is enabled. |
+| `requiredEnv` | string[] | `[]` | Variables of its declared settings that must be non-empty while this plugin is enabled (the form marks those settings required). |
 | `sibling` | bool | `false` | Its `docker run` args and container stages fit any container of the run's own beside the sandbox too, which then takes them; see [Sibling plugins](#sibling-plugins). |
 | `settings` | object[] | `[]` | The settings this plugin reads, for the web UI's settings form. See [Declaring settings](#declaring-settings). |
 
@@ -417,20 +416,23 @@ included). `dev-server`'s demo takes it only with `.agentHome` true.
 
 Every setting a project can make in its file is declared by its owner — a plugin
 in its `plugin.json`, an agent in its `agent.json`, the sandbox itself in
-[src/orchestrator/kernel.json](src/orchestrator/kernel.json) — as a `settings` list. The web UI draws its settings form from
+[src/orchestrator/kernel.json](src/orchestrator/kernel.json) — as a `settings` list. It sits with its owner in the file:
+the sandbox's at the top (`"agent": "copilot"`), an agent's under `.agents["<agent>"]`, a
+plugin's in its own section, `.plugins["<plugin>"]`. The web UI draws its settings form from
 these, and `src/server/server.py` checks values against them before it writes the file.
 
 ```json
 "settings": [
   { "key": "branchPrefix", "type": "string", "label": "Branch prefix",
     "description": "Leading segment of each run's branch.", "placeholder": "claude-code" },
-  { "env": "AGENT_WORKSPACE_CLEANUP", "type": "boolean", "label": "Delete the mirror on exit", "default": true }
+  { "key": "cleanup", "env": "AGENT_WORKSPACE_CLEANUP", "type": "boolean", "label": "Delete the mirror on exit", "default": true }
 ]
 ```
 
-Each entry names exactly one of `key` (a key in the plugin's own section,
-`.plugins["<plugin>"].<key>`, read with `plugin_config`) or `env` (a variable in the `env` block,
-which must also be in `.env.example`; there a boolean is written as `1`/`0`). The rest:
+Each entry names its `key` in its owner's section. A plugin's stages read it there with
+`plugin_config`; with `env`, `run.sh` hands every stage its value as that variable too
+(`$AGENT_WORKSPACE_CLEANUP`, a switch as `1`/`0`), which is how the agents, the sandbox's own
+settings and most plugins read theirs. The rest:
 
 | Key | Meaning |
 |-----|---------|
@@ -444,8 +446,8 @@ which must also be in `.env.example`; there a boolean is written as `1`/`0`). Th
 | `when` | Inside an `object`: show (and check) the field only while a sibling has one of these values, e.g. `{"type": ["header", "bearer"]}`. |
 | `title` | On a list's `object` items: the field whose value titles each item. |
 
-`tests/test_manifests.py` keeps the declarations in step with `.env.example`: every sandbox
-variable but the `ENABLE_` flags and the two `PROJECT_*_FILE` paths is declared exactly once.
+`tests/test_manifests.py` keeps the declarations sound: every setting has a key, unique to its
+owner, and no two owners read the same variable.
 
 ### `install.sh` — build stage (root)
 
@@ -467,7 +469,8 @@ can't perturb each other.
 ### `host.sh` — host stage (your user)
 
 Sourced in bash (`src/contract/host/stage.sh`, which `run.sh` starts once it has resolved the run) with
-your full environment, including the worked-on repo's settings. Every enabled plugin's `host.sh`
+your environment and the project's settings as their variables (your environment never sets
+one of those). Every enabled plugin's `host.sh`
 and then the agent's are sourced into that one shell, so a variable one sets is seen by the next,
 and what one exports reaches `docker` too. The shell lives until the container is gone, which is
 when the `on_exit` hooks run. This is where long-lived credentials are read; they must never be
@@ -480,7 +483,7 @@ Available context:
 | `$PLUGIN_NAME` | this plugin's directory name |
 | `$PLUGIN_DIR` | absolute path to `plugins/<name>` on the host |
 | `$ENABLED_PLUGINS` | space-separated, priority-ordered list of enabled plugins |
-| sandbox-owned settings | exported by `run.sh` from the project's file (and your shell) |
+| the declared settings | exported by `run.sh` from the project's file, each as its `env` |
 
 Available helpers:
 
@@ -542,8 +545,7 @@ a few failed attempts in a row still don't let it lapse.
 ### `web.sh` — web stage (your user)
 
 Sourced by `run.sh --web`, which the web UI runs in a project to learn what to draw for it. The
-agent and the plugins are resolved exactly as for a run — same project settings, same `ENABLE_*`
-switches — but nothing is validated, built or started, so keep it quick and never `die` over
+agent and the plugins are resolved exactly as for a run — same project settings — but nothing is validated, built or started, so keep it quick and never `die` over
 something a run would need. The web UI itself knows nothing about any plugin: it draws what these
 calls describe.
 
@@ -585,14 +587,15 @@ web_tie_items 'if (.branch // "") | test("^.+/[0-9]{8}-[0-9a-f]{6}$") then .bran
 
 ### Project configuration — `~/.config/claude-sandbox/projects/<name>.json`
 
-The sandbox's own directory holds no configuration, and no `.env` is read — neither the
-sandbox's nor the worked-on repo's: a project's file is the one place its settings are made (its
-`env` block for the variables [.env.example](.env.example) lists, a section per plugin for the
-rest), over what your shell exports. The file's name is the project's (`run.sh --project
+A project's file is the one place its settings are made: the sandbox's own at the top, an
+agent's under `.agents["<agent>"]`, a plugin's (and whether it runs) under `.plugins["<plugin>"]`,
+each under the key its owner declares (see [Declaring settings](#declaring-settings)). Nothing
+else configures a run: not the sandbox's own directory, not a `.env` file, not your shell's
+exports. The file's name is the project's (`run.sh --project
 <name>`), and its `repo` the repo the agent works on: a path on this machine, or a git URL. Plugins
 see a path as `$HOST_CWD`; a git URL is not cloned on this machine at all: `$HOST_CWD` is empty,
 `$REPO_URL` is the URL, and git-workspace clones it in the container with the project's
-credentials (so a private repo needs only its `GH_AUTH` App). `cwd-workspace` and relative
+credentials (so a private repo needs only github-auth's App). `cwd-workspace` and relative
 `data-mounts` paths need a checkout here, and refuse a URL. Without `--project`, `run.sh` works on the directory it was
 started in, with no project file (`PROJECT_CONFIG_FILE` names one).
 
@@ -636,7 +639,7 @@ container's own Google identity, so `gcloud` and every Google client library wor
 real endpoints, real TLS, no emulator variables:
 
 ```json
-{ "env": { "GCP_AUTH": "data" }, "plugins": { "gcp-auth": { "enabled": true } } }
+{ "plugins": { "gcp-auth": { "enabled": true, "auth": "data" } } }
 ```
 
 where `data` is a `gcp-service-account` of your authentications. `run.sh` mints a 1-hour token for
@@ -755,14 +758,14 @@ else), each under a name:
 
 | Type | Named by | Fields |
 |------|----------|--------|
-| `github-app` | `GH_AUTH` (`github-auth`), `.plugins["pr-review"].auth` | `appId`, `privateKeyFile`; optional `host` (GitHub Enterprise Server), `username` (what git and `gh` in the container authenticate as; default: the App's bot) |
-| `gcp-service-account` | `GCP_AUTH` (`gcp-auth`), a route's `auth.credential` (`upstream-proxy`) | `serviceAccount`; optional `project`, `credentialFile` (a workload identity federation config, used instead of your application default credentials) |
+| `github-app` | `.plugins["github-auth"].auth`, `.plugins["pr-review"].auth` | `appId`, `privateKeyFile`; optional `host` (GitHub Enterprise Server), `username` (what git and `gh` in the container authenticate as; default: the App's bot) |
+| `gcp-service-account` | `.plugins["gcp-auth"].auth`, a route's `auth.credential` (`upstream-proxy`) | `serviceAccount`; optional `project`, `credentialFile` (a workload identity federation config, used instead of your application default credentials) |
 | `api-key` | a route's `auth.credential` (`upstream-proxy`) | `key` |
 | `oauth2-client` | a route's `auth.credential` (`upstream-proxy`) | `tokenUrl`, `clientId`, `clientSecret`; optional `audience` |
-| `netbird-setup-key` | `NB_AUTH` (`netbird`) | `key`; optional `managementUrl` (a self-hosted server) |
-| `ssh-key` | `SSH_AUTH` (`ssh-credentials`) | `privateKeyFile` (no passphrase); optional `user`, `knownHostsFile` |
-| `claude-token` | `CLAUDE_AUTH` (agent `claude`) | `token`, from `claude setup-token` |
-| `copilot-token` | `COPILOT_AUTH` (agent `copilot`) | `token`: a fine-grained PAT with "Copilot Requests", or a Copilot/`gh` OAuth token |
+| `netbird-setup-key` | `.plugins["netbird"].auth` | `key`; optional `managementUrl` (a self-hosted server) |
+| `ssh-key` | `.plugins["ssh-credentials"].auth` | `privateKeyFile` (no passphrase); optional `user`, `knownHostsFile` |
+| `claude-token` | `.agents["claude"].auth` | `token`, from `claude setup-token` |
+| `copilot-token` | `.agents["copilot"].auth` | `token`: a fine-grained PAT with "Copilot Requests", or a Copilot/`gh` OAuth token |
 
 This file is the only place a key, a token or an identity is configured: no plugin or agent has a
 setting for one, and a project only names an entry — in the settings form, a dropdown of those of
@@ -774,11 +777,10 @@ tokens are minted on the host, and `upstream-proxy` keeps its credentials in its
 
 The core (`src/orchestrator/auth.py`) knows the types, no provider. A plugin or an agent declares a
 setting of type `auth` naming the type it takes, and which of its own variables each field of the
-entry fills; its stages then read those variables as before, and no project can set them itself
-(they are not in `.env.example`):
+entry fills; its stages then read those variables, which nothing else sets:
 
 ```json
-{"env": "GH_AUTH", "type": "auth", "auth": "github-app", "label": "GitHub App",
+{"key": "auth", "env": "GH_AUTH", "type": "auth", "auth": "github-app", "label": "GitHub App",
  "fills": {"appId": "GH_APP_ID", "privateKeyFile": "GH_PRIVATE_KEY_FILE", "host": "GH_HOST", "username": "GH_USERNAME"}}
 ```
 
@@ -809,8 +811,8 @@ Off by default; switch it on per project, with the authentication the review run
 if you like, what the reviewer is asked:
 
 ```json
-{ "env": { "GH_AUTH": "coder" },
-  "plugins": { "pr-review": { "enabled": true, "auth": "reviewer", "prompt": "Review this pull request. …" } } }
+{ "plugins": { "github-auth": { "auth": "coder" },
+               "pr-review": { "enabled": true, "auth": "reviewer", "prompt": "Review this pull request. …" } } }
 ```
 
 Once a sandbox run's pull request is open, not a draft, its CI green — and that run's session
@@ -909,35 +911,41 @@ usually declares a `requiredAgent` too.
 
 Everything else under the plugin directory is 444 with 555 directories.
 
-## Environment variables
+## Settings
 
-Every variable must have an entry in `.env.example`, which doubles as the allowlist of
-sandbox-owned names. Configuration is per-project: it lives in the project's
-file (these variables in its `env` block), never in a `.env` and never in the sandbox's own directory. Only `AGENT` belongs to the core; the rest are owned by an agent or a plugin and
-only required while that agent or plugin is in use.
+A project's file is the only place a run is configured (see
+[Project configuration](#project-configuration--configclaude-sandboxprojectsnamejson)). The
+settings the sandbox, the agents and the plugins declare, by where they sit in it (each plugin's
+own section holds more: see its manifest, or the settings form):
 
-| Variable | Owner | Purpose |
-|----------|-------|---------|
-| `AGENT` | core | Which agent runs: a directory name under `agents/` (default `claude`) |
-| `PROJECT_CONFIG_FILE` | core | The project's file; `--project <name>` sets it to `~/.config/claude-sandbox/projects/<name>.json` (optional) |
-| `SANDBOX_AUTH_FILE` | core | Your named authentications (default `~/.config/claude-sandbox/auth.json`), see [Authentications](#authentications--configclaude-sandboxauthjson); shell only |
-| `SANDBOX_WEB_BIND` / `SANDBOX_WEB_NAME` | core | Set by the web UI for every `run.sh` it starts: the address it listens on, and the host name its `--bind` gave for it (plugins that publish what a session serves default to it) |
-| `CLAUDE_AUTH` | agents/claude | Name of the `claude-token` authentication Claude Code runs with. Required unless `CLAUDE_HOME_MOUNT` is on, or a plugin sets `AGENT_AUTH_PROVIDED=1` |
-| `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low`, `medium` (the sandbox default), `high`, `xhigh`, `max` |
-| `CLAUDE_MODEL` | agents/claude | Model Claude Code starts on, an alias (`opus`) or a full id (default: Claude Code's own default) |
-| `COPILOT_AUTH` | agents/copilot | Name of the `copilot-token` authentication Copilot runs with. Required unless `COPILOT_HOME_MOUNT` is on, or a plugin sets `AGENT_AUTH_PROVIDED=1` |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_DOCKER_CLI` / `ENABLE_CA_CERTS` / `ENABLE_DEV_SERVER` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_SETUP` / `ENABLE_NETBIRD` / `ENABLE_GCP_AUTH` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_PR_REVIEW` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `gcp-auth`, `netbird`, `pr-review` and `ssh-credentials`) |
-| `GH_AUTH` | github-auth | Name of the `github-app` authentication the sandbox authenticates as |
-| `BASE_BRANCH` | git-workspace | Branch to cut from (default: the repo's own default branch, via `origin/HEAD`) |
-| `HOST_WORKSPACE_DIR` | cwd-workspace | Host dir mounted at `/workspace` (default: `run.sh`'s cwd) |
-| `BRANCH_PREFIX` | git-workspace | Leading segment of the per-run branch name; `.plugins["git-workspace"].branchPrefix` in the project's file wins over it, and with neither it defaults to the agent manifest's `branchPrefix`, else the agent's directory name |
-| `AGENT_WORKSPACE_DIR` | agent-workspace | Host dir holding the per-run mirrors of `/workspace`, created if missing (default: `$HOME/.agent-workspaces`; each run uses `<dir>/<project>-<date>-<RUN_ID>`) |
-| `AGENT_WORKSPACE_CLEANUP` | agent-workspace | Delete the run's mirror directory when the container exits; 0 keeps it for inspection, at one leftover directory per run (default: 1) |
-| `CA_CERTS_DIR` | ca-certs | Host dir holding extra root certificates, PEM or DER (default `/usr/local/share/ca-certificates`) |
-| `CLAUDE_HOME_MOUNT` | agents/claude | `1` (default) mounts a per-run copy of `~/.claude`, login included; `0` leaves it out |
-| `CLAUDE_HOME_DIR` | agents/claude | Host dir copied as the agent's `~/.claude` (default `$HOME/.claude`) |
-| `COPILOT_HOME_MOUNT` | agents/copilot | `1` (default) mounts a per-run copy of `~/.copilot`, login included; `0` leaves it out |
-| `COPILOT_HOME_DIR` | agents/copilot | Host dir copied as the agent's `~/.copilot` (default `$HOME/.copilot`) |
+| Setting | Purpose |
+|---------|---------|
+| `agent` | Which agent runs: a directory name under `agents/` (default `claude`) |
+| `agentVersion` | Pins the agent CLI's version (default: the latest release, checked on every run) |
+| `.agents["claude"].auth` | Name of the `claude-token` authentication Claude Code runs with. Required unless `homeMount` is on, or a plugin provides the agent's credentials |
+| `.agents["claude"].effort` | Reasoning effort Claude Code runs at: `low`, `medium` (the sandbox default), `high`, `xhigh`, `max` |
+| `.agents["claude"].model` | Model Claude Code starts on, an alias (`opus`) or a full id (default: Claude Code's own default) |
+| `.agents["claude"].homeMount` | `true` (default) mounts a per-run copy of `~/.claude`, login included; `false` leaves it out |
+| `.agents["claude"].homeDir` | Host dir copied as the agent's `~/.claude` (default `$HOME/.claude`) |
+| `.agents["copilot"].auth` | Name of the `copilot-token` authentication Copilot runs with. Required unless `homeMount` is on, or a plugin provides the agent's credentials |
+| `.agents["copilot"].homeMount` | `true` (default) mounts a per-run copy of `~/.copilot`, login included; `false` leaves it out |
+| `.agents["copilot"].homeDir` | Host dir copied as the agent's `~/.copilot` (default `$HOME/.copilot`) |
+| `.plugins["<name>"].enabled` | Whether the plugin runs (default: its manifest's `defaultEnabled`: on, except `ca-certs`, `cwd-workspace`, `gcp-auth`, `netbird`, `pr-review` and `ssh-credentials`) |
+| `.plugins["github-auth"].auth` | Name of the `github-app` authentication the sandbox authenticates as |
+| `.plugins["git-workspace"].baseBranch` | Branch to cut from (default: the repo's own default branch, via `origin/HEAD`) |
+| `.plugins["git-workspace"].branchPrefix` | Leading segment of the per-run branch name (default: the agent manifest's `branchPrefix`, else the agent's directory name) |
+| `.plugins["cwd-workspace"].dir` | Host dir mounted at `/workspace` (default: the project's repo) |
+| `.plugins["agent-workspace"].dir` | Host dir holding the per-run mirrors of `/workspace`, created if missing (default: `$HOME/.agent-workspaces`; each run uses `<dir>/<project>-<date>-<RUN_ID>`) |
+| `.plugins["agent-workspace"].cleanup` | Delete the run's mirror directory when the container exits; `false` keeps it for inspection, at one leftover directory per run (default: `true`) |
+| `.plugins["ca-certs"].dir` | Host dir holding extra root certificates, PEM or DER (default `/usr/local/share/ca-certificates`) |
+
+Where the files are is the only thing your environment says: `SANDBOX_PROJECTS_DIR` (default
+`~/.config/claude-sandbox/projects`) and `SANDBOX_AUTH_FILE` (default
+`~/.config/claude-sandbox/auth.json`, see
+[Authentications](#authentications--configclaude-sandboxauthjson)). The web UI sets
+`SANDBOX_WEB_BIND` / `SANDBOX_WEB_NAME` for every `run.sh` it starts: the address it listens on,
+and the host name its `--bind` gave for it (plugins that publish what a session serves default
+to it).
 
 Volume mounts are contributed by plugins via `pass_mount`; the core `docker run` has none. The agent's
 user, `node`, takes the uid of whoever runs `run.sh` (`HOST_UID`, set by the boot in

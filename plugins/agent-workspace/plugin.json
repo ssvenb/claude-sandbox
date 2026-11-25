@@ -9,6 +9,7 @@
   "requiredEnv": [],
   "settings": [
     {
+      "key": "dir",
       "env": "AGENT_WORKSPACE_DIR",
       "type": "path",
       "label": "Mirror directory",
@@ -16,6 +17,7 @@
       "placeholder": "~/.agent-workspaces"
     },
     {
+      "key": "cleanup",
       "env": "AGENT_WORKSPACE_CLEANUP",
       "type": "boolean",
       "label": "Delete the mirror on exit",

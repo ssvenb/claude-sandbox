@@ -6,8 +6,8 @@ optional lifecycle scripts, one per privilege stage:
     root-init.sh   sourced by entrypoint.sh as root: setup that needs root, not a boundary
     agent-init.sh  sourced by agent-setup.sh as the unprivileged 'node' user
 
-Enablement is resolved ONCE here and handed to the stages and the container as $ENABLED_PLUGINS,
-so nothing downstream re-interprets the ENABLE_* flags.
+Enablement is resolved ONCE here, from the project's file, and handed to the stages and the
+container as $ENABLED_PLUGINS.
 """
 from __future__ import annotations
 
@@ -38,11 +38,6 @@ def plugin_root(env: dict) -> Path:
     return Path(env.get("PLUGIN_ROOT") or SANDBOX / "plugins")
 
 
-def flag_name(plugin: str) -> str:
-    """The ENABLE_ flag of a plugin: github-auth → ENABLE_GITHUB_AUTH."""
-    return "ENABLE_" + plugin.upper().replace("-", "_")
-
-
 def discover(root: Path) -> list[Plugin]:
     """Every plugin on disk, in priority order (then by name)."""
     if not root.is_dir():
@@ -69,15 +64,12 @@ def discover(root: Path) -> list[Plugin]:
 
 
 def resolve(plugins: list[Plugin], env: dict, project: Project, agent: str) -> list[Plugin]:
-    """The plugins that will run, in priority order. The worked-on repo has the last word, then
-    the ENABLE_ flag (its "env" block, else your shell; see config.py), then the
-    manifest default."""
+    """The plugins that will run, in priority order: as the project's file says (its section's
+    "enabled"), else as the manifest's default."""
     enabled = []
     for p in plugins:
         value = project.plugin_setting(p.name, "enabled")
         source = f'{project.config_file} (.plugins["{p.name}"].enabled)'
-        if not value:
-            value, source = env.get(flag_name(p.name), ""), flag_name(p.name)
         if not value:
             value, source = ("true" if p.default_enabled else "false"), f"{p.name}'s manifest"
         if value in OFF:
@@ -104,7 +96,9 @@ def validate(enabled: list[Plugin], everything: list[Plugin], env: dict) -> None
     for p in enabled:
         for var in p.required_env:
             if not env.get(var):
-                raise Die(f"Plugin '{p.name}' requires {var} to be set in the project's file")
+                spec = next((s for s in p.settings if s.get("env") == var), {})
+                raise Die(f"Plugin '{p.name}' requires its {spec.get('label') or var} to be set in the project's file"
+                          + (f' (.plugins["{p.name}"].{spec["key"]})' if spec.get("key") else ""))
         provided.update(p.provides)
     for p in enabled:
         for cap in p.requires:

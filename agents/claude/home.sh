@@ -7,7 +7,7 @@
 # its conversation in it again; of what the agent changed, only a refreshed login comes back to yours
 # (host/keep-credentials.py). The copies live at claude-sandbox/claude-home/<RUN_ID>, where a sign-in
 # on the dashboard reaches those of the runs still going (after-sign-in.sh).
-case "${CLAUDE_HOME_MOUNT:-${ENABLE_CLAUDE_HOME:-1}}" in  # ENABLE_CLAUDE_HOME: when it was a plugin
+case "${CLAUDE_HOME_MOUNT:-1}" in
   1|true|yes|on) ;;
   0|false|no|off) return 0 ;;
   *) die "CLAUDE_HOME_MOUNT must be 0 or 1 (got: $CLAUDE_HOME_MOUNT)" ;;

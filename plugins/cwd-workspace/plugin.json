@@ -9,12 +9,14 @@
   "requiredEnv": [],
   "settings": [
     {
+      "key": "dir",
       "env": "HOST_WORKSPACE_DIR",
       "type": "path",
       "label": "Workspace directory",
       "description": "Host directory mounted at /workspace. Default: the project's directory."
     },
     {
+      "key": "hide",
       "env": "CWD_WORKSPACE_HIDE",
       "type": "string",
       "label": "Hidden paths",

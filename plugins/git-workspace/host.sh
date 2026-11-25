@@ -31,15 +31,15 @@ else
   fi
 
   git -C "$HOST_CWD" rev-parse --verify --quiet "refs/remotes/origin/$BASE_BRANCH" >/dev/null ||
-    die "git-workspace: origin has no branch '$BASE_BRANCH' to cut from (set BASE_BRANCH in the project's file, or run 'git fetch origin')"
+    die "git-workspace: origin has no branch '$BASE_BRANCH' to cut from (set its base branch in the project's settings, or run 'git fetch origin')"
 
   pass_value BASE_BRANCH "$BASE_BRANCH"
 fi
 
 # The branch name's leading segment belongs to the repo being worked on, so it is read from there:
-# the project's file first, then the environment. With neither the agent stage falls back
-# to the agent manifest's branchPrefix, then the agent's directory name.
-BRANCH_PREFIX=$(plugin_config '.branchPrefix' "${BRANCH_PREFIX:-}")
+# the project's file. Without one the agent stage falls back to the agent manifest's branchPrefix,
+# then the agent's directory name.
+BRANCH_PREFIX=$(plugin_config '.branchPrefix' "")
 if [ -n "$BRANCH_PREFIX" ]; then
   pass_value BRANCH_PREFIX "$BRANCH_PREFIX"
 fi

@@ -93,7 +93,7 @@ export function AuthCards({ auth, projects, draft, query, onChanged }: Props) {
           <div className="entries">
             <div className="entry">
               <input ref={name} className="key mono" name="new-project.name" placeholder="name" aria-label="New project's name" spellCheck={false} />
-              <input ref={repo} className="mono" name="new-project.repo" placeholder="~/code/my-app or a git URL" aria-label="New project's repo" spellCheck={false} />
+              <input ref={repo} className="mono" name="new-project.repo" placeholder="~/code/my-app, a git URL, or empty" aria-label="New project's repo" spellCheck={false} />
               <BusyButton className="add" onClick={add}>+ Add</BusyButton>
             </div>
             <p className="error" role="alert">{error}</p>

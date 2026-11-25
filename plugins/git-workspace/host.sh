@@ -4,10 +4,12 @@
 
 # A project whose repo is a git URL has no checkout here (HOST_CWD is empty): the URL is REPO_URL
 # already, and BASE_BRANCH, unless set, is the clone's own default branch, read in the container.
+# A project with no repo at all has neither: the agent stage starts an empty repo instead.
 if [ -z "$HOST_CWD" ]; then
-  [ -n "${REPO_URL:-}" ] || die "git-workspace: no checkout on this machine and no REPO_URL to clone"
-  pass_value REPO_URL "$REPO_URL"
-  [ -z "${BASE_BRANCH:-}" ] || pass_value BASE_BRANCH "$BASE_BRANCH"
+  if [ -n "${REPO_URL:-}" ]; then
+    pass_value REPO_URL "$REPO_URL"
+    [ -z "${BASE_BRANCH:-}" ] || pass_value BASE_BRANCH "$BASE_BRANCH"
+  fi
 else
   git -C "$HOST_CWD" rev-parse --git-dir >/dev/null 2>&1 ||
     die "git-workspace: $HOST_CWD is not a git repository (set the project's \"repo\" to one)"
@@ -43,3 +45,14 @@ BRANCH_PREFIX=$(plugin_config '.branchPrefix' "")
 if [ -n "$BRANCH_PREFIX" ]; then
   pass_value BRANCH_PREFIX "$BRANCH_PREFIX"
 fi
+
+# The commit identity, when the project names one; else the agent stage derives it.
+GIT_USER_NAME=$(plugin_config '.userName' "")
+[ -z "$GIT_USER_NAME" ] || pass_value GIT_USER_NAME "$GIT_USER_NAME"
+GIT_USER_EMAIL=$(plugin_config '.userEmail' "")
+[ -z "$GIT_USER_EMAIL" ] || pass_value GIT_USER_EMAIL "$GIT_USER_EMAIL"
+
+case "$(plugin_config '.branchGuard' true)" in
+  false|0|no|off) ;;
+  *) pass_value BRANCH_GUARD 1 ;;
+esac

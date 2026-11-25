@@ -899,8 +899,8 @@ def check_config(config):
     """What run.sh would refuse, refused before it lands in the file (it reads the rest itself)."""
     if not isinstance(config, dict):
         raise ValueError("the configuration must be a JSON object")
-    if not isinstance(config.get("repo"), str) or not config["repo"].strip():
-        raise ValueError(".repo must name the project's repo: a path on this machine or a git URL")
+    if not isinstance(config.get("repo", ""), str):
+        raise ValueError(".repo must be a path on this machine or a git URL, or empty for none")
     plugins = config.get("plugins", {})
     if not isinstance(plugins, dict):
         raise ValueError(".plugins must be an object keyed by plugin name")
@@ -1006,12 +1006,12 @@ def write_json(path, data, mode=None):
 
 
 def add_project(name, repo):
-    """A new project: its file, naming its repo."""
+    """A new project: its file, naming its repo, or none (an empty repo in the container)."""
     if not isinstance(name, str) or not re.fullmatch(r"\w[\w.-]*", name):
         raise ValueError("a project's name is letters, digits, '.', '-' and '_', not starting with '.' or '-'")
     if config_file(name).exists():
         raise ValueError(f"there is a project '{name}' already")
-    config = {"repo": repo}
+    config = {} if repo is None or (isinstance(repo, str) and not repo.strip()) else {"repo": repo}
     check_config(config)
     write_json(config_file(name), config)
 

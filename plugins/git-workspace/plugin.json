@@ -1,17 +1,38 @@
 {
   "name": "git-workspace",
-  "description": "Clones the target repo into /workspace and puts the agent on its own <agent-prefix>/<RUN_ID> branch, committing under the agent's own git identity, resuming an existing one when asked.",
+  "description": "Clones the target repo into /workspace (or, for a project with no repo, starts an empty one there) and puts the agent on its own <agent-prefix>/<RUN_ID> branch, committing under the agent's own git identity, resuming an existing one when asked. Optionally keeps the agent on that branch.",
   "priority": 20,
   "defaultEnabled": true,
   "provides": ["workspace"],
-  "requires": ["git-credentials"],
+  "requires": [],
   "settings": [
+    {
+      "key": "branchGuard",
+      "type": "boolean",
+      "label": "Branch guard",
+      "description": "Lets the agent push only its own branch: a git pre-push hook, for every agent, rejects any other ref. A guardrail: git push --no-verify skips it.",
+      "default": true
+    },
     {
       "key": "branchPrefix",
       "type": "string",
       "label": "Branch prefix",
       "description": "Leading segment of each run's branch, <prefix>/<date>-<id>. Default: the agent's own prefix.",
       "placeholder": "claude-code"
+    },
+    {
+      "key": "userName",
+      "type": "string",
+      "label": "Commit author name",
+      "description": "Name the agent's commits are authored under. Default: the branch prefix when one is set, else the agent's own (Claude Code, GitHub Copilot CLI).",
+      "placeholder": "Claude Code"
+    },
+    {
+      "key": "userEmail",
+      "type": "string",
+      "label": "Commit author email",
+      "description": "Email the agent's commits are authored under. Default: <branch prefix>@sandbox.local when a prefix is set, else <agent>@sandbox.local.",
+      "placeholder": "claude@sandbox.local"
     },
     {
       "key": "baseBranch",

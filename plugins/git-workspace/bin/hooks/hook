@@ -1,0 +1,33 @@
+#!/bin/sh
+# Every client-side git hook of a run whose branch guard is on (git-workspace's branchGuard): its
+# agent-init.sh points core.hooksPath here through GIT_CONFIG_*, which outranks a repo's own
+# core.hooksPath (husky's), so every agent's git runs these. Each name in this directory links here.
+#
+# pre-push lets through only the run's own branch, $AGENT_BRANCH. Then every hook runs the repo's
+# own hook of the same name, if it has one, as git would have without this directory. A guardrail:
+# `git push --no-verify` skips it.
+
+name=$(basename "$0")
+
+if [ "$name" = pre-push ]; then
+  # One line per ref: <local ref> <local sha> <remote ref> <remote sha>. Kept for the repo's hook.
+  input=$(cat)
+  [ -z "$input" ] || input="$input
+"
+  printf '%s' "$input" | while read -r _local _sha remote _rsha; do
+    [ "$remote" = "refs/heads/${AGENT_BRANCH:-}" ] && continue
+    echo "Blocked: this run may only push its own branch ${AGENT_BRANCH:-} (got: $remote). Push it with: git push origin ${AGENT_BRANCH:-}" >&2
+    exit 1
+  done || exit 1
+fi
+
+# The repo's own hooks: its core.hooksPath (relative to the worktree, where git runs hooks), else
+# .git/hooks. --local reads the repo's file only, not the GIT_CONFIG_* that points here.
+own=$(git config --local core.hooksPath 2>/dev/null) || own="$(git rev-parse --git-common-dir)/hooks"
+hook="$own/$name"
+[ -x "$hook" ] && [ "$(cd "$own" && pwd -P)" != "$(cd "$(dirname "$0")" && pwd -P)" ] || exit 0
+if [ "$name" = pre-push ]; then
+  printf '%s' "$input" | "$hook" "$@"
+  exit
+fi
+exec "$hook" "$@"

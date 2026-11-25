@@ -247,31 +247,6 @@ def test_ca_certs_skips_files_that_are_not_certificates(sb, ca_dir):
     assert run.builds["EXTRA_CA_CERTS"].count("-----BEGIN CERTIFICATE-----") == 2
 
 
-# --- cwd-workspace -------------------------------------------------------------------------
-
-def test_cwd_workspace_mounts_the_checkout_and_masks_its_env(sb):
-    sb.dotenv("SECRET=1\n")
-    run = sb.plugin("cwd-workspace").ok()
-    assert run.mounts == [f"{sb.cwd}:/workspace", "/dev/null:/workspace/.env:ro"]
-    assert run.env == {"CWD_WORKSPACE_HIDDEN": "/workspace/.env"}
-    assert (sb.cwd / ".env").read_text() == "SECRET=1\n"
-
-
-def test_cwd_workspace_masks_only_listed_files_that_exist(sb):
-    (sb.cwd / "secrets").mkdir()
-    (sb.cwd / "secrets/key.json").write_text("{}")
-    sb.dotenv("X=1\n")
-    run = sb.plugin("cwd-workspace", CWD_WORKSPACE_HIDE="secrets/key.json missing.txt").ok()
-    assert run.mounts[1:] == ["/dev/null:/workspace/secrets/key.json:ro"]
-    assert sb.plugin("cwd-workspace", CWD_WORKSPACE_HIDE="").ok().mounts == [f"{sb.cwd}:/workspace"]
-
-
-def test_cwd_workspace_dir_override(sb):
-    run = sb.plugin("cwd-workspace", HOST_WORKSPACE_DIR=f"{sb.cwd}/../project/").ok()
-    assert run.mounts == [f"{sb.cwd}:/workspace"]
-    sb.plugin("cwd-workspace", HOST_WORKSPACE_DIR=sb.tmp / "nope").dies("is not a directory")
-
-
 # --- data-mounts ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("config, mode", [({}, "rw"), ({"readOnly": False}, "rw"), ({"readOnly": True}, "ro")])
@@ -289,7 +264,7 @@ def test_data_mounts_names_the_directory_after_the_repo_without_a_project_file(s
     assert run.ok().mounts == [f"{data}:/data:rw"]
 
 
-# --- docker-cli, kvm, libvirt, netbird: host devices and sockets ---------------------------
+# --- docker-cli, kvm, netbird: host devices and sockets ---------------------------
 
 def test_docker_cli_runs_the_sandbox_under_sysbox_without_the_host_socket(sb):
     sb.stub("docker", "echo 'io.containerd.runc.v2 runc sysbox-runc '")
@@ -318,11 +293,6 @@ def test_kvm_passes_the_device_and_the_projects_briefing(sb, briefing, expected)
 @pytest.mark.skipif(os.path.exists("/dev/kvm"), reason="this host has /dev/kvm")
 def test_kvm_needs_the_device(sb):
     sb.plugin("kvm").dies("/dev/kvm not found")
-
-
-@pytest.mark.skipif(bool(glob.glob("/run/libvirt/*-sock")), reason="this host runs libvirt")
-def test_libvirt_needs_a_daemon_socket(sb):
-    sb.plugin("libvirt").dies("no libvirt socket under /run/libvirt")
 
 
 @pytest.mark.skipif(not os.path.exists("/dev/net/tun"), reason="no /dev/net/tun on this host")
@@ -420,16 +390,25 @@ def test_git_workspace_needs_a_checkout_with_an_origin(sb):
 
 def test_git_workspace_hands_over_the_repo_and_its_default_branch(sb):
     origin = checkout_with_origin(sb)
-    assert sb.plugin("git-workspace").ok().env == {"REPO_URL": str(origin), "BASE_BRANCH": "main"}
+    assert sb.plugin("git-workspace").ok().env == {"REPO_URL": str(origin), "BASE_BRANCH": "main", "BRANCH_GUARD": "1"}
 
 
 def test_git_workspace_takes_a_url_repo_without_a_checkout(sb):
     """A project whose repo is a git URL: no HOST_CWD; the container finds the default branch."""
     url = "git@github.com:acme/w.git"
-    assert sb.plugin("git-workspace", HOST_CWD="", REPO_URL=url).ok().env == {"REPO_URL": url}
+    assert sb.plugin("git-workspace", HOST_CWD="", REPO_URL=url).ok().env == {"REPO_URL": url, "BRANCH_GUARD": "1"}
     assert sb.plugin("git-workspace", HOST_CWD="", REPO_URL=url, BASE_BRANCH="dev").ok().env == {
-        "REPO_URL": url, "BASE_BRANCH": "dev"}
-    sb.plugin("git-workspace", HOST_CWD="").dies("no REPO_URL to clone")
+        "REPO_URL": url, "BASE_BRANCH": "dev", "BRANCH_GUARD": "1"}
+
+
+def test_git_workspace_without_a_repo_hands_over_none(sb):
+    """A project with no repo: the container starts an empty one."""
+    assert sb.plugin("git-workspace", HOST_CWD="").ok().env == {"BRANCH_GUARD": "1"}
+
+
+def test_git_workspace_branch_guard_can_be_switched_off_and_the_identity_set(sb):
+    sb.config({"plugins": {"git-workspace": {"branchGuard": False, "userName": "Bot", "userEmail": "bot@x"}}})
+    assert sb.plugin("git-workspace", HOST_CWD="").ok().env == {"GIT_USER_NAME": "Bot", "GIT_USER_EMAIL": "bot@x"}
 
 
 def test_git_workspace_finds_a_default_branch_not_called_main(sb):
@@ -491,7 +470,7 @@ def test_github_auth_mint_sees_the_repo_url_set_by_later_plugins(sb):
     assert run.out.endswith(f"7 {key} github.com https://github.com/acme/w.git\n")
 
 
-# --- herdr, dev-server, screenshots ------------------------------------------------------
+# --- herdr, dev-server ------------------------------------------------------
 
 @pytest.mark.parametrize("herdr_env, expected", [("1", "HERDR_AGENT=copilot"), (None, "")])
 def test_herdr_labels_the_docker_process_inside_a_herdr_pane(sb, herdr_env, expected):
@@ -614,16 +593,6 @@ def test_dev_server_demo_runs_shared_stages_and_its_setup_then_restarts_on_chang
         assert count(2)
     finally:
         os.killpg(proc.pid, signal.SIGKILL)
-
-
-def test_screenshots_mounts_read_only(sb):
-    sb.plugin("screenshots").dies("no such directory")
-    default = sb.home / "Pictures/Screenshots"
-    default.mkdir(parents=True)
-    assert sb.plugin("screenshots").ok().mounts == [f"{default}:/home/node/Pictures/Screenshots:ro"]
-    (sb.tmp / "shots").mkdir()
-    assert sb.plugin("screenshots", SCREENSHOTS_DIR=sb.tmp / "shots").ok().mounts == [
-        f"{sb.tmp}/shots:/home/node/Pictures/Screenshots:ro"]
 
 
 # --- permissions ---------------------------------------------------------------------------

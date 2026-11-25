@@ -18,7 +18,6 @@ AGENT = os.environ.get("SANDBOX_E2E_AGENT", "claude")
 MANAGED = json.loads((REPO / "agents" / AGENT / "agent.json").read_text())["managedSettings"]
 PREFIX = json.loads((REPO / "agents" / AGENT / "agent.json").read_text())["git"]["branchPrefix"]
 pytestmark = pytest.mark.skipif(not BASE, reason="SANDBOX_E2E_IMAGE is not set")
-claude_only = pytest.mark.skipif(AGENT != "claude", reason="claude-only plugin")
 
 
 @pytest.fixture(scope="module")
@@ -88,7 +87,7 @@ def test_a_chat_boots_into_the_agents_bridge_and_its_sdk(image):
 
 
 def test_the_agent_cli_and_every_plugins_tools_are_installed(image):
-    tools = ["/usr/bin/gh", "docker", "gcloud", "qemu-img", "cloud-localds", "virsh", "ssh", "sudo",
+    tools = ["/usr/bin/gh", "docker", "gcloud", "qemu-img", "cloud-localds", "ssh", "sudo",
              "terraform", "ruff", "chromium", "/usr/local/bin/netbird", AGENT]
     if AGENT == "claude":
         tools.append("playwright-mcp")
@@ -102,8 +101,8 @@ def test_the_agent_does_not_edit_its_guardrails_by_accident(image):
     probe = f"""touch /opt/plugins/x 2>/dev/null && echo plugins writable
 touch /opt/agents/x 2>/dev/null && echo agents writable
 rm -f {MANAGED} 2>/dev/null; [ -f {MANAGED} ] || echo policy removed
-[ -x /opt/plugins/branch-guard/bin/guard-branch.py ] || echo hook not executable"""
-    assert boot(image, "branch-guard", probe).out == ""
+[ -x /opt/plugins/git-workspace/bin/hooks/pre-push ] || echo hook not executable"""
+    assert boot(image, "git-workspace", probe).out == ""
 
 
 def test_netbird_enrols_with_the_setup_key_and_leaves_it_out_of_the_agents_env(image):
@@ -125,20 +124,31 @@ GIT_PROBE = ("cd /workspace; git rev-parse --abbrev-ref HEAD; git config user.na
 
 
 def test_git_workspace_creates_the_runs_branch(image):
-    plugins = "git-workspace branch-guard" if AGENT == "claude" else "git-workspace"
-    b = boot(image, plugins, GIT_PROBE, REPO_URL="/srv/origin.git", BASE_BRANCH="main")
+    b = boot(image, "git-workspace", GIT_PROBE, REPO_URL="/srv/origin.git", BASE_BRANCH="main", BRANCH_GUARD="1")
     branch = f"{PREFIX}/20260102-abc123"
     name = json.loads((REPO / "agents" / AGENT / "agent.json").read_text())["git"]["userName"]
     assert b.out.splitlines() == [branch, name, f"{AGENT}@sandbox.local", "initial", "node"]
     assert (b.env["AGENT_BRANCH"], b.env["AGENT_BRANCH_PREFIX"]) == (branch, PREFIX)
     assert f"on the branch {branch}, created for this sandbox run (RUN_ID=abc123) off main" in b.briefing
-    assert ("You cannot leave this branch" if AGENT == "claude" else "Stay on this branch") in b.briefing
+    assert f"Only this branch can be pushed: a pre-push hook rejects any other ref. Push it by name (`git push origin {branch}`)." \
+        in b.briefing
+
+
+def test_without_a_repo_the_run_gets_an_empty_one_of_its_own(image):
+    b = boot(image, "git-workspace", "cd /workspace; git symbolic-ref --short HEAD; git remote; git config user.email; stat -c %U .",
+             BRANCH_GUARD="1")
+    assert b.out.splitlines() == [f"{PREFIX}/20260102-abc123", f"{AGENT}@sandbox.local", "node"]
+    assert "a new git repository at /workspace, with no remote" in b.briefing
+    assert "allows pushes" not in b.briefing
 
 
 def test_an_explicit_branch_prefix_is_also_the_identity(image):
     b = boot(image, "git-workspace", GIT_PROBE, REPO_URL="/srv/origin.git", BASE_BRANCH="main",
              BRANCH_PREFIX="feature")
     assert b.out.splitlines()[:3] == ["feature/20260102-abc123", "feature", "feature@sandbox.local"]
+    b = boot(image, "git-workspace", GIT_PROBE, REPO_URL="/srv/origin.git", BASE_BRANCH="main",
+             BRANCH_PREFIX="feature", GIT_USER_NAME="Bot", GIT_USER_EMAIL="bot@x")  # the project's identity wins
+    assert b.out.splitlines()[:3] == ["feature/20260102-abc123", "Bot", "bot@x"]
 
 
 def test_without_a_base_branch_the_clones_default_branch_is_cut_from(image):
@@ -157,17 +167,16 @@ def test_resume_finds_the_runs_branch_and_its_pull_request(image):
     assert "A pull request already exists for this branch (#7 https://github.com/e2e/repo/pull/7)" in b.briefing
 
 
-@claude_only
-def test_branch_guard_hook_is_installed_and_enforces_the_branch(image):
-    hook = "/opt/plugins/branch-guard/bin/guard-branch.py"
-    probe = f"""cat {MANAGED}; echo
-printf '%s' '{{"tool_input": {{"command": "git checkout main"}}}}' | {hook} 2>/dev/null; echo "checkout=$?"
-printf '{{"tool_input": {{"command": "git push origin %s"}}}}' "$AGENT_BRANCH" | {hook}; echo "own=$?"
-printf '%s' '{{"tool_input": {{"command": "git push origin main"}}}}' | {hook} 2>/dev/null; echo "main=$?" """
-    b = boot(image, "git-workspace branch-guard", probe, REPO_URL="/srv/origin.git", BASE_BRANCH="main")
-    *settings, checkout, own, main = b.out.strip().splitlines()
-    assert json.loads("\n".join(settings))["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == hook
-    assert (checkout, own, main) == ("checkout=2", "own=0", "main=2")
+def test_the_branch_guard_lets_the_agent_push_only_its_own_branch(image):
+    probe = """cd /workspace && git clone -q --bare /srv/origin.git /tmp/o.git && git remote set-url origin /tmp/o.git
+git commit -q --allow-empty -m work
+git push -q origin "$AGENT_BRANCH" 2>/dev/null; echo "own=$?"
+git push -q origin HEAD:main 2>/dev/null; echo "main=$?"
+git push -q --no-verify origin HEAD:main 2>/dev/null; echo "no-verify=$?" """  # a guardrail, not a wall
+    assert boot(image, "git-workspace", probe, REPO_URL="/srv/origin.git", BASE_BRANCH="main",
+                BRANCH_GUARD="1").out.splitlines() == ["own=0", "main=1", "no-verify=0"]
+    assert boot(image, "git-workspace", probe, REPO_URL="/srv/origin.git",
+                BASE_BRANCH="main").out.splitlines() == ["own=0", "main=0", "no-verify=0"]
 
 
 def test_github_auth_logs_gh_in_with_the_minted_token(image):
@@ -239,12 +248,10 @@ def test_ssh_credentials_belong_to_the_agent_user(image):
     assert b.out.splitlines() == ["node 600", "user ops", "hostname box.mesh", "identityfile ~/.ssh/sandbox_key"]
 
 
-def test_entrypoint_hands_the_workspace_to_the_agent_but_not_masks(image):
-    b = boot(image, "cwd-workspace", "stat -c %U /workspace/sub /workspace/sub/f; stat -c '%U %F' /workspace/.env",
-             before="mkdir /workspace/sub && touch /workspace/sub/f && mknod /workspace/.env c 1 3",
-             CWD_WORKSPACE_HIDDEN="/workspace/.env")
-    assert b.out.splitlines() == ["node", "node", "root character special file"]
-    assert "- `/workspace/.env`" in b.briefing
+def test_entrypoint_hands_the_workspace_to_the_agent(image):
+    b = boot(image, "", "stat -c %U /workspace/sub /workspace/sub/f",
+             before="mkdir /workspace/sub && touch /workspace/sub/f")
+    assert b.out.splitlines() == ["node", "node"]
 
 
 def test_gcp_auth_serves_the_hosts_token_as_a_metadata_server(image):

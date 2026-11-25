@@ -38,8 +38,8 @@ export function SettingsCards({ declared, draft, query }: Props) {
   const sandbox: CardSpec[] = [
     {
       key: 'general', title: 'General', description: declared.kernel.description, fields: [
-        { spec: { type: 'string', label: 'Repository', description: 'The repo the agent works on: a path on this machine, or a git URL (cloned only in the container).', placeholder: 'https://github.com/owner/repo', required: true, monospace: true },
-          slot: slot(() => draft, 'repo'), name: 'repo', required: true },
+        { spec: { type: 'string', label: 'Repository', description: 'The repo the agent works on: a path on this machine, or a git URL (cloned only in the container). Empty: a new, empty repo in the container.', placeholder: 'https://github.com/owner/repo', monospace: true },
+          slot: slot(() => draft, 'repo'), name: 'repo' },
         ...declared.kernel.settings.filter(s => !isAgent(s)).map(s => field(top, '', s)),
       ],
     },

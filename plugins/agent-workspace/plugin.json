@@ -5,7 +5,6 @@
   "defaultEnabled": true,
   "provides": ["workspace-mirror"],
   "requires": [],
-  "conflicts": ["cwd-workspace"],
   "requiredEnv": [],
   "settings": [
     {

@@ -36,8 +36,8 @@ def test_stages_run_in_the_order_the_host_resolved(sb):
 
 
 def test_settings_fragments_of_enabled_plugins(sb):
-    run = sb.sh("plugin_settings_files", ENABLED_PLUGINS="github-auth branch-guard netbird gcp-auth").ok()
-    assert run.out == f"{REPO}/plugins/branch-guard/settings.json\n"
+    run = sb.sh("plugin_settings_files", ENABLED_PLUGINS="github-auth agent-status netbird gcp-auth").ok()
+    assert run.out == f"{REPO}/plugins/agent-status/settings.json\n"
     assert sb.sh("plugin_settings_files", ENABLED_PLUGINS="").ok().out == ""
 
 
@@ -150,12 +150,6 @@ def stage(sb, plugin, **env):
     return sb.sh(f". {REPO}/plugins/{plugin}/agent-init.sh", **env).ok()
 
 
-def test_cwd_workspace_names_the_masked_files(sb):
-    assert stage(sb, "cwd-workspace").prompt == ""
-    prompt = stage(sb, "cwd-workspace", CWD_WORKSPACE_HIDDEN="/workspace/.env /workspace/k.json").prompt
-    assert "## Masked files" in prompt and "- `/workspace/.env`\n- `/workspace/k.json`\n" in prompt
-
-
 def test_gcp_auth_starts_its_metadata_server_and_briefs_the_agent(sb):
     plugin = sb.tmp / "gcp-auth"
     shutil.copytree(REPO / "plugins/gcp-auth", plugin)
@@ -181,15 +175,6 @@ def test_pr_review_briefs_only_a_review_session_and_with_its_guardrails(sb):
 def test_kvm_briefing_includes_the_projects_own(sb):
     assert "KVM is available" in stage(sb, "kvm").prompt
     assert stage(sb, "kvm", KVM_BRIEFING="Images in /data.").prompt.endswith("\nImages in /data.\n")
-
-
-@pytest.mark.parametrize("plugin, phrase", [
-    ("libvirt", "`virsh` talks to the host's system daemon"),
-    ("screenshots", "/home/node/Pictures/Screenshots"),
-])
-def test_static_briefings(sb, plugin, phrase):
-    assert phrase in stage(sb, plugin).prompt
-    assert sb.sh(f". {REPO}/plugins/{plugin}/agent-init.sh", AGENT_PROMPT_FILE="").ok().prompt == ""
 
 
 @pytest.mark.parametrize("enrolled, phrase", [("1", "NetBird peer named sandbox-abc123"),

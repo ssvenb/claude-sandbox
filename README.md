@@ -9,7 +9,7 @@ the agent to a branch, mounting your `~/.claude` — lives in **plugins** that c
 individually. With the defaults, the GitHub App private key never leaves your machine — tokens are
 minted and refreshed on the host, and the container only sees the current short-lived installation
 token — and each run works on its own
-`<prefix>/<yyyymmdd>-<RUN_ID>` branch kept by a managed hook — a guardrail: everything inside the container is the agent's, and only what crosses to the host is a boundary (see [Security model](#security-model)).
+`<prefix>/<yyyymmdd>-<RUN_ID>` branch, the only one its git pushes — a guardrail: everything inside the container is the agent's, and only what crosses to the host is a boundary (see [Security model](#security-model)).
 
 ## Quick start
 
@@ -335,13 +335,11 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | `ssh-credentials` | 15 | off | any | `ssh-credentials` | — | `openssh-client` install; writes `~/.ssh/sandbox_key` + `~/.ssh/config` for the agent user |
 | `upstream-proxy` | 15 | on | any | `upstream-proxy` | — | credential-injecting reverse proxies on the HOST, one per route from the project config, shared by all of a project's running sandboxes, bind-mounted (read-only) as unix sockets and bridged to loopback ports; no routes configured → does nothing |
 | `pr-review` | 25 | off | any | — | `git-credentials` | has the web UI start a review session for a run's pull request once its CI is green and the run's session is deleted, under another GitHub App (`.plugins["pr-review"].auth`), with guardrails against what the pull request says; see [Reviewing pull requests](#reviewing-pull-requests-with-pr-review) |
-| `git-workspace` | 20 | on | any | `workspace` | `git-credentials` | clone the `origin` remote of `run.sh`'s cwd into `/workspace`, per-run branch named after the agent (or `$BRANCH_PREFIX`) and the date, its commit identity, resume briefing |
-| `cwd-workspace` | 20 | off | any | `workspace` | — | bind-mounts the host's cwd (or `$HOST_WORKSPACE_DIR`) at `/workspace`; conflicts with `git-workspace` |
-| `agent-workspace` | 15 | on | any | `workspace-mirror` | — | bind-mounts `$AGENT_WORKSPACE_DIR/<project>-<date>-<RUN_ID>` (default `~/.agent-workspaces/<project>-<date>-<RUN_ID>`, created if missing) at `/workspace`, so the agent's checkout is visible on the host; removed when the container exits, unless `AGENT_WORKSPACE_CLEANUP=0`; complements `git-workspace`, conflicts with `cwd-workspace` |
+| `git-workspace` | 20 | on | any | `workspace` | — | clone the `origin` remote of `run.sh`'s cwd (or the project's URL) into `/workspace` with whatever credentials the run has, or for a project with no repo start an empty one there; per-run branch named after the agent (or `$BRANCH_PREFIX`) and the date, its commit identity, resume briefing; with `branchGuard` (default on) a git `pre-push` hook, for every agent, pushes nothing but that branch |
+| `agent-workspace` | 15 | on | any | `workspace-mirror` | — | bind-mounts `$AGENT_WORKSPACE_DIR/<project>-<date>-<RUN_ID>` (default `~/.agent-workspaces/<project>-<date>-<RUN_ID>`, created if missing) at `/workspace`, so the agent's checkout is visible on the host; removed when the container exits, unless `AGENT_WORKSPACE_CLEANUP=0`; complements `git-workspace` |
 | `permissions` | 25 | off | any | `permissions` | — | what the agent may run as root, all off by default: `.sudo` gives passwordless `sudo` for everything; `.tools` for chosen tools only — `apt` (`apt`, `apt-get`, `dpkg`), `npm`, `pip` (`pip`, `pip3`), `chown` (`chown`, `chmod`), `mount` (`mount`, `umount`), `network` (`ip`, `iptables`, `ip6tables`), `tcpdump`, `strace` — building into the image those it lacks; `.homeInstalls` points `npm -g`/`pip` at the agent's home, no root needed; briefs the agent on what it may do. Most of these tools can make the agent root, so they are conveniences, not a boundary |
 | `project-setup` | 25 | on | any | `project-setup` | — | sets the sandbox up for the target repo, from its project config: builds into the image (at `docker build`, so a change rebuilds it) the recipes in `.tools` (`python-pip`, `terraform`, `ruff`, `chromium` — the Debian browser Claude's Playwright MCP drives — and `playwright`, its own Chromium in `/ms-playwright`; all of them when unset, none for `[]`) and the packages in `.apt`, `.npm` (global) and `.pip`; then runs the `.setup` shell commands (installing dependencies, building) as the agent user in the provisioned `/workspace` at every boot; the core image has only what a fresh Ubuntu has, plus `jq` |
 | `dev-server` | 28 | on | any | `dev-server` | — | starts the project's server (`.plugins["dev-server"].command`) in `/workspace` at every boot, after `project-setup`, for the agent's own checks (`bin/sandbox-server` restarts it), unpublished; with a `.port`, runs the same command in a sibling container on the HOST from the run's checkout (`agent-workspace`'s mirror), after `.demoSetup`, restarted on every change, with what the [sibling plugins](#sibling-plugins) hand the sandbox (and, with `.agentHome` true, the agent's home: your Claude login), and publishes that port as a button on the run's session; see [Dev server](#dev-server); nothing configured → does nothing |
-| `branch-guard` | 30 | on | claude | — | `workspace` | `guard-branch.py` PreToolUse hook |
 
 Disable them all and the agent starts plain, in an empty `/workspace` with no GitHub access.
 
@@ -592,11 +590,11 @@ agent's under `.agents["<agent>"]`, a plugin's (and whether it runs) under `.plu
 each under the key its owner declares (see [Declaring settings](#declaring-settings)). Nothing
 else configures a run: not the sandbox's own directory, not a `.env` file, not your shell's
 exports. The file's name is the project's (`run.sh --project
-<name>`), and its `repo` the repo the agent works on: a path on this machine, or a git URL. Plugins
+<name>`), and its `repo` the repo the agent works on: a path on this machine, a git URL, or
+none, for which git-workspace starts an empty repo with no remote in the container. Plugins
 see a path as `$HOST_CWD`; a git URL is not cloned on this machine at all: `$HOST_CWD` is empty,
 `$REPO_URL` is the URL, and git-workspace clones it in the container with the project's
-credentials (so a private repo needs only github-auth's App). `cwd-workspace` needs a checkout here,
-and refuses a URL. Without `--project`, `run.sh` works on the directory it was
+credentials (github-auth's App, ssh-credentials' key, or none for a public repo). Without `--project`, `run.sh` works on the directory it was
 started in, with no project file (`PROJECT_CONFIG_FILE` names one).
 
 ```json
@@ -860,7 +858,7 @@ Recognised output:
 |----------|--------|
 | `AGENT_LAUNCH_CMD` | replaces the agent's default binary in its `launch.sh`; word-split, so it may include flags up to the point the agent's own flags begin |
 | `AGENT_PROMPT_FILE` (appended to) | the joined contents become the agent's briefing (system prompt for Claude, first message for Copilot) |
-| any `export` | inherited by the agent and by its hooks (this is how `branch-guard` sees `$AGENT_BRANCH`) |
+| any `export` | inherited by the agent and by its hooks (this is how git-workspace's `pre-push` hook sees `$AGENT_BRANCH`) |
 
 ```sh
 # shellcheck shell=sh
@@ -895,9 +893,9 @@ usually declares a `requiredAgent` too.
 {
   "hooks": {
     "PreToolUse": [
-      { "matcher": "Bash",
+      { "matcher": "*",
         "hooks": [{ "type": "command",
-                    "command": "/opt/plugins/branch-guard/bin/guard-branch.py" }] }
+                    "command": "/opt/plugins/agent-status/bin/agent-status.py" }] }
     ]
   }
 }
@@ -930,11 +928,12 @@ own section holds more: see its manifest, or the settings form):
 | `.agents["copilot"].auth` | Name of the `copilot-token` authentication Copilot runs with. Required unless `homeMount` is on, or a plugin provides the agent's credentials |
 | `.agents["copilot"].homeMount` | `true` (default) mounts a per-run copy of `~/.copilot`, login included; `false` leaves it out |
 | `.agents["copilot"].homeDir` | Host dir copied as the agent's `~/.copilot` (default `$HOME/.copilot`) |
-| `.plugins["<name>"].enabled` | Whether the plugin runs (default: its manifest's `defaultEnabled`: on, except `ca-certs`, `cwd-workspace`, `gcp-auth`, `netbird`, `permissions`, `pr-review` and `ssh-credentials`) |
+| `.plugins["<name>"].enabled` | Whether the plugin runs (default: its manifest's `defaultEnabled`: on, except `ca-certs`, `gcp-auth`, `netbird`, `permissions`, `pr-review` and `ssh-credentials`) |
 | `.plugins["github-auth"].auth` | Name of the `github-app` authentication the sandbox authenticates as |
 | `.plugins["git-workspace"].baseBranch` | Branch to cut from (default: the repo's own default branch, via `origin/HEAD`) |
+| `.plugins["git-workspace"].branchGuard` | Let the agent's git push only its own branch, through a `pre-push` hook for every agent; `git push --no-verify` skips it (default: `true`) |
+| `.plugins["git-workspace"].userName`, `.userEmail` | Commit identity (default: the branch prefix and `<prefix>@sandbox.local` when one is set, else the agent manifest's) |
 | `.plugins["git-workspace"].branchPrefix` | Leading segment of the per-run branch name (default: the agent manifest's `branchPrefix`, else the agent's directory name) |
-| `.plugins["cwd-workspace"].dir` | Host dir mounted at `/workspace` (default: the project's repo) |
 | `.plugins["agent-workspace"].dir` | Host dir holding the per-run mirrors of `/workspace`, created if missing (default: `$HOME/.agent-workspaces`; each run uses `<dir>/<project>-<date>-<RUN_ID>`) |
 | `.plugins["agent-workspace"].cleanup` | Delete the run's mirror directory when the container exits; `false` keeps it for inspection, at one leftover directory per run (default: `true`) |
 | `.plugins["permissions"].sudo` | `true`: passwordless `sudo` for any command (default `false`) |
@@ -964,7 +963,7 @@ whenever it wants, and whatever enters the container — a token, a setup key, a
 What runs in the container is a **guardrail**, there to keep a well-meaning agent on track, never to
 hold against one that is not:
 
-- `branch-guard` blocks `git checkout/switch/branch/worktree` and pushes of other branches; the
+- git-workspace's branch guard (`branchGuard`, on by default) is a `pre-push` hook that rejects pushes of other branches (`--no-verify` skips it); the
   managed settings, `/opt/plugins` and `/opt/agents` are root-owned and read-only. What actually
   keeps a branch safe is the forge's branch protection, and what the token may do.
 - `DISABLE_AUTOUPDATER=1` / `COPILOT_AUTO_UPDATE=false` — the agent version is pinned at image
@@ -981,9 +980,9 @@ of it as hostile:
   agent's; Claude's `CLAUDE_HOME_MOUNT` mounts a copy of `~/.claude` per run and takes back only a validated login.
 - What the host connects to, it checks each time: upstream-proxy's sockets are mounted
   read-only, so no sandbox can put itself between another one and the proxy.
-- Plugins that hand the container a part of your machine by design — `cwd-workspace` (your
-  checkout), `data-mounts` (the project's own directory under `~/.local/share/claude-sandbox/data`, nothing
-  else, read-only if you say so), `libvirt` (your VMs) — do nothing until you switch them on, and give the agent exactly that: switch one on only for what you would let the agent run on your machine.
+- `data-mounts` hands the container a part of your machine by design (the project's own directory
+  under `~/.local/share/claude-sandbox/data`, nothing else, read-only if you say so): it does nothing
+  until you switch it on, and gives the agent exactly that: switch it on only for what you would let the agent run on your machine.
 
 ## Repository layout
 

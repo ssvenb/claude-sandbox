@@ -184,7 +184,6 @@ def test_kvm_briefing_includes_the_projects_own(sb):
 
 
 @pytest.mark.parametrize("plugin, phrase", [
-    ("libvirt", "`virsh` talks to the host's system daemon"),
     ("screenshots", "/home/node/Pictures/Screenshots"),
     ("package-managers", "`apt-home <pkg>...` installs Debian packages"),
 ])

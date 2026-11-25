@@ -979,7 +979,7 @@ of it as hostile:
 - What the host connects to, it checks each time: upstream-proxy's sockets are mounted
   read-only, so no sandbox can put itself between another one and the proxy.
 - Plugins that hand the container a part of your machine by design — `cwd-workspace` (your
-  checkout), `data-mounts` (what you list), `libvirt` (your VMs) — do nothing until you switch them on or
+  checkout), `data-mounts` (what you list) — do nothing until you switch them on or
   list what to mount, and give the agent exactly that: switch one on only for what you would let the agent run on your machine.
 
 ## Repository layout

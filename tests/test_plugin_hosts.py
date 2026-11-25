@@ -302,7 +302,7 @@ def test_data_mounts_without_config_does_nothing(sb):
     assert sb.plugin("data-mounts").ok().args == []
 
 
-# --- docker-cli, kvm, libvirt, netbird: host devices and sockets ---------------------------
+# --- docker-cli, kvm, netbird: host devices and sockets ---------------------------
 
 def test_docker_cli_runs_the_sandbox_under_sysbox_without_the_host_socket(sb):
     sb.stub("docker", "echo 'io.containerd.runc.v2 runc sysbox-runc '")
@@ -331,11 +331,6 @@ def test_kvm_passes_the_device_and_the_projects_briefing(sb, briefing, expected)
 @pytest.mark.skipif(os.path.exists("/dev/kvm"), reason="this host has /dev/kvm")
 def test_kvm_needs_the_device(sb):
     sb.plugin("kvm").dies("/dev/kvm not found")
-
-
-@pytest.mark.skipif(bool(glob.glob("/run/libvirt/*-sock")), reason="this host runs libvirt")
-def test_libvirt_needs_a_daemon_socket(sb):
-    sb.plugin("libvirt").dies("no libvirt socket under /run/libvirt")
 
 
 @pytest.mark.skipif(not os.path.exists("/dev/net/tun"), reason="no /dev/net/tun on this host")

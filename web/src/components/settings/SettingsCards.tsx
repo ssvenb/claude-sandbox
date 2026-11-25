@@ -48,16 +48,17 @@ export function SettingsCards({ declared, draft, query }: Props) {
   };
 
   const agentNow = env()?.AGENT ?? declared.kernel.settings.find(s => s.env === 'AGENT')?.default;
+  const isAgent = (s: SettingSpec) => s.env === 'AGENT' || s.env === 'AGENT_VERSION';  // the Agents card's own
   const sandbox: CardSpec[] = [
     {
       key: 'general', title: 'General', description: declared.kernel.description, fields: [
         { spec: { type: 'string', label: 'Repository', description: 'The repo the agent works on: a path on this machine, or a git URL (cloned only in the container).', placeholder: 'https://github.com/owner/repo', required: true, monospace: true },
           slot: slot(() => draft, 'repo'), name: 'repo', required: true },
-        ...declared.kernel.settings.map(s => envField(s)),
+        ...declared.kernel.settings.filter(s => !isAgent(s)).map(s => envField(s)),
       ],
     },
     {
-      key: 'agents', title: 'Agents', fields: [], summary: agentNow ? agentNow + ' selected' : '',
+      key: 'agents', title: 'Agents', fields: declared.kernel.settings.filter(isAgent).map(s => envField(s)), summary: agentNow ? agentNow + ' selected' : '',
       cards: declared.agents.map(a => ({
         key: 'agent-' + a.name, title: a.name, description: a.description,
         fields: a.settings.map(s => envField(s)), tag: a.name === agentNow ? 'selected' : '',

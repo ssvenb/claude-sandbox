@@ -56,10 +56,13 @@ export function SettingsCards({ declared, draft, query }: Props) {
         ...declared.kernel.settings.map(s => envField(s)),
       ],
     },
-    ...declared.agents.map(a => ({
-      key: 'agent-' + a.name, title: a.name + ' agent', description: a.description,
-      fields: a.settings.map(s => envField(s)), tag: a.name === agentNow ? 'selected' : '',
-    })),
+    {
+      key: 'agents', title: 'Agents', fields: [], summary: agentNow ? agentNow + ' selected' : '',
+      cards: declared.agents.map(a => ({
+        key: 'agent-' + a.name, title: a.name, description: a.description,
+        fields: a.settings.map(s => envField(s)), tag: a.name === agentNow ? 'selected' : '',
+      })),
+    },
     {
       key: 'other', title: 'Other variables', description: 'Further sandbox settings for the env block, by name (see .env.example).',
       fields: [{ spec: { type: 'map', label: 'Variables', placeholder: 'NAME' }, slot: others, name: 'env-other' }],
@@ -93,7 +96,6 @@ export function SettingsCards({ declared, draft, query }: Props) {
 
   return (
     <>
-      <p>Unset settings come from your shell, else their default. ↺ reset unsets one again.</p>
       <CardGroup title="Sandbox" cards={sandbox} query={query} />
       <CardGroup title="Plugins" cards={declared.plugins.map(plugin)} query={query} />
     </>

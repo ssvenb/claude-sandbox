@@ -17,6 +17,17 @@ export interface FieldProps {
   hidden?: boolean;
 }
 
+/** An ⓘ that shows `text` in a view of its own, over the form, until clicked away. */
+export function Info({ text, about }: { text: string; about: string }) {
+  const id = useId();
+  return (
+    <>
+      <button type="button" className="info" popoverTarget={id} title="About this" aria-label={'About ' + about}>i</button>
+      <div popover="auto" id={id} className="tip"><b>{about}</b><p>{text}</p></div>
+    </>
+  );
+}
+
 const WIDE = ['list', 'map', 'object', 'json', 'text'];
 
 /** One setting: its label, its control, its description, and a reset while it is set. */
@@ -43,17 +54,17 @@ export function Field({ spec, slot, name, required, ariaLabel, head, hidden }: F
   const control = <Control key={gen} kind={kind} spec={spec} slot={slot} name={name} set={set} id={id} ariaLabel={ariaLabel} />;
   if (head) return <div className="control">{reset}<div className="control">{control}</div></div>;
   return (
-    <div className={'field' + (kind === 'boolean' ? ' bool' : '') + (WIDE.includes(kind) ? ' wide' : '') + (hidden ? ' hidden' : '')}>
+    <div className={'field' + (WIDE.includes(kind) ? ' wide' : '') + (hidden ? ' hidden' : '')}>
       <div className="label">
         <label htmlFor={id}>
           {spec.label || spec.key || spec.env}
           {(spec.required || required) && <span className="req" title="Required">*</span>}
         </label>
+        {spec.description && <Info text={spec.description} about={spec.label || spec.key || spec.env || name} />}
         {spec.env && <code title="Set in the env block">{spec.env}</code>}
         {reset}
       </div>
       <div className="control">{control}</div>
-      {spec.description && <p>{spec.description}</p>}
     </div>
   );
 }

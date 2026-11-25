@@ -112,6 +112,8 @@ export interface SettingSpec {
   items?: SettingSpec;
   fields?: SettingSpec[];
   title?: string;
+  /** A list of objects shown in groups by this field's value, + Add and new entries on top. */
+  groupBy?: string;
   when?: Record<string, Json[]>;
 }
 

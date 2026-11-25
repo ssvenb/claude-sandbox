@@ -30,7 +30,7 @@ function entrySpec(types: AuthConfig['types']): SettingSpec {
       fields.set(f, seen);
     }
   return {
-    type: 'object', title: 'name', fields: [
+    type: 'object', title: 'name', groupBy: 'type', fields: [
       { key: 'name', label: 'Name', required: true, monospace: true },
       { key: 'type', type: 'enum', label: 'Type', required: true, choices: Object.keys(types) },
       ...[...fields].map(([key, { of, requiredIn }]): SettingSpec => ({
@@ -93,19 +93,19 @@ export function AuthCards({ auth, projects, draft, query, onChanged }: Props) {
         more: ' ' + listed.join(' ').toLowerCase(),
         after: <>
           <div className="entries">
+            <div className="entry">
+              <input ref={name} className="key mono" name="new-project.name" placeholder="name" aria-label="New project's name" spellCheck={false} />
+              <input ref={repo} className="mono" name="new-project.repo" placeholder="~/code/my-app or a git URL" aria-label="New project's repo" spellCheck={false} />
+              <BusyButton className="add" onClick={add}>+ Add</BusyButton>
+            </div>
+            <p className="error" role="alert">{error}</p>
             {listed.map(p => (
               <div className="entry" key={p}>
                 <span className="mono">{p}</span>
                 <BusyButton className="remove" title="Delete" aria-label={'Delete project ' + p} onClick={() => remove(p)}>✕</BusyButton>
               </div>
             ))}
-            <div className="entry">
-              <input ref={name} className="key mono" name="new-project.name" placeholder="name" aria-label="New project's name" spellCheck={false} />
-              <input ref={repo} className="mono" name="new-project.repo" placeholder="~/code/my-app or a git URL" aria-label="New project's repo" spellCheck={false} />
-              <BusyButton className="add" onClick={add}>+ Add</BusyButton>
-            </div>
           </div>
-          <p className="error" role="alert">{error}</p>
         </>,
       }} />
       <Card query={query} card={{

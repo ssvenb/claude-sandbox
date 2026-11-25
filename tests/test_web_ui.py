@@ -814,8 +814,8 @@ def test_the_gear_configures_the_projects_plugins_in_its_file(board):
     board.click("button[name='enabled-docker-cli']")
     assert not board.is_visible("textarea[name='plugins.kvm.briefing']")  # kvm is off by default
     board.click("button[name='enabled-kvm']")
-    for card in ("plugin-kvm", "agent-claude", "plugin-github-auth", "plugin-project-setup", "plugin-upstream-proxy"):
-        board.click(f"[data-card='{card}'] .toggle")  # a card shows only its head until clicked
+    for card in ("plugin-kvm", "agents", "agent-claude", "plugin-github-auth", "plugin-project-setup", "plugin-upstream-proxy"):
+        board.click(f"[data-card='{card}'] > .head .toggle")  # a card shows only its head until clicked
     board.fill("textarea[name='plugins.kvm.briefing']", "VMs in /data")
     board.select_option("select[name='env.CLAUDE_EFFORT']", "max")
     board.select_option("select[name='env.GH_AUTH']", "")  # unset
@@ -902,6 +902,7 @@ def test_the_menus_settings_add_and_delete_projects_and_edit_your_authentication
 
     # Authentications: an entry each, its fields those of its type; what the form has none for is kept.
     assert board.input_value("input[name='auth.0.appId']") == "1"
+    assert board.text_content("[data-card=auth] .kind h5") == "github-app"  # grouped by type
     board.click(".field:has(label:text-is('Entries')) > .control > .entries > button.add")
     board.fill("input[name='auth.1.name']", "openai")
     board.select_option("select[name='auth.1.type']", "api-key")

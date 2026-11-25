@@ -28,15 +28,13 @@
   .card.open > .head { background: var(--sunk); }
   .card.off > .head .toggle { opacity: .6; }
   .head { display: flex; align-items: center; gap: 12px; padding-right: 16px; }
-  .toggle { flex: 1; min-width: 0; display: grid; grid-template-columns: 12px auto 1fr; column-gap: 10px; align-items: baseline;
+  .toggle { flex: 1; min-width: 0; display: grid; grid-template-columns: 12px auto 1fr; column-gap: 10px; align-items: center;
             padding: 12px 0 12px 16px; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
   .toggle:hover b { color: var(--link); }
   .toggle:focus-visible { outline: 2px solid var(--link); outline-offset: -2px; }
   .toggle b { font-weight: 600; }
   .toggle .agent { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 8px; }
   .toggle .count { justify-self: end; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .toggle .desc { grid-column: 2 / -1; color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .open > .head .desc { white-space: normal; }
   .chev { width: 0; height: 0; align-self: center; border-left: 6px solid var(--muted); border-block: 4.5px solid transparent;
           transition: transform .15s; }
   .toggle[aria-expanded=true] .chev { transform: rotate(90deg); border-left-color: var(--ink); }
@@ -45,20 +43,27 @@
   .fold > div { min-height: 0; overflow: hidden; visibility: hidden; transition: visibility .2s; }
   .open > .fold > div { visibility: visible; }
   .card .inner { padding: 0 16px 16px 38px; }
-  .card .inner > p { margin: 10px 0 0; }
+  .inner > .stack { margin-top: 14px; }
+  /* A description: behind an ⓘ, in a view of its own beside it. */
+  .info { flex: none; width: 20px; height: 20px; padding: 0; border-radius: 50%; border-color: var(--rule); color: var(--muted);
+          font: italic 600 12px/1 Georgia, serif; }
+  .info:hover, .info:has(+ .tip:popover-open) { color: var(--ink); border-color: var(--muted); }
+  .tip { max-width: min(380px, calc(100vw - 32px)); padding: 12px 14px; border: 1px solid var(--rule); border-radius: 10px;
+         background: var(--panel); color: var(--ink); box-shadow: var(--shadow); font-size: 13px; font-weight: 400; line-height: 1.5; }
+  .tip b { display: block; margin-bottom: 2px; font-size: 13px; font-weight: 600; }
+  .tip p { margin: 0; color: var(--muted); }
+  @supports (position-area: bottom) {
+    .tip { inset: auto; margin: 6px 0; position-area: bottom span-right; position-try-fallbacks: flip-inline, flip-block, flip-block flip-inline; }
+  }
   @media (prefers-reduced-motion: reduce) { .fold, .fold > div, .chev { transition: none; } }
   .card .fields { display: grid; gap: 14px; margin-top: 14px; }
   .card .fields:empty { display: none; }
   .field { display: grid; gap: 4px; min-width: 0; align-content: start; }
   .field > .label { display: flex; align-items: center; gap: 8px; min-height: 24px; flex-wrap: wrap; row-gap: 0; font-size: 14px; font-weight: 500; }
-  .field > .label label { flex: 1 1 auto; }
+  .field > .label label { flex: 0 1 auto; }
+  .field > .label > :is(label:not(:has(+ .info)), .info) { margin-right: auto; }
   .field > .label .req { color: var(--lamp); margin-left: 2px; }
   .field > .label code { color: var(--muted); font-size: 11px; font-weight: 400; }
-  .field > p { margin: 0; font-size: 12px; }
-  .field.bool { grid-template-columns: 1fr auto; align-items: center; column-gap: 12px; }
-  .field.bool > .label { grid-column: 1; }
-  .field.bool > p { grid-column: 1; }
-  .field.bool > .control { grid-column: 2; grid-row: 1 / span 2; justify-self: end; }
   .control { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .control > input, .control > select, .control > textarea, .control > .entries,
   .control > fieldset, .control > .chips { flex: 1; min-width: 0; }
@@ -87,10 +92,14 @@
   [data-card=projects] .entries { margin-top: 12px; gap: 0; }
   [data-card=projects] .entry:has(> span) { border-bottom: 1px solid var(--rule); }
   [data-card=projects] .entry > span { flex: 1; padding: 6px 0; }
-  [data-card=projects] .entry:has(input) { margin-top: 10px; }
+  [data-card=projects] .entry:has(input) { margin-bottom: 6px; }
+  [data-card=projects] .entries > .error { margin: 0 0 6px; }
+  [data-card=projects] .entries > .error:empty { display: none; }
   .add { justify-self: start; font-size: 13px; color: var(--link); border-style: dashed; }
   .remove { border-color: transparent; color: var(--muted); padding: 2px 8px; }
   .remove:hover { color: var(--fail); }
+  .entries > .kind { display: grid; gap: 6px; }
+  .kind > h5 { margin: 8px 0 0; color: var(--muted); font-size: 12px; font-weight: 600; }
   .item { border: 1px solid var(--rule); border-radius: 10px; background: var(--sunk); }
   .item > .head { padding-right: 6px; }
   .item .toggle { padding: 8px 0 8px 12px; grid-template-columns: 12px auto 1fr; }

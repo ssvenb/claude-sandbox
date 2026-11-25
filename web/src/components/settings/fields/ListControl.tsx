@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import type { Json, SettingSpec } from '../../../api/types';
 import type { ControlProps } from '../Control';
 import { isObject, type Slot, type Value } from '../slots';
@@ -16,6 +16,34 @@ function ChoiceChips({ items, name, id, list, put }: { items: SettingSpec; name:
           {String(c)}
         </label>
       ))}
+    </div>
+  );
+}
+
+/** An object in a list: its name (and the choice it was given first: an auth's type) on a row to
+ *  click, its fields folded under it. A new one, nameless yet, starts unfolded. */
+function Item({ items, v, i, slot, name, drop }: { items: SettingSpec; v: Json; i: number; slot: Slot; name: string; drop: () => void }) {
+  const o = isObject(v) ? v : {};
+  const named = items.title ? o[items.title] : undefined;
+  const title = named ? String(named) : `#${i + 1}`;
+  const kind = items.fields?.find(f => f.type === 'enum' && f.key && typeof o[f.key] === 'string');
+  const [open, setOpen] = useState(!named);
+  const body = useId();
+  return (
+    <div className={'item' + (open ? ' open' : '')}>
+      <div className="head">
+        <button type="button" className="toggle" aria-expanded={open} aria-controls={body} onClick={() => setOpen(!open)}>
+          <span className="chev" aria-hidden="true" />
+          <b>{title}</b>
+          {kind && <span className="count">{String(o[kind.key!])}</span>}
+        </button>
+        <button type="button" className="remove" title="Remove" aria-label={`Remove ${title}`} onClick={drop}>✕</button>
+      </div>
+      <div className="fold" id={body} inert={!open}>
+        <div>
+          <ObjectFields spec={items} slot={slot} name={`${name}.${i}`} set={(x: Value) => slot.set(x ?? {})} keepEmpty />
+        </div>
+      </div>
     </div>
   );
 }
@@ -50,19 +78,7 @@ export function ListControl({ spec, slot, name, set, id }: ControlProps) {
     <div className="entries" ref={box}>
       {list().map((v, i) => {
         const key = gen + '.' + i, first = i === 0 ? id : undefined;
-        if (items.type === 'object') {
-          const named = items.title && isObject(v) ? v[items.title] : undefined;
-          const title = named ? String(named) : `#${i + 1}`;
-          return (
-            <div className="item" key={key}>
-              <div className="row">
-                <b>{title}</b>
-                <button type="button" className="remove" title="Remove" aria-label={`Remove ${title}`} onClick={drop(i)}>✕</button>
-              </div>
-              <ObjectFields spec={items} slot={at(i)} name={`${name}.${i}`} set={(x: Value) => at(i).set(x ?? {})} keepEmpty />
-            </div>
-          );
-        }
+        if (items.type === 'object') return <Item key={key} items={items} v={v} i={i} slot={at(i)} name={name} drop={drop(i)} />;
         return (
           <div className="entry" key={key}>
             <input name={`${name}.${i}`} defaultValue={String(v ?? '')} placeholder={items.placeholder || ''} autoComplete="off" spellCheck={false}

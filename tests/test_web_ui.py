@@ -807,12 +807,15 @@ def test_the_gear_configures_the_projects_plugins_in_its_file(board):
     assert "never-shown" not in board.content()  # names, never what they hold
     assert board.input_value("select[name='env.CLAUDE_EFFORT']") == "high"
     assert "extra" in board.text_content(".card:has(button[name='enabled-git-workspace']) .kept")
+    assert not board.is_visible("input[name='repo']")  # each card folded to its head
 
     # Plugins: a switch each, its settings shown while it is on.
     assert board.get_attribute("button[name='enabled-docker-cli']", "aria-checked") == "true"  # the default
     board.click("button[name='enabled-docker-cli']")
     assert not board.is_visible("textarea[name='plugins.kvm.briefing']")  # kvm is off by default
     board.click("button[name='enabled-kvm']")
+    for card in ("plugin-kvm", "agent-claude", "plugin-github-auth", "plugin-project-setup", "plugin-upstream-proxy"):
+        board.click(f"[data-card='{card}'] .toggle")  # a card shows only its head until clicked
     board.fill("textarea[name='plugins.kvm.briefing']", "VMs in /data")
     board.select_option("select[name='env.CLAUDE_EFFORT']", "max")
     board.select_option("select[name='env.GH_AUTH']", "")  # unset
@@ -859,7 +862,7 @@ def test_the_gear_configures_the_projects_plugins_in_its_file(board):
     board.click(".card:has(button[name='enabled-docker-cli']) .reset")  # back to its default: no entry
     assert board.get_attribute("button[name='enabled-docker-cli']", "aria-checked") == "true"
     board.fill("input[type=search]", "branch prefix")  # the filter keeps the matching settings
-    assert board.is_visible("input[name='plugins.git-workspace.branchPrefix']")
+    board.wait_for_selector("input[name='plugins.git-workspace.branchPrefix']", state="visible")  # its card unfolded
     assert not board.is_visible("button[name='enabled-kvm']")
 
     # The JSON view edits the whole file; a typo there is reported, not saved.
@@ -889,7 +892,7 @@ def test_the_menus_settings_add_and_delete_projects_and_edit_your_authentication
     # Projects: added and deleted at once.
     board.fill("input[name='new-project.name']", "other")
     board.fill("input[name='new-project.repo']", "~/code/other")
-    board.click(".card.projects button.add")
+    board.click("[data-card=projects] button.add")
     board.wait_for_selector("button[aria-label='Delete project other']")
     assert json.loads((board.project.parent / "projects/other.json").read_text()) == {"repo": "~/code/other"}
     board.once("dialog", lambda d: d.accept())

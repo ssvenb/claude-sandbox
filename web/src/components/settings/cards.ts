@@ -15,6 +15,10 @@ export interface CardSpec {
   right?: ReactNode;
   /** Under its fields. */
   after?: ReactNode;
+  /** On its head while folded, instead of how many of its settings are set. */
+  summary?: string;
+  /** Unfolded when the form opens. */
+  open?: boolean;
   /** Switched off: dimmed, its settings not shown. */
   off?: boolean;
   /** More for the filter to find the card by. */

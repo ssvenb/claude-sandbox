@@ -11,6 +11,7 @@
   },
   "settings": [
     {
+      "key": "effort",
       "env": "CLAUDE_EFFORT",
       "type": "enum",
       "choices": ["low", "medium", "high", "xhigh", "max"],
@@ -19,6 +20,7 @@
       "default": "medium"
     },
     {
+      "key": "model",
       "env": "CLAUDE_MODEL",
       "type": "string",
       "label": "Model",
@@ -26,13 +28,15 @@
       "placeholder": "opus"
     },
     {
+      "key": "homeMount",
       "env": "CLAUDE_HOME_MOUNT",
       "type": "boolean",
       "label": "Mount ~/.claude",
-      "description": "Hands the agent a per-run copy of your Claude config directory, login included, so no token is needed. Off: the agent starts on a fresh config with CLAUDE_AUTH's token.",
+      "description": "Hands the agent a per-run copy of your Claude config directory, login included, so no token is needed. Off: the agent starts on a fresh config with the OAuth token picked below.",
       "default": true
     },
     {
+      "key": "homeDir",
       "env": "CLAUDE_HOME_DIR",
       "type": "path",
       "label": "Claude config directory",
@@ -40,11 +44,12 @@
       "placeholder": "~/.claude"
     },
     {
+      "key": "auth",
       "env": "CLAUDE_AUTH",
       "type": "auth",
       "auth": "claude-token",
       "label": "OAuth token",
-      "description": "The claude-token (from `claude setup-token`) Claude Code runs with; not needed while CLAUDE_HOME_MOUNT mounts a logged-in ~/.claude.",
+      "description": "The claude-token (from `claude setup-token`) Claude Code runs with; not needed while Mount ~/.claude hands it a logged-in one.",
       "fills": {
         "token": "CLAUDE_CODE_OAUTH_TOKEN"
       }

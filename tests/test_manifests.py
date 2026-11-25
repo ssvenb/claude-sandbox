@@ -10,15 +10,10 @@ from conftest import REPO
 
 PLUGINS = sorted(p.parent.name for p in REPO.glob("plugins/*/plugin.json"))
 AGENTS = sorted(p.parent.name for p in REPO.glob("agents/*/agent.json"))
-EXAMPLE_KEYS = set(re.findall(r"^#?\s*([A-Z_][A-Z0-9_]*)=", (REPO / ".env.example").read_text(), re.M))
 
 
 def manifest(name: str) -> dict:
     return json.loads((REPO / "plugins" / name / "plugin.json").read_text())
-
-
-def flag(name: str) -> str:
-    return "ENABLE_" + name.upper().replace("-", "_")
 
 
 def test_every_plugin_and_agent_directory_has_a_manifest():
@@ -55,32 +50,26 @@ def test_every_required_capability_has_a_provider(name):
 
 
 @pytest.mark.parametrize("name", PLUGINS)
-def test_env_example_documents_the_plugin_flag_with_its_default(name):
-    """.env.example is the allowlist of sandbox-owned names, so every flag must be in it."""
-    text = (REPO / ".env.example").read_text()
-    found = re.search(rf"^#?{flag(name)}=(\S*)", text, re.M)
-    assert found, f"{flag(name)} missing from .env.example"
-    assert found[1] == ("1" if manifest(name)["defaultEnabled"] else "0")
+def test_every_required_variable_is_a_declared_setting(name):
+    """A plugin requires a setting of its own, so the project's file (and the form) can set it."""
+    declared = {s.get("env") for s in manifest(name).get("settings", [])}
+    assert set(manifest(name).get("requiredEnv", [])) <= declared
 
 
-@pytest.mark.parametrize("var", sorted({v for p in PLUGINS for v in manifest(p).get("requiredEnv", [])}))
-def test_env_example_documents_every_required_variable(var):
-    assert var in EXAMPLE_KEYS
-
-
+SETTING_VARS = {s["env"] for path in [*REPO.glob("plugins/*/plugin.json"), *REPO.glob("agents/*/agent.json"),
+                                       REPO / "src/orchestrator/kernel.json"]
+                for s in json.loads(path.read_text()).get("settings", []) if "env" in s}
 TYPES = {"boolean", "string", "path", "text", "integer", "enum", "list", "map", "object", "json", "auth"}
 # Who declares settings: the kernel, each agent, each plugin.
 OWNERS = ([("kernel", REPO / "src/orchestrator/kernel.json")] + [(f"agents/{a}", REPO / "agents" / a / "agent.json") for a in AGENTS]
           + [(f"plugins/{p}", REPO / "plugins" / p / "plugin.json") for p in PLUGINS])
-# Where the settings file is: set in the shell only, never in the config file.
-NOT_IN_CONFIG = {"PROJECT_CONFIG_FILE"}
 
 
 def check_spec(spec, where, top=False):
     assert spec["type"] in TYPES, where
     assert isinstance(spec.get("label", ""), str) and isinstance(spec.get("description", ""), str), where
     if top:
-        assert ("env" in spec) != ("key" in spec), f"{where}: exactly one of env / key"
+        assert "key" in spec, f"{where}: where it sits in the project's file"
     if spec["type"] == "auth":
         from orchestrator.auth import TYPES as AUTH_TYPES
         kinds = [spec["auth"]] if isinstance(spec["auth"], str) else spec["auth"]
@@ -89,7 +78,7 @@ def check_spec(spec, where, top=False):
             assert isinstance(spec["auth"], str) and "env" in spec, where
             held = set(sum(AUTH_TYPES[spec["auth"]], ()))
             assert set(spec["fills"]) <= held, f"{where}: fills what a {spec['auth']} does not hold"
-            assert not set(spec["fills"].values()) & EXAMPLE_KEYS, f"{where}: a filled variable must not be a setting"
+            assert not set(spec["fills"].values()) & SETTING_VARS, f"{where}: a filled variable must not be a setting"
     if spec["type"] == "enum":
         assert spec["choices"] and spec.get("default", spec["choices"][0]) in spec["choices"], where
     if spec["type"] == "list":
@@ -107,24 +96,21 @@ def test_declared_settings_are_well_formed(owner, path):
     """What the web UI's settings form is drawn from (see README, "Declaring settings")."""
     settings = json.loads(path.read_text()).get("settings", [])
     for spec in settings:
-        check_spec(spec, f"{owner}:{spec.get('env') or spec.get('key')}", top=True)
-        if "env" in spec:
-            assert spec["env"] in EXAMPLE_KEYS, f"{spec['env']}: run.sh refuses names .env.example lacks"
-        else:
-            assert owner.startswith("plugins/"), f"{owner}: only a plugin has a section of its own"
-    names = [s.get("env") or s.get("key") for s in settings]
-    assert len(names) == len(set(names)), owner
+        check_spec(spec, f"{owner}:{spec.get('key')}", top=True)
+    keys = [s["key"] for s in settings]
+    assert len(keys) == len(set(keys)), owner
+    if owner == "kernel":  # they sit at the top of the file, beside these
+        assert not set(keys) & {"repo", "agents", "plugins"}
 
 
-def test_every_sandbox_variable_is_declared_by_exactly_one_owner():
-    """.env.example and the declarations list the same names, so the form offers every one."""
+def test_every_settings_variable_is_declared_by_exactly_one_owner():
+    """The stages read a setting from its variable, so two owners must not share one."""
     declared = [s["env"] for _, path in OWNERS for s in json.loads(path.read_text()).get("settings", []) if "env" in s]
     assert len(declared) == len(set(declared)), "declared twice"
-    assert set(declared) == {k for k in EXAMPLE_KEYS if not k.startswith("ENABLE_")} - NOT_IN_CONFIG
 
 
 def test_the_kernel_offers_every_agent():
-    agent = next(s for s in json.loads((REPO / "src/orchestrator/kernel.json").read_text())["settings"] if s.get("env") == "AGENT")
+    agent = next(s for s in json.loads((REPO / "src/orchestrator/kernel.json").read_text())["settings"] if s.get("key") == "agent")
     assert sorted(agent["choices"]) == AGENTS
 
 

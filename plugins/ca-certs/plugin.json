@@ -9,6 +9,7 @@
   "requiredEnv": [],
   "settings": [
     {
+      "key": "dir",
       "env": "CA_CERTS_DIR",
       "type": "path",
       "label": "Certificates directory",

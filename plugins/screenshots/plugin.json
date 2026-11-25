@@ -8,6 +8,7 @@
   "requiredEnv": [],
   "settings": [
     {
+      "key": "dir",
       "env": "SCREENSHOTS_DIR",
       "type": "path",
       "label": "Screenshots folder",

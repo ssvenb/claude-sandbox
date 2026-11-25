@@ -2,6 +2,7 @@
   "description": "The sandbox itself: which agent runs, and its version.",
   "settings": [
     {
+      "key": "agent",
       "env": "AGENT",
       "type": "enum",
       "choices": ["claude", "copilot"],
@@ -10,6 +11,7 @@
       "default": "claude"
     },
     {
+      "key": "agentVersion",
       "env": "AGENT_VERSION",
       "type": "string",
       "label": "Agent version",

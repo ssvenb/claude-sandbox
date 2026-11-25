@@ -909,43 +909,29 @@ def check_config(config):
             raise ValueError(f".plugins[\"{name}\"] must be an object")
         if section.get("enabled", True) not in (True, False, 0, 1):
             raise ValueError(f".plugins[\"{name}\"].enabled must be true or false")
-    env = config.get("env", {})
-    if not isinstance(env, dict) or any(isinstance(v, (dict, list)) for v in env.values()):
-        raise ValueError(".env must be an object of scalar values")
+    agents = config.get("agents", {})
+    if not isinstance(agents, dict) or not all(isinstance(v, dict) for v in agents.values()):
+        raise ValueError(".agents must be an object of objects keyed by agent name")
     # What the kernel, the agents and the plugins declare is checked against its declared type;
     # anything else is left to run.sh and the plugins, as before.
-    declared = kernel_manifest()["settings"] + [s for a in agent_manifests() for s in a["settings"]]
-    for p in plugin_manifests():
-        declared += [s for s in p["settings"] if "env" in s]
-        section = plugins.get(p["name"], {})
-        for spec in p["settings"]:
+    owners = [((), config, kernel_manifest()["settings"])]
+    owners += [(("agents", a["name"]), agents.get(a["name"], {}), a["settings"]) for a in agent_manifests()]
+    owners += [(("plugins", p["name"]), plugins.get(p["name"], {}), p["settings"]) for p in plugin_manifests()]
+    for where, section, settings in owners:
+        for spec in settings:
             if "key" in spec and spec["key"] in section:
-                check_setting(spec, section[spec["key"]], f'.plugins["{p["name"]}"].{spec["key"]}')
-    for spec in declared:
-        if spec.get("env") in env:
-            check_setting(spec, env[spec["env"]], f".env.{spec['env']}", in_env=True)
+                path = (f'.{where[0]}["{where[1]}"]' if where else "") + f'.{spec["key"]}'
+                check_setting(spec, section[spec["key"]], path)
 
 
-def check_setting(spec, value, where, in_env=False):
-    """One value against the type its owner declared for it (see README, "Declaring settings").
-    An .env value is a scalar that run.sh exports as a string, so there it may be spelled as one."""
+def check_setting(spec, value, where):
+    """One value against the type its owner declared for it (see README, "Declaring settings")."""
     kind = spec.get("type", "string")
     if value is None:
         raise ValueError(f"{where} must not be null: leave it out instead")
     if spec.get("authTypes") and value not in spec.get("choices", []):  # an authentication (offered())
         raise ValueError(f"{where}: no {' or '.join(spec['authTypes'])} called '{value}' in "
                          f"{auth.auth_file(os.environ)} (there: {', '.join(spec['choices']) or 'none'})")
-    if in_env:
-        text = str(value).lower() if isinstance(value, bool) else str(value)
-        if kind == "boolean" and text not in ("0", "1", "true", "false"):
-            raise ValueError(f"{where} must be 0 or 1")
-        if kind == "integer" and not re.fullmatch(r"-?[0-9]+", text):
-            raise ValueError(f"{where} must be a whole number")
-        if kind == "enum" and text not in spec.get("choices", []):
-            raise ValueError(f"{where} must be one of {', '.join(spec.get('choices', []))}")
-        if spec.get("pattern") and not re.fullmatch(spec["pattern"], text):
-            raise ValueError(f"{where} is not in the expected format")
-        return
     if kind == "boolean":
         ok = isinstance(value, bool)
     elif kind in ("string", "path"):

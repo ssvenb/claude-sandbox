@@ -795,17 +795,18 @@ def test_the_gear_configures_the_projects_plugins_in_its_file(board):
                                 "openai": {"type": "api-key", "key": "never-shown"}, "gcs": {"type": "gcp-service-account"}}))
     auth.chmod(0o600)
     file = board.project.parent / "projects/proj.json"
-    file.write_text(json.dumps({"repo": str(board.project), "env": {"CLAUDE_EFFORT": "high", "GH_AUTH": "coder"},
-                                "plugins": {"git-workspace": {"branchPrefix": "bot", "extra": 1}, "retired": {"x": 1}}}))
+    file.write_text(json.dumps({"repo": str(board.project), "agents": {"claude": {"effort": "high"}},
+                                "plugins": {"github-auth": {"auth": "coder"}, "git-workspace": {"branchPrefix": "bot", "extra": 1},
+                                            "retired": {"x": 1}}}))
     board.click("button[aria-label='Settings']")
     board.wait_for_selector("dialog[open] b:has-text('docker-cli')")
     assert board.input_value("input[name='plugins.git-workspace.branchPrefix']") == "bot"
     assert board.input_value("input[name='repo']") == str(board.project)  # the repo it works on
     options = lambda sel: board.eval_on_selector_all(sel + " option", "os => os.map(o => o.value)")  # noqa: E731
-    assert board.input_value("select[name='env.GH_AUTH']") == "coder"
-    assert options("select[name='env.GH_AUTH']") == ["", "coder", "reviewer"]  # github-apps only
+    assert board.input_value("select[name='plugins.github-auth.auth']") == "coder"
+    assert options("select[name='plugins.github-auth.auth']") == ["", "coder", "reviewer"]  # github-apps only
     assert "never-shown" not in board.content()  # names, never what they hold
-    assert board.input_value("select[name='env.CLAUDE_EFFORT']") == "high"
+    assert board.input_value("select[name='agents.claude.effort']") == "high"
     assert "extra" in board.text_content(".card:has(button[name='enabled-git-workspace']) .kept")
     assert not board.is_visible("input[name='repo']")  # each card folded to its head
 
@@ -817,8 +818,8 @@ def test_the_gear_configures_the_projects_plugins_in_its_file(board):
     for card in ("plugin-kvm", "agents", "agent-claude", "plugin-github-auth", "plugin-project-setup", "plugin-upstream-proxy"):
         board.click(f"[data-card='{card}'] > .head .toggle")  # a card shows only its head until clicked
     board.fill("textarea[name='plugins.kvm.briefing']", "VMs in /data")
-    board.select_option("select[name='env.CLAUDE_EFFORT']", "max")
-    board.select_option("select[name='env.GH_AUTH']", "")  # unset
+    board.select_option("select[name='agents.claude.effort']", "max")
+    board.select_option("select[name='plugins.github-auth.auth']", "")  # unset
 
     # Lists: + Add a row each; one left empty is not saved.
     deps = ".card:has(button[name='enabled-project-setup']) .field:has(label:text-is('apt packages'))"
@@ -841,13 +842,13 @@ def test_the_gear_configures_the_projects_plugins_in_its_file(board):
     board.fill("input[name='plugins.upstream-proxy.routes.0.containerEnv.0.value']", "http://127.0.0.1:8081")
     board.click("dialog button[type=submit]")
     board.wait_for_selector("dialog .error:has-text('routes[0].port is required')")  # the server's check
-    assert json.loads(file.read_text())["env"]["GH_AUTH"] == "coder"  # nothing saved
+    assert json.loads(file.read_text())["plugins"]["github-auth"]["auth"] == "coder"  # nothing saved
     board.fill("input[name='plugins.upstream-proxy.routes.0.port']", "8081")
 
     board.click("dialog button[type=submit]")
     board.wait_for_selector("dialog[open]", state="detached")
     assert json.loads(file.read_text()) == {
-        "repo": str(board.project), "env": {"CLAUDE_EFFORT": "max"},
+        "repo": str(board.project), "agents": {"claude": {"effort": "max"}},
         "plugins": {"git-workspace": {"branchPrefix": "bot", "extra": 1}, "retired": {"x": 1},
                     "docker-cli": {"enabled": False}, "kvm": {"enabled": True, "briefing": "VMs in /data"},
                     "project-setup": {"apt": ["ripgrep"]},
@@ -891,6 +892,9 @@ def test_the_menus_settings_add_and_delete_projects_and_edit_your_authentication
     auth.write_text(json.dumps({"coder": {"type": "github-app", "appId": "1", "privateKeyFile": "~/k.pem", "extra": 1}}))
     board.click("button[aria-label='Sandbox settings']")
     board.wait_for_selector("dialog[open] h2:has-text('Sandbox settings')")
+
+    for card in ("projects", "auth"):  # folded to their heads until clicked
+        board.click(f"[data-card={card}] > .head .toggle")
 
     # Projects: added and deleted at once.
     board.fill("input[name='new-project.name']", "other")

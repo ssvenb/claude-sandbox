@@ -41,7 +41,7 @@ export function SettingsDialog({ settings, onClose, onSaved }: Props) {
           onClose={onClose} onSaved={() => onSaved(settings.project)} />
       ) : (
         <SettingsForm key={settings.opening} title="Sandbox settings"
-          file={settings.auth.file} exists={settings.auth.exists} config={settings.auth.config} save={saveAuth}
+          exists={settings.auth.exists} config={settings.auth.config} save={saveAuth}
           cards={(draft, query) => <AuthCards auth={settings.auth} projects={settings.projects} draft={draft} query={query} onChanged={() => onSaved()} />}
           onClose={onClose} onSaved={() => onSaved()} />
       ))}

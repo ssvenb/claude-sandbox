@@ -1,29 +1,27 @@
 """Per-project configuration: a project's file, ~/.config/claude-sandbox/projects/<name>.json
-(`run.sh --project <name>`), and the settings it layers over your environment.
+(`run.sh --project <name>`), the one place a project, its agent and its plugins are configured.
 
-Configuration is per-project: the file names the repo the agent works on ("repo": a path on this
-machine, or a git URL, cloned only in the container) and how it wants to be
-sandboxed; the sandbox's own directory contributes nothing. Lowest to highest precedence:
-
-  1. a plugin manifest's defaultEnabled, and each setting's built-in default
-  2. anything already exported in your shell
-  3. the project's file                     — "env" block, and per-plugin "enabled"
-  4. `run.sh --set NAME=VALUE`                — what this one run was started with (by a plugin's
-                                                 web_start: a review under another authentication)
-
-The repo's own .env is not read: it is the target repo's, full of its own secrets. The names the
-sandbox owns — what the "env" block and --set may set — are every key in .env.example, the
-catalogue of them, plus any ENABLE_<PLUGIN> flag.
+The file names the repo the agent works on ("repo": a path on this machine, or a git URL, cloned
+only in the container) and how it wants to be sandboxed; the sandbox's own directory contributes
+nothing, and neither do your shell's exports nor any .env file. Each setting sits with its owner,
+under the key it declares: the sandbox's own at the top, an agent's under "agents", a plugin's
+(and whether it is enabled) under "plugins".
 
     ~/.config/claude-sandbox/projects/my-app.json
     {
       "repo": "~/code/my-app",
-      "env": { "AGENT": "copilot", "ENABLE_GIT_WORKSPACE": 0 },
+      "agent": "copilot",
+      "agents": { "claude": { "effort": "high" } },
       "plugins": {
         "upstream-proxy": { "routes": [ ... ] },
-        "git-workspace": { "enabled": false }
+        "git-workspace": { "enabled": false, "baseBranch": "trunk" }
       }
     }
+
+A setting the stages read as a variable also declares that variable's name ("env"): run.sh hands
+the stages its value under that name, so the plugins' scripts read $BASE_BRANCH as they always
+did, while nothing of the kind is taken from your environment. `run.sh --set NAME=VALUE`, by those
+names, sets one for a single run (a plugin's web_start: a review under another authentication).
 
 The file and every key in it are optional. Nothing here is passed to the container — a plugin
 decides what, if anything, crosses over.
@@ -32,45 +30,10 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import SANDBOX, Die
-
-_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-_BLANK = " \t\n\v\f\r"  # bash's [[:space:]]
-
-
-def scan_env(path, commented=False) -> dict[str, str]:
-    """KEY=VALUE lines of a .env file, parsed, never executed. With `commented`, `#KEY=value`
-    counts too, which is how .env.example documents optional defaults; without it, comments are
-    skipped. It reads .env.example, the catalogue of the sandbox's names."""
-    out: dict[str, str] = {}
-    try:
-        text = Path(path).read_bytes().decode("utf-8", "surrogateescape") if path else None
-    except (FileNotFoundError, IsADirectoryError, NotADirectoryError):
-        return out
-    if text is None:
-        return out
-    for line in text.split("\n"):
-        line = line.removesuffix("\r").lstrip(_BLANK)  # CRLF checkouts, leading blanks
-        if commented:
-            line = line.removeprefix("#").lstrip(_BLANK)
-        elif not line or line.startswith("#"):
-            continue
-        line = line.removeprefix("export").lstrip(_BLANK)
-        if "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.rstrip(_BLANK)
-        if not _KEY.fullmatch(key):  # prose that contains '='
-            continue
-        value = value.strip(_BLANK)
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        out[key] = value  # last assignment wins
-    return out
-
 
 def _or(value, default):
     """jq's `value // default`: only null and false fall through."""
@@ -123,9 +86,9 @@ def load_project(env: dict) -> Project:
             raise Die(f"{where} must be a JSON object.")
         if not isinstance(_or(config.get("plugins"), {}), dict):
             raise Die(f"{where}: .plugins must be an object keyed by plugin name.")
-        block = _or(config.get("env"), {})
-        if not isinstance(block, dict) or any(isinstance(v, (dict, list)) for v in block.values()):
-            raise Die(f"{where}: .env must be an object of scalar values.")
+        if not isinstance(_or(config.get("agents"), {}), dict) \
+                or not all(isinstance(v, dict) for v in _or(config.get("agents"), {}).values()):
+            raise Die(f"{where}: .agents must be an object of objects keyed by agent name.")
         project.config = config
     return project
 
@@ -167,35 +130,90 @@ def repo_dir(env: dict, name: str, repo) -> str:
     return str(path)
 
 
-def sandbox_vars(env: dict) -> set[str]:
-    """The names the sandbox owns, besides ENABLE_*: every key .env.example documents."""
-    example = env.get("SANDBOX_ENV_EXAMPLE") or str(SANDBOX / ".env.example")
-    return set(scan_env(example, commented=True))
+ON = {"1", "true", "yes", "on"}
 
 
-# Which plugin started the run (web_start), for its own stages to tell: not a setting of a project's.
+@dataclass
+class Owner:
+    """The sandbox itself, an agent or a plugin: where its settings sit in a project's file, and
+    what it declares."""
+    where: tuple            # () for the sandbox's own, ("agents", name), ("plugins", name)
+    manifest: dict
+
+    @property
+    def settings(self) -> list:
+        return [s for s in self.manifest.get("settings") or [] if isinstance(s, dict)]
+
+    def section(self, config: dict) -> dict:
+        """Its settings in `config`, {} while it has none."""
+        for key in self.where:
+            config = config.get(key) if isinstance(config, dict) else None
+        return config if isinstance(config, dict) else {}
+
+
+def declared(env: dict) -> list[Owner]:
+    """The sandbox, every agent and every plugin, with what each declares. A manifest that cannot
+    be read declares nothing here; discovering the plugins says what is wrong with it."""
+    from .agents import agent_root  # noqa: PLC0415 — plugins.py imports this module
+    from .plugins import plugin_root  # noqa: PLC0415
+
+    def read(path):
+        try:
+            found = json.loads(Path(path).read_text())
+        except (OSError, ValueError, UnicodeDecodeError):
+            return {}
+        return found if isinstance(found, dict) else {}
+    return ([Owner((), read(SANDBOX / "src/orchestrator/kernel.json"))]
+            + [Owner(("agents", p.parent.name), read(p)) for p in sorted(agent_root(env).glob("*/agent.json"))]
+            + [Owner(("plugins", p.parent.name), read(p)) for p in sorted(plugin_root(env).glob("*/plugin.json"))])
+
+
+def owned_names(owners: list[Owner]) -> set[str]:
+    """Every variable the stages read a setting from: the declared ones, what an authentication
+    fills, what a plugin requires."""
+    names = set()
+    for o in owners:
+        names.update(o.manifest.get("requiredEnv") or [])
+        for spec in o.settings:
+            names.update(filter(None, [spec.get("env"), *(spec.get("fills") or {}).values()]))
+    return names
+
+
+def without_settings(environ: dict, owners: list[Owner]) -> dict:
+    """Your environment, less every name a setting is read from: the project's file is the only
+    place they are set."""
+    owned = owned_names(owners)
+    return {k: v for k, v in environ.items() if k not in owned}
+
+
+def env_value(spec: dict, value) -> str:
+    """A setting's value as its variable holds it: a switch as 1 or 0."""
+    if spec.get("type") == "boolean":
+        return "1" if value is True or tostring(value).lower() in ON else "0"
+    return tostring(value)
+
+
+# Which plugin started the run (web_start): not a setting of a project's.
 STARTED_BY = "SANDBOX_STARTED_BY"
 
 
 def apply_settings(env: dict, project: Project, sets: dict | None = None) -> list[str]:
-    """Lays layers 3 and 4 over `env`, in place, before the agent and the plugins are resolved.
-    The names applied, sorted."""
-    owned = sandbox_vars(env)
-
-    def owns(name):
-        return name.startswith("ENABLE_") or name in owned
-
-    applied = set()
-    for key, value in _or((project.config or {}).get("env"), {}).items():
-        # This block is written *for* the sandbox, so an unknown name is a typo, not one of the
-        # repo's own variables — say so instead of silently ignoring it.
-        if not owns(key):
-            raise Die(f"Project config '{project.config_file}': .env.{key} is not a sandbox setting (see .env.example).")
-        env[key] = tostring(value)
-        applied.add(key)
+    """Lays the project's settings over `env`, in place, as the variables the stages read them
+    from, then this run's --set ones, before the agent and the plugins are resolved. Where each
+    came from, sorted."""
+    owners = declared(env)
+    config = project.config or {}
+    applied = []
+    for owner in owners:
+        section = owner.section(config)
+        for spec in owner.settings:
+            if spec.get("env") and spec.get("key") in section:
+                env[spec["env"]] = env_value(spec, section[spec["key"]])
+                applied.append(".".join([*owner.where, spec["key"]]))
+    owned = owned_names(owners)
     for key, value in (sets or {}).items():
-        if not owns(key) and key != STARTED_BY:
-            raise Die(f"--set {key}: not a sandbox setting (see .env.example).")
+        if key not in owned and key != STARTED_BY:
+            raise Die(f"--set {key}: not a sandbox setting.")
         env[key] = value
-        applied.add(key)
+        applied.append(key)
     return sorted(applied)

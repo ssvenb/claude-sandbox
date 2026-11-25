@@ -14,6 +14,7 @@
       "placeholder": "claude-code"
     },
     {
+      "key": "baseBranch",
       "env": "BASE_BRANCH",
       "type": "string",
       "label": "Base branch",

@@ -13,8 +13,6 @@ export interface CardSpec {
   right?: ReactNode;
   /** Under its fields. */
   after?: ReactNode;
-  /** Unfolded when the form opens. */
-  open?: boolean;
   /** Switched off: dimmed, its settings not shown. */
   off?: boolean;
   /** Cards under it, folded with it: the agents', an agent's own plugins. */
@@ -25,7 +23,7 @@ export interface CardSpec {
   more?: string;
 }
 
-const searchOf = (spec: SettingSpec): string => [spec.label, spec.key, spec.env, spec.description].join(' ').toLowerCase();
+const searchOf = (spec: SettingSpec): string => [spec.label, spec.key, spec.description].join(' ').toLowerCase();
 
 /** What of a card the filter `q` (in lower case) keeps: nothing of it, or which of its fields (and
  *  cards); `hit`, the card itself matches, so all of it is kept. */

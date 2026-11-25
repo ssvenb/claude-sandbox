@@ -6,6 +6,6 @@
 # installation tokens github-auth mints are NOT accepted, hence its own variable.
 
 [ "${AGENT_AUTH_PROVIDED:-0}" = 1 ] \
-  || : "${COPILOT_GITHUB_TOKEN:?Copilot needs credentials: set COPILOT_AUTH to a copilot-token authentication (a fine-grained PAT with the 'Copilot Requests' permission), or turn COPILOT_HOME_MOUNT on}"
+  || : "${COPILOT_GITHUB_TOKEN:?Copilot needs credentials: pick a copilot-token authentication (a fine-grained PAT with the 'Copilot Requests' permission) as the GitHub token of the copilot agent, or switch its Mount ~/.copilot on}"
 
 pass_env COPILOT_GITHUB_TOKEN

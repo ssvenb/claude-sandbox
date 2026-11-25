@@ -8,7 +8,7 @@ import { Field, Info } from './Field';
  *  stay in the form, so what was typed in them is kept. */
 export function Card({ card, query }: { card: CardSpec; query: string }) {
   const { hidden, hit, hiddenFields } = filtered(card, query);
-  const [open, setOpen] = useState(!!card.open);
+  const [open, setOpen] = useState(false);
   const shown = open || !!query;
   const body = useId();
   return (

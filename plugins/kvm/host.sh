@@ -2,7 +2,7 @@
 # Host stage: hand the container the host's KVM device.
 
 [ -c /dev/kvm ] \
-  || die "/dev/kvm not found — virtualisation off in firmware, or kvm module not loaded (disable the plugin with ENABLE_KVM=0)"
+  || die "/dev/kvm not found — virtualisation off in firmware, or kvm module not loaded (switch the plugin off in the project's settings)"
 
 pass_arg --device /dev/kvm
 

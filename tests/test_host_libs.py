@@ -11,40 +11,13 @@ from conftest import REPO, orchestrator
 from orchestrator import agents, config, plugins
 
 
-def scan(sb, text, commented=False):
-    path = sb.tmp / "scanned.env"
-    path.write_bytes(text.encode())
-    return config.scan_env(path, commented)
-
-
-# --- .env.example: src/orchestrator/config.py reads the sandbox's names from it ------------------
-
-def test_env_scan_parses_without_executing(sb):
-    text = "\n".join([
-        "# comment", "", "export A=1", 'B = "two words"', "C='single'", "D=x=y", "   E=  padded  ",
-        "F=$(touch pwned)", "1BAD=no", "some prose with = in it", "G=crlf\r", "A=2", "H=\"", "I=''",
-        "\tJ=\ttabbed\t", "exportK=glued", "L=#not a comment",
-    ])
-    assert scan(sb, text) == {
-        "A": "2", "B": "two words", "C": "single", "D": "x=y", "E": "padded", "F": "$(touch pwned)",
-        "G": "crlf", "H": '"', "I": "", "J": "tabbed", "K": "glued", "L": "#not a comment"}
-    assert not (REPO / "pwned").exists()
-
-
-def test_env_scan_commented_mode_reads_documented_defaults(sb):
-    assert scan(sb, "#BASE_BRANCH=main\n# prose here\nAGENT=claude\n", True) == {
-        "BASE_BRANCH": "main", "AGENT": "claude"}
-    assert scan(sb, "#BASE_BRANCH=main\n") == {}
-
-
 # --- the project's file -------------------------------------------------------------------
 
 @pytest.mark.parametrize("content, message", [
     ("[]", "must be a JSON object"),
     ("not json", "must be a JSON object"),
     ('{"plugins": []}', ".plugins must be an object"),
-    ('{"env": {"A": {"b": 1}}}', ".env must be an object of scalar values"),
-    ('{"env": {"A": [1]}}', ".env must be an object of scalar values"),
+    ('{"agents": {"claude": 1}}', ".agents must be an object of objects"),
 ])
 def test_malformed_project_config_fails(sb, content, message):
     sb.config({}).write_text(content)
@@ -78,36 +51,35 @@ def test_project_config_file_location_can_be_overridden(sb):
 
 # --- settings: precedence -----------------------------------------------------------------
 
-def test_each_layer_overrides_the_one_below(sb):
-    show = 'echo "effort=$CLAUDE_EFFORT"'
-    assert sb.staged(show, CLAUDE_EFFORT="low").ok().out.endswith("effort=low\n")
-    sb.config({"env": {"CLAUDE_EFFORT": "max"}})
-    assert sb.staged(show, CLAUDE_EFFORT="low").ok().out.endswith("effort=max\n")
-    env = sb._env({"CLAUDE_EFFORT": "low"})
-    assert config.apply_settings(env, config.load_project(env), {"CLAUDE_EFFORT": "high"}) == ["CLAUDE_EFFORT"]
+def test_the_file_sets_each_setting_under_its_owners_key(sb):
+    """The sandbox's own at the top, an agent's under .agents, a plugin's in its section; the
+    stages read them as the variables they declare, a switch as 1 or 0."""
+    sb.config({"agent": "copilot", "agentVersion": 1.5, "agents": {"claude": {"effort": "max", "homeMount": False}},
+               "plugins": {"git-workspace": {"baseBranch": "trunk"}, "agent-workspace": {"cleanup": True}}})
+    run = sb.staged('echo "$AGENT $AGENT_VERSION $CLAUDE_EFFORT $CLAUDE_HOME_MOUNT $BASE_BRANCH $AGENT_WORKSPACE_CLEANUP"').ok()
+    assert run.out.endswith("copilot 1.5 max 0 trunk 1\n")
+    env = sb._env({})
+    assert config.apply_settings(env, config.load_project(env), {"CLAUDE_EFFORT": "high"}) == [
+        "CLAUDE_EFFORT", "agent", "agentVersion", "agents.claude.effort", "agents.claude.homeMount",
+        "plugins.agent-workspace.cleanup", "plugins.git-workspace.baseBranch"]
     assert env["CLAUDE_EFFORT"] == "high"  # --set: this run alone
 
 
-def test_the_repos_env_file_sets_nothing(sb):
-    """The project's file is the one place a project's settings are made: its .env is its own."""
-    sb.dotenv("SECRET_API_KEY=hunter2\nENABLE_ANYTHING=0\nGH_APP_ID=99\nCLAUDE_EFFORT=high\n")
-    run = sb.staged('echo "flag=${ENABLE_ANYTHING-unset} app=${GH_APP_ID-unset} effort=${CLAUDE_EFFORT-unset}"\n'
-                    'env | grep -c hunter2 || true').ok()
-    assert "flag=unset app=unset effort=unset" in run.out
-    assert run.out.endswith("0\n")
+def test_set_takes_only_the_names_settings_are_read_from(sb):
     env = sb._env({})
-    assert config.apply_settings(env, config.load_project(env)) == []
+    with pytest.raises(orchestrator.Die, match="--set NOT_A_SETTING: not a sandbox setting"):
+        config.apply_settings(env, config.load_project(env), {"NOT_A_SETTING": "1"})
 
 
-def test_an_unknown_name_in_the_config_env_block_is_a_typo(sb):
-    sb.config({"env": {"CLAUDE_EFORT": "high"}})
-    sb.staged("").dies(".env.CLAUDE_EFORT is not a sandbox setting")
-
-
-def test_config_env_scalars_become_strings(sb):
-    sb.config({"env": {"ENABLE_KVM": 0, "ENABLE_HERDR": True, "AGENT_VERSION": 1.5, "CLAUDE_MODEL": 3000.0}})
-    run = sb.staged('echo "$ENABLE_KVM $ENABLE_HERDR $AGENT_VERSION $CLAUDE_MODEL"').ok()
-    assert run.out.endswith("0 true 1.5 3000\n")
+def test_your_environment_sets_nothing(sb):
+    """Neither an export nor a .env: a setting's variable, or one an authentication fills, is
+    dropped from what run.sh starts with; the rest of your environment stays."""
+    owners = config.declared({})
+    environ = {"CLAUDE_EFFORT": "high", "GH_APP_ID": "99", "GH_AUTH": "coder", "HOME": "/h", "PATH": "/bin"}
+    assert config.without_settings(environ, owners) == {"HOME": "/h", "PATH": "/bin"}
+    sb.dotenv("SECRET_API_KEY=hunter2\nCLAUDE_EFFORT=high\n")
+    run = sb.staged('echo "effort=${CLAUDE_EFFORT-unset}"; env | grep -c hunter2 || true').ok()
+    assert "effort=unset" in run.out and run.out.endswith("0\n")
 
 
 # --- plugins: discovery, enablement, validation (src/orchestrator/plugins.py) ---------------------
@@ -140,11 +112,6 @@ def resolve(sb, root, validate=False, **env):
     return " ".join(p.name for p in enabled)
 
 
-def test_flag_names():
-    assert plugins.flag_name("github-auth") == "ENABLE_GITHUB_AUTH"
-    assert plugins.flag_name("a-b-c") == "ENABLE_A_B_C"
-
-
 def test_plugins_run_in_priority_then_name_order(sb, fake_plugins):
     fake_plugins("zeta", priority=10, defaultEnabled=True)
     fake_plugins("beta", priority=20, defaultEnabled=True)
@@ -168,20 +135,14 @@ def test_enablement_precedence(sb, fake_plugins):
     fake_plugins("unspecified")
     root = fake_plugins.root
     assert resolve(sb, root) == "on-by-default"
-    flags = {"ENABLE_ON_BY_DEFAULT": "off", "ENABLE_OFF_BY_DEFAULT": "yes", "ENABLE_UNSPECIFIED": "true"}
-    assert resolve(sb, root, **flags) == "off-by-default unspecified"
-    sb.config({"plugins": {"unspecified": {"enabled": False}, "on-by-default": {"enabled": 1}}})
-    assert resolve(sb, root, **flags) == "off-by-default on-by-default"
+    sb.config({"plugins": {"on-by-default": {"enabled": False}, "off-by-default": {"enabled": True}, "unspecified": {"enabled": 1}}})
+    assert resolve(sb, root) == "off-by-default unspecified"
 
 
-@pytest.mark.parametrize("config_, env, source", [
-    ({}, {"ENABLE_P": "maybe"}, "ENABLE_P must be 0 or 1 (got: maybe)"),
-    ({"plugins": {"p": {"enabled": "sometimes"}}}, {}, '.plugins["p"].enabled) must be 0 or 1'),
-])
-def test_invalid_enablement_names_its_source(sb, fake_plugins, config_, env, source):
+def test_invalid_enablement_names_its_source(sb, fake_plugins):
     fake_plugins("p")
-    sb.config(config_)
-    assert source in resolve(sb, fake_plugins.root, **env)
+    sb.config({"plugins": {"p": {"enabled": "sometimes"}}})
+    assert '.plugins["p"].enabled) must be 0 or 1' in resolve(sb, fake_plugins.root)
 
 
 def test_agent_specific_plugins_drop_out_for_other_agents(sb, fake_plugins):
@@ -195,13 +156,17 @@ def test_conflicting_plugins_cannot_run_together(sb, fake_plugins):
     fake_plugins("a", defaultEnabled=True, conflicts=["b"])
     fake_plugins("b", defaultEnabled=True)
     assert "Plugins 'a' and 'b' cannot be enabled together" in resolve(sb, fake_plugins.root, True)
-    assert resolve(sb, fake_plugins.root, True, ENABLE_B=0) == "a"
+    sb.config({"plugins": {"b": {"enabled": False}}})
+    assert resolve(sb, fake_plugins.root, True) == "a"
 
 
-def test_required_env_must_be_set(sb, fake_plugins):
-    fake_plugins("needy", defaultEnabled=True, requiredEnv=["NEEDY_KEY"])
-    assert "Plugin 'needy' requires NEEDY_KEY" in resolve(sb, fake_plugins.root, True)
-    assert resolve(sb, fake_plugins.root, True, NEEDY_KEY="x") == "needy"
+def test_required_settings_must_be_set(sb, fake_plugins):
+    fake_plugins("needy", defaultEnabled=True, requiredEnv=["NEEDY_KEY"],
+                 settings=[{"key": "key", "env": "NEEDY_KEY", "label": "Key"}])
+    assert "Plugin 'needy' requires its Key to be set in the project's file (.plugins[\"needy\"].key)" in resolve(
+        sb, fake_plugins.root, True, PLUGIN_ROOT=fake_plugins.root)
+    sb.config({"plugins": {"needy": {"key": "x"}}})
+    assert resolve(sb, fake_plugins.root, True, PLUGIN_ROOT=fake_plugins.root) == "needy"
 
 
 def test_required_capabilities_name_their_providers(sb, fake_plugins):
@@ -209,10 +174,12 @@ def test_required_capabilities_name_their_providers(sb, fake_plugins):
     fake_plugins("prov-a", provides=["workspace"])
     fake_plugins("prov-b", provides=["workspace", "other"])
     fake_plugins("lonely", defaultEnabled=True, requires=["nothing-provides-this"])
-    assert "requires the 'workspace' capability. Enable one of: prov-a,prov-b" in resolve(
-        sb, fake_plugins.root, True, ENABLE_LONELY=0)
-    assert resolve(sb, fake_plugins.root, True, ENABLE_LONELY=0, ENABLE_PROV_B=1) == "consumer prov-b"
-    assert "<none available>" in resolve(sb, fake_plugins.root, True, ENABLE_CONSUMER=0)
+    sb.config({"plugins": {"lonely": {"enabled": False}}})
+    assert "requires the 'workspace' capability. Enable one of: prov-a,prov-b" in resolve(sb, fake_plugins.root, True)
+    sb.config({"plugins": {"lonely": {"enabled": False}, "prov-b": {"enabled": True}}})
+    assert resolve(sb, fake_plugins.root, True) == "consumer prov-b"
+    sb.config({"plugins": {"consumer": {"enabled": False}}})
+    assert "<none available>" in resolve(sb, fake_plugins.root, True)
 
 
 # --- contract/host/plugins.sh: what a host.sh is sourced with ---------------------------------------

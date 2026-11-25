@@ -1,6 +1,5 @@
 {
   "repo": "https://github.com/owner/repo",
-  "env": {},
   "plugins": {
     "data-mounts": {
       "mounts": [

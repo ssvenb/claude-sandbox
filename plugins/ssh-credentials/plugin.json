@@ -8,6 +8,7 @@
   "requiredEnv": ["SSH_AUTH"],
   "settings": [
     {
+      "key": "auth",
       "env": "SSH_AUTH",
       "type": "auth",
       "auth": "ssh-key",
@@ -20,6 +21,7 @@
       }
     },
     {
+      "key": "hostPattern",
       "env": "SSH_HOST_PATTERN",
       "type": "string",
       "label": "Hosts",
@@ -27,6 +29,7 @@
       "default": "*"
     },
     {
+      "key": "hostSuffix",
       "env": "SSH_HOST_SUFFIX",
       "type": "string",
       "label": "Domain suffix",

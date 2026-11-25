@@ -99,10 +99,10 @@ fi
 sysbox_registered() { docker info --format '{{range $name, $_ := .Runtimes}}{{$name}} {{end}}' 2>/dev/null | grep -qw sysbox-runc; }
 if have sysbox-runc && sysbox_registered; then ok sysbox-runc
 elif have sysbox-runc; then
-  warn "sysbox-runc is installed but this Docker daemon ($(docker info --format '{{.OperatingSystem}}' 2>/dev/null)) does not list it as a runtime: the docker-cli plugin will refuse to start. Docker Desktop's daemon cannot use it; use Docker Engine on this host, or set ENABLE_DOCKER_CLI=0 in your projects."
+  warn "sysbox-runc is installed but this Docker daemon ($(docker info --format '{{.OperatingSystem}}' 2>/dev/null)) does not list it as a runtime: the docker-cli plugin will refuse to start. Docker Desktop's daemon cannot use it; use Docker Engine on this host, or switch the docker-cli plugin off in your projects."
 # Its package restarts Docker: never under running containers (the dashboard's sync runs this with --yes).
 elif have docker && have dpkg && [ -n "$(docker ps -q 2>/dev/null)" ]; then
-  warn "sysbox-runc is missing, and installing it restarts Docker: stop the running containers (docker ps) and run ./install.sh again, or set ENABLE_DOCKER_CLI=0 in your projects."
+  warn "sysbox-runc is missing, and installing it restarts Docker: stop the running containers (docker ps) and run ./install.sh again, or switch the docker-cli plugin off in your projects."
 elif have docker && have dpkg \
   && confirm "sysbox-runc is missing (the docker-cli plugin runs sandboxes under it). Install Sysbox's latest .deb from GitHub? It restarts Docker."; then
   # A token, where there is one (CI), spares the API's rate limit for anonymous callers; failing, it warns below.
@@ -113,11 +113,11 @@ elif have docker && have dpkg \
   if [ -n "$deb" ] && curl -fsSLo "$tmp/sysbox.deb" "$deb" && chmod 644 "$tmp/sysbox.deb" && $sudo apt-get install -y "$tmp/sysbox.deb" && sysbox_registered; then
     ok "sysbox-runc (installed)"
   else
-    warn "Sysbox did not install (see above): sandboxes will not start until it does, or ENABLE_DOCKER_CLI=0 is set in their project."
+    warn "Sysbox did not install (see above): sandboxes will not start until it does, or the docker-cli plugin is switched off in their project."
   fi
   rm -rf "$tmp"
 else
-  warn "sysbox-runc is missing: the docker-cli plugin runs sandboxes under it. Install Sysbox (https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md), or set ENABLE_DOCKER_CLI=0 in your projects."
+  warn "sysbox-runc is missing: the docker-cli plugin runs sandboxes under it. Install Sysbox (https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md), or switch the docker-cli plugin off in your projects."
 fi
 have flock || warn "flock (util-linux) is missing: the upstream-proxy plugin needs it."
 [ ${#MISSING[@]} -eq 0 ] || die "Install what is missing (${MISSING[*]}) and run ./install.sh again, or pass --yes to let it."
@@ -259,7 +259,7 @@ fi
 step "Done"
 say "  A project is a file in ~/.config/claude-sandbox/projects, its name the file's:"
 say "    echo '{\"repo\": \"https://github.com/owner/repo\"}' > ~/.config/claude-sandbox/projects/my-app.json"
-say "    # \"repo\": a git URL or a path on this machine; $here/.env.example lists the settings (the web UI's gear edits them too)"
+say "    # \"repo\": a git URL or a path on this machine; the web UI's gear edits its settings"
 say "    claude-sandbox --project my-app # or $here/run.sh --project my-app"
 if [ "$WEB" = 1 ]; then
   say "  The web UI, for every project in ${listing/#$HOME/\~}:"

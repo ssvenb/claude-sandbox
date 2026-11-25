@@ -3,6 +3,6 @@
 # Never the host's socket: with it the agent could reach every other sandbox and be root on the host.
 
 docker info --format '{{range $name, $_ := .Runtimes}}{{$name}} {{end}}' 2>/dev/null | grep -qw sysbox-runc \
-  || die "docker-cli needs the Sysbox runtime (sysbox-runc) on this host, to give the sandbox a Docker daemon of its own: install it (https://github.com/nestybox/sysbox), or disable the plugin with ENABLE_DOCKER_CLI=0"
+  || die "docker-cli needs the Sysbox runtime (sysbox-runc) on this host, to give the sandbox a Docker daemon of its own: install it (https://github.com/nestybox/sysbox), or switch the plugin off in the project's settings"
 
 pass_arg --runtime=sysbox-runc

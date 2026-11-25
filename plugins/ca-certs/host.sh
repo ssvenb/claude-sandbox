@@ -5,7 +5,7 @@
 
 CA_CERTS_DIR="${CA_CERTS_DIR:-/usr/local/share/ca-certificates}"
 [ -d "$CA_CERTS_DIR" ] \
-  || die "CA_CERTS_DIR not found: $CA_CERTS_DIR (set it in the project's file, or disable the plugin there)"
+  || die "ca-certs: its certificates directory is not there: $CA_CERTS_DIR (set it in the project's settings, or switch the plugin off)"
 
 # The build needs them as well (curl/apt/npm/pip during `docker build`), as one PEM bundle;
 # DER files are converted here for the same reason root-init.sh does, and anything else is

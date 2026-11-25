@@ -635,6 +635,11 @@ def test_permissions_hand_the_build_and_the_boot_the_tools(sb):
     assert run.builds == {"PERMISSIONS_TOOLS": "apt strace"} and run.env == {"PERMISSIONS_TOOLS": "apt strace"}
 
 
+def test_permissions_hand_the_boot_its_switches(sb):
+    run = sb.plugin("permissions", PERMISSIONS_SUDO="1", PERMISSIONS_HOME_INSTALLS="1").ok()
+    assert run.env == {"PERMISSIONS_SUDO": "1", "PERMISSIONS_HOME_INSTALLS": "1"}
+
+
 @pytest.mark.parametrize("value", [["rm"], "apt", ["apt; id"]])
 def test_permissions_reject_unknown_tools(sb, value):
     sb.config({"plugins": {"permissions": {"tools": value}}})

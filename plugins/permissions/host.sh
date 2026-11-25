@@ -1,6 +1,8 @@
 # shellcheck shell=bash
 # Host stage: the tools the agent may sudo, from .plugins.permissions.tools. A build arg, so
 # install.sh builds in the ones the image lacks, and a value, so root-init.sh writes their sudoers.
+# Settings stay on the host unless passed: the switches too, for root-init.sh and agent-init.sh.
+pass_env PERMISSIONS_SUDO PERMISSIONS_HOME_INSTALLS
 
 _perm_tools=$(plugin_config_json '.tools' '[]')
 printf '%s' "$_perm_tools" | jq -e 'type == "array" and all(IN("apt", "npm", "pip", "chown", "mount", "network", "tcpdump", "strace"))' >/dev/null 2>&1 \

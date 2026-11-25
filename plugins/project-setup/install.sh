@@ -11,7 +11,7 @@ apt_install() {
 }
 
 for tool in ${BUILD_TOOLS:-}; do
-  echo "🔧 build-tools: $tool"
+  echo "🔧 project-setup: $tool"
   case "$tool" in
     python-pip) apt_install python3-pip python3-venv ;;
     terraform)

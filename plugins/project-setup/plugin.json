@@ -1,0 +1,49 @@
+{
+  "name": "project-setup",
+  "description": "Sets the sandbox up for the repo being worked on: builds the tools and packages it needs into the image (the recipes in tools, all of them when unset, and the apt, npm and pip packages listed), then runs its setup commands in /workspace as the agent user at every boot.",
+  "priority": 25,
+  "defaultEnabled": true,
+  "provides": ["project-setup"],
+  "requires": [],
+  "requiredEnv": [],
+  "settings": [
+    {
+      "key": "tools",
+      "type": "list",
+      "items": {
+        "type": "enum",
+        "choices": ["python-pip", "terraform", "ruff", "chromium", "playwright"]
+      },
+      "label": "Tools",
+      "description": "Built into the image. Unset: all of them; an empty list: none."
+    },
+    {
+      "key": "apt",
+      "type": "list",
+      "items": { "type": "string", "placeholder": "ripgrep", "monospace": true },
+      "label": "apt packages",
+      "description": "Built into the image."
+    },
+    {
+      "key": "npm",
+      "type": "list",
+      "items": { "type": "string", "placeholder": "pnpm@9", "monospace": true },
+      "label": "npm packages",
+      "description": "Installed globally, into the image."
+    },
+    {
+      "key": "pip",
+      "type": "list",
+      "items": { "type": "string", "placeholder": "uv", "monospace": true },
+      "label": "pip packages",
+      "description": "Installed into the image (pip itself comes along when missing)."
+    },
+    {
+      "key": "setup",
+      "type": "list",
+      "items": { "type": "string", "placeholder": "make bootstrap", "monospace": true },
+      "label": "Setup commands",
+      "description": "Shell commands run in /workspace as the agent user, in order, at every boot: installing the project's dependencies, building it. Starting its server is dev-server's job."
+    }
+  ]
+}

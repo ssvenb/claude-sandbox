@@ -8,7 +8,7 @@ RUN find /i -type f ! -name install.sh -delete
 FROM node:20-bookworm-slim
 
 # What a fresh Ubuntu has, plus jq, which the boot scripts need. Every other tool comes from a
-# plugin's install.sh (the build-tools plugin for general-purpose ones).
+# plugin's install.sh (project-setup for what the repo being worked on needs).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
@@ -35,7 +35,7 @@ ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt \
 
 # Plugin dependencies first: they change far less often than the agent CLI's version. Only those
 # in ENABLED_PLUGINS (resolved by run.sh, empty means all) get installed, so flipping a flag
-# rebuilds from here. BUILD_TOOLS and BUILD_TOOLS_APT/_NPM/_PIP are the build-tools plugin's (see its host.sh);
+# rebuilds from here. BUILD_TOOLS and BUILD_TOOLS_APT/_NPM/_PIP are project-setup's (see its host.sh);
 # the default is every recipe it has.
 ARG ENABLED_PLUGINS=
 ARG BUILD_TOOLS="python-pip terraform ruff chromium playwright"

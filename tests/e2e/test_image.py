@@ -211,11 +211,11 @@ def test_package_managers(image):
     assert b.env["PATH"].startswith("/home/node/.npm-global/bin:/home/node/.local/bin:")
 
 
-def test_project_deps_sets_up_as_the_agent(image):
+def test_project_setup_runs_as_the_agent(image):
     probe = "cat /workspace/setup-user /workspace/setup-cwd"
     setup = ["id -un > setup-user", "false", "pwd > setup-cwd"]
-    b = boot(image, "git-workspace project-deps", probe, REPO_URL="/srv/origin.git", BASE_BRANCH="main",
-             PROJECT_DEPS_SETUP=json.dumps(setup))
+    b = boot(image, "git-workspace project-setup", probe, REPO_URL="/srv/origin.git", BASE_BRANCH="main",
+             PROJECT_SETUP=json.dumps(setup))
     assert b.out.splitlines() == ["node", "/workspace"]
     assert "setup command failed: false" in b.log
     assert "already run for you in /workspace during boot (id -un > setup-user; false; pwd > setup-cwd)" \

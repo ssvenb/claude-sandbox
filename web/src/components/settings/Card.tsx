@@ -11,15 +11,12 @@ export function Card({ card, query }: { card: CardSpec; query: string }) {
   const [open, setOpen] = useState(!!card.open);
   const shown = open || !!query;
   const body = useId();
-  const set = card.fields.filter(f => f.slot.get() !== undefined).length;
-  const summary = card.summary ?? (set ? set + ' set' : '');
   return (
     <section data-card={card.key} className={['card', card.off && 'off', shown && 'open', hidden && 'hidden'].filter(Boolean).join(' ')}>
       <div className="head">
         <button type="button" className="toggle" aria-expanded={shown} aria-controls={body} onClick={() => setOpen(!shown)}>
           <span className="chev" aria-hidden="true" />
-          <b>{card.title}{card.tag && <span className="agent">{card.tag}</span>}</b>
-          {summary && <span className="count">{summary}</span>}
+          <b>{card.title}</b>
         </button>
         {shown && card.description && <Info text={card.description} about={card.title} />}
         {card.right}

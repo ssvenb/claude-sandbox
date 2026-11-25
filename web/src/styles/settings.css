@@ -37,7 +37,6 @@
   .toggle:hover b { color: var(--link); }
   .toggle:focus-visible { outline: 2px solid var(--link); outline-offset: -2px; }
   .toggle b { font-weight: 600; }
-  .toggle .agent { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 8px; }
   .toggle .count { justify-self: end; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .chev { width: 0; height: 0; align-self: center; border-left: 6px solid var(--muted); border-block: 4.5px solid transparent;
           transition: transform .15s; }

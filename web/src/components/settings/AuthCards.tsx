@@ -41,8 +41,6 @@ function entrySpec(types: AuthConfig['types']): SettingSpec {
   };
 }
 
-const plural = (n: number, one: string, many = one + 's') => `${n} ${n === 1 ? one : many}`;
-
 export function AuthCards({ auth, projects, draft, query, onChanged }: Props) {
   const form = useForm();
   const token = useMemo(() => ({}), []);
@@ -88,7 +86,7 @@ export function AuthCards({ auth, projects, draft, query, onChanged }: Props) {
   return (
     <div className="stack">
       <Card query={query} card={{
-        key: 'projects', title: 'Projects', open: true, fields: [], summary: plural(listed.length, 'project'),
+        key: 'projects', title: 'Projects', open: true, fields: [],
         description: 'A file each in the projects folder. Added and deleted at once; its own settings are behind its gear.',
         more: ' ' + listed.join(' ').toLowerCase(),
         after: <>
@@ -109,7 +107,7 @@ export function AuthCards({ auth, projects, draft, query, onChanged }: Props) {
         </>,
       }} />
       <Card query={query} card={{
-        key: 'auth', title: 'Authentications', open: true, summary: plural(rows.current.filter(r => r.name).length, 'entry', 'entries'),
+        key: 'auth', title: 'Authentications', open: true,
         description: 'Every identity, key and token a sandbox may use, each under a name; projects and plugins only name one. Saved readable by you alone; a saved key, token or client secret is never shown again, and kept while you leave it as it is.',
         more: ' ' + Object.keys(draft).join(' ').toLowerCase(),
         fields: [{ spec: { type: 'list', label: 'Entries', items: entrySpec(auth.types) }, slot: entries, name: 'auth' }],

@@ -51,7 +51,6 @@ export function SettingsCards({ declared, draft, query }: Props) {
     },
   };
 
-  const agentNow = env()?.AGENT ?? declared.kernel.settings.find(s => s.env === 'AGENT')?.default;
   const isAgent = (s: SettingSpec) => s.env === 'AGENT' || s.env === 'AGENT_VERSION';  // the Agents card's own
   const sandbox: CardSpec[] = [
     {
@@ -62,10 +61,10 @@ export function SettingsCards({ declared, draft, query }: Props) {
       ],
     },
     {
-      key: 'agents', title: 'Agents', fields: declared.kernel.settings.filter(isAgent).map(s => envField(s)), summary: agentNow ? agentNow + ' selected' : '',
+      key: 'agents', title: 'Agents', fields: declared.kernel.settings.filter(isAgent).map(s => envField(s)),
       cards: declared.agents.map(a => ({
         key: 'agent-' + a.name, title: a.name, description: a.description,
-        fields: a.settings.map(s => envField(s)), tag: a.name === agentNow ? 'selected' : '',
+        fields: a.settings.map(s => envField(s)),
         // Its own plugins: kept in the file whichever agent runs, applied only with this one.
         cardsTitle: 'Plugins', cards: declared.plugins.filter(p => p.requiredAgent === a.name).map(plugin),
       })),

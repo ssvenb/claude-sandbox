@@ -40,14 +40,21 @@ def test_claude_effort_is_validated(sb):
     sb.agent(CLAUDE_HOME_MOUNT="0", AGENT_AUTH_PROVIDED=1, CLAUDE_EFFORT="turbo").dies("CLAUDE_EFFORT must be one of")
 
 
-def test_copilot_needs_its_own_token(sb):
-    sb.agent(AGENT="copilot").dies("Copilot needs credentials: set COPILOT_AUTH")
-    assert sb.agent(AGENT="copilot", COPILOT_GITHUB_TOKEN="pat").ok().env == {"COPILOT_GITHUB_TOKEN": "pat"}
+COPILOT_STAGE = "agent_home_stage\nagent_host_stage"
+
+
+def test_copilot_needs_its_own_token_without_its_home_mounted(sb):
+    for off in ("0", "false"):
+        sb.bash(COPILOT_STAGE, AGENT="copilot", COPILOT_HOME_MOUNT=off).dies("Copilot needs credentials: set COPILOT_AUTH")
+    sb.bash(COPILOT_STAGE, AGENT="copilot", ENABLE_COPILOT_HOME="0").dies("Copilot needs credentials")  # the old plugin switch
+    assert sb.bash(COPILOT_STAGE, AGENT="copilot", COPILOT_HOME_MOUNT="0", COPILOT_GITHUB_TOKEN="pat").ok().env \
+        == {"COPILOT_GITHUB_TOKEN": "pat"}
     assert sb.agent(AGENT="copilot", AGENT_AUTH_PROVIDED=1).ok().args == []
+    sb.bash(COPILOT_STAGE, AGENT="copilot", COPILOT_HOME_MOUNT="maybe").dies("COPILOT_HOME_MOUNT must be 0 or 1")
 
 
 def test_copilot_home_mounts_a_copy_per_run_and_replaces_the_token(sb):
-    stage = "ENABLED_PLUGINS=copilot-home\nplugins_host_stage\nagent_host_stage"
+    stage = COPILOT_STAGE
     sb.bash(stage, AGENT="copilot").dies("no Copilot config directory")  # nothing at the default path yet
     home = sb.home / ".copilot"
     (home / "session-state").mkdir(parents=True)

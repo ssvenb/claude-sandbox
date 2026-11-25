@@ -6,7 +6,7 @@
 # $AGENT_LAUNCH_CMD is unquoted on purpose so a plugin-supplied wrapper splits into words.
 #
 # Every run's session is named after its RUN_ID, so `run.sh --resume` picks the same session back
-# up. It only outlives the container when ~/.copilot is mounted (copilot-home).
+# up. It only outlives the container when ~/.copilot is mounted (COPILOT_HOME_MOUNT).
 #
 # $AGENT_TASK (run.sh --task) is the user's task: it closes that first message, which then asks
 # for it to be done instead of for a wait.

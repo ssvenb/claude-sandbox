@@ -46,6 +46,12 @@ if [ -n "$BRANCH_PREFIX" ]; then
   pass_value BRANCH_PREFIX "$BRANCH_PREFIX"
 fi
 
+# The commit identity, when the project names one; else the agent stage derives it.
+GIT_USER_NAME=$(plugin_config '.userName' "")
+[ -z "$GIT_USER_NAME" ] || pass_value GIT_USER_NAME "$GIT_USER_NAME"
+GIT_USER_EMAIL=$(plugin_config '.userEmail' "")
+[ -z "$GIT_USER_EMAIL" ] || pass_value GIT_USER_EMAIL "$GIT_USER_EMAIL"
+
 case "$(plugin_config '.branchGuard' true)" in
   false|0|no|off) ;;
   *) pass_value BRANCH_GUARD 1 ;;

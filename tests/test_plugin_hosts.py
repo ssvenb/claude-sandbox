@@ -419,9 +419,9 @@ def test_git_workspace_without_a_repo_hands_over_none(sb):
     assert sb.plugin("git-workspace", HOST_CWD="").ok().env == {"BRANCH_GUARD": "1"}
 
 
-def test_git_workspace_branch_guard_can_be_switched_off(sb):
-    sb.config({"plugins": {"git-workspace": {"branchGuard": False}}})
-    assert sb.plugin("git-workspace", HOST_CWD="").ok().env == {}
+def test_git_workspace_branch_guard_can_be_switched_off_and_the_identity_set(sb):
+    sb.config({"plugins": {"git-workspace": {"branchGuard": False, "userName": "Bot", "userEmail": "bot@x"}}})
+    assert sb.plugin("git-workspace", HOST_CWD="").ok().env == {"GIT_USER_NAME": "Bot", "GIT_USER_EMAIL": "bot@x"}
 
 
 def test_git_workspace_finds_a_default_branch_not_called_main(sb):

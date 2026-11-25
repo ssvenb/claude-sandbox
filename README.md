@@ -933,6 +933,7 @@ own section holds more: see its manifest, or the settings form):
 | `.plugins["github-auth"].auth` | Name of the `github-app` authentication the sandbox authenticates as |
 | `.plugins["git-workspace"].baseBranch` | Branch to cut from (default: the repo's own default branch, via `origin/HEAD`) |
 | `.plugins["git-workspace"].branchGuard` | Keep the agent on its branch with the `guard-branch.py` hook, Claude only (default: `true`) |
+| `.plugins["git-workspace"].userName`, `.userEmail` | Commit identity (default: the branch prefix and `<prefix>@sandbox.local` when one is set, else the agent manifest's) |
 | `.plugins["git-workspace"].branchPrefix` | Leading segment of the per-run branch name (default: the agent manifest's `branchPrefix`, else the agent's directory name) |
 | `.plugins["agent-workspace"].dir` | Host dir holding the per-run mirrors of `/workspace`, created if missing (default: `$HOME/.agent-workspaces`; each run uses `<dir>/<project>-<date>-<RUN_ID>`) |
 | `.plugins["agent-workspace"].cleanup` | Delete the run's mirror directory when the container exits; `false` keeps it for inspection, at one leftover directory per run (default: `true`) |

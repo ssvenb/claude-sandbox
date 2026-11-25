@@ -21,6 +21,20 @@
       "placeholder": "claude-code"
     },
     {
+      "key": "userName",
+      "type": "string",
+      "label": "Commit author name",
+      "description": "Name the agent's commits are authored under. Default: the branch prefix when one is set, else the agent's own (Claude Code, GitHub Copilot CLI).",
+      "placeholder": "Claude Code"
+    },
+    {
+      "key": "userEmail",
+      "type": "string",
+      "label": "Commit author email",
+      "description": "Email the agent's commits are authored under. Default: <branch prefix>@sandbox.local when a prefix is set, else <agent>@sandbox.local.",
+      "placeholder": "claude@sandbox.local"
+    },
+    {
       "key": "baseBranch",
       "env": "BASE_BRANCH",
       "type": "string",

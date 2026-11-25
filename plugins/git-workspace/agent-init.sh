@@ -15,6 +15,9 @@ else
   agent_git_name=$(agent_meta '.git.userName // empty')
   agent_git_email=$(agent_meta '.git.userEmail // empty')
 fi
+# The project's own userName/userEmail settings win over both.
+agent_git_name="${GIT_USER_NAME:-$agent_git_name}"
+agent_git_email="${GIT_USER_EMAIL:-$agent_git_email}"
 
 # Each run gets its own branch so parallel agents don't collide: the date makes a branch listing
 # readable, the RUN_ID keeps it unique.

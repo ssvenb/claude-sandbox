@@ -146,6 +146,9 @@ def test_an_explicit_branch_prefix_is_also_the_identity(image):
     b = boot(image, "git-workspace", GIT_PROBE, REPO_URL="/srv/origin.git", BASE_BRANCH="main",
              BRANCH_PREFIX="feature")
     assert b.out.splitlines()[:3] == ["feature/20260102-abc123", "feature", "feature@sandbox.local"]
+    b = boot(image, "git-workspace", GIT_PROBE, REPO_URL="/srv/origin.git", BASE_BRANCH="main",
+             BRANCH_PREFIX="feature", GIT_USER_NAME="Bot", GIT_USER_EMAIL="bot@x")  # the project's identity wins
+    assert b.out.splitlines()[:3] == ["feature/20260102-abc123", "Bot", "bot@x"]
 
 
 def test_without_a_base_branch_the_clones_default_branch_is_cut_from(image):

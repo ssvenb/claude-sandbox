@@ -135,7 +135,7 @@ def test_git_workspace_creates_the_runs_branch(image):
 
 
 def test_without_a_repo_the_run_gets_an_empty_one_of_its_own(image):
-    b = boot(image, "git-workspace", "cd /workspace; git rev-parse --abbrev-ref HEAD; git remote; git config user.email; stat -c %U .",
+    b = boot(image, "git-workspace", "cd /workspace; git symbolic-ref --short HEAD; git remote; git config user.email; stat -c %U .",
              BRANCH_GUARD="1")
     assert b.out.splitlines() == [f"{PREFIX}/20260102-abc123", f"{AGENT}@sandbox.local", "node"]
     assert "a new git repository at /workspace, with no remote" in b.briefing

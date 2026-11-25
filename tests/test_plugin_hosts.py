@@ -249,32 +249,19 @@ def test_ca_certs_skips_files_that_are_not_certificates(sb, ca_dir):
 
 # --- data-mounts ---------------------------------------------------------------------------
 
-def test_data_mounts(sb):
-    for d in (sb.tmp / "datasets", sb.cwd / "rel/data", sb.home / "scratch"):
-        d.mkdir(parents=True)
-    sb.config({"plugins": {"data-mounts": {"mounts": [
-        f"{sb.tmp}/datasets:/data:ro", "rel/data", "~/scratch:/scratch"]}}})
-    assert sb.plugin("data-mounts").ok().mounts == [
-        f"{sb.tmp}/datasets:/data:ro", f"{sb.cwd}/rel/data:{sb.cwd}/rel/data", f"{sb.home}/scratch:/scratch"]
+@pytest.mark.parametrize("config, mode", [({}, "rw"), ({"readOnly": False}, "rw"), ({"readOnly": True}, "ro")])
+def test_data_mounts_the_projects_own_directory(sb, config, mode):
+    sb.config({"plugins": {"data-mounts": config}})  # the file is project.json → project "project"
+    data = sb.home / ".local/share/claude-sandbox/data/project"
+    assert sb.plugin("data-mounts").ok().mounts == [f"{data}:/data:{mode}"]
+    assert data.is_dir()
 
 
-def test_data_mounts_relative_paths_need_a_checkout(sb):
-    sb.config({"plugins": {"data-mounts": {"mounts": ["~/x", "rel/data"]}}})
-    (sb.home / "x").mkdir()
-    sb.plugin("data-mounts", HOST_CWD="").dies("'rel/data' is relative, but the project's repo is a git URL")
-
-
-@pytest.mark.parametrize("spec, message", [
-    ("/no/such/dir:/data", "no such host path"),
-    (".:data", "container path must be absolute"),
-])
-def test_data_mounts_validation(sb, spec, message):
-    sb.config({"plugins": {"data-mounts": {"mounts": [spec]}}})
-    sb.plugin("data-mounts").dies(message)
-
-
-def test_data_mounts_without_config_does_nothing(sb):
-    assert sb.plugin("data-mounts").ok().args == []
+def test_data_mounts_names_the_directory_after_the_repo_without_a_project_file(sb):
+    data = sb.tmp / "xdg/claude-sandbox/data/my-repo"
+    run = sb.plugin("data-mounts", HOST_CWD="", REPO_URL="https://github.com/me/my-repo.git",
+                    XDG_DATA_HOME=sb.tmp / "xdg")
+    assert run.ok().mounts == [f"{data}:/data:rw"]
 
 
 # --- docker-cli, kvm, netbird: host devices and sockets ---------------------------
@@ -606,6 +593,21 @@ def test_dev_server_demo_runs_shared_stages_and_its_setup_then_restarts_on_chang
         assert count(2)
     finally:
         os.killpg(proc.pid, signal.SIGKILL)
+
+
+# --- permissions ---------------------------------------------------------------------------
+
+def test_permissions_hand_the_build_and_the_boot_the_tools(sb):
+    assert sb.plugin("permissions").ok().builds == {}
+    sb.config({"plugins": {"permissions": {"tools": ["strace", "apt", "apt"]}}})
+    run = sb.plugin("permissions").ok()
+    assert run.builds == {"PERMISSIONS_TOOLS": "apt strace"} and run.env == {"PERMISSIONS_TOOLS": "apt strace"}
+
+
+@pytest.mark.parametrize("value", [["rm"], "apt", ["apt; id"]])
+def test_permissions_reject_unknown_tools(sb, value):
+    sb.config({"plugins": {"permissions": {"tools": value}}})
+    sb.plugin("permissions").dies("must list only")
 
 
 # --- project-setup -------------------------------------------------------------------------

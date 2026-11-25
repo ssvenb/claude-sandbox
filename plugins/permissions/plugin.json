@@ -1,0 +1,37 @@
+{
+  "name": "permissions",
+  "description": "Decides what the agent may run as root: sudo for everything, or sudo for chosen tools only (apt, npm, pip, …), and whether npm -g and pip install into its home. Everything is off by default. Security: most of these tools can make the agent root in its container (apt runs packages' install scripts as root), so pick them for convenience, not as a boundary.",
+  "priority": 25,
+  "defaultEnabled": false,
+  "provides": ["permissions"],
+  "requires": [],
+  "requiredEnv": [],
+  "settings": [
+    {
+      "key": "sudo",
+      "env": "PERMISSIONS_SUDO",
+      "type": "boolean",
+      "label": "Full sudo",
+      "description": "Passwordless sudo for any command.",
+      "default": false
+    },
+    {
+      "key": "tools",
+      "type": "list",
+      "items": {
+        "type": "enum",
+        "choices": ["apt", "npm", "pip", "chown", "mount", "network", "tcpdump", "strace"]
+      },
+      "label": "Tools with sudo",
+      "description": "Passwordless sudo for these only. apt: apt, apt-get, dpkg. npm: global installs into /usr/local. pip: pip, pip3 (built into the image). chown: chown, chmod, for files containers left as root. mount: mount, umount. network: ip, iptables, ip6tables (built in). tcpdump, strace: built in. mount and network need the capabilities docker-cli's Sysbox gives the container."
+    },
+    {
+      "key": "homeInstalls",
+      "env": "PERMISSIONS_HOME_INSTALLS",
+      "type": "boolean",
+      "label": "npm and pip into the home directory",
+      "description": "npm install -g and pip install go into the agent's home, no root needed.",
+      "default": false
+    }
+  ]
+}

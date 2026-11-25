@@ -36,12 +36,13 @@ ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt \
 # Plugin dependencies first: they change far less often than the agent CLI's version. Only those
 # in ENABLED_PLUGINS (resolved by run.sh, empty means all) get installed, so flipping a flag
 # rebuilds from here. BUILD_TOOLS and BUILD_TOOLS_APT/_NPM/_PIP are project-setup's (see its host.sh);
-# the default is every recipe it has.
+# the default is every recipe it has. PERMISSIONS_TOOLS is permissions' (the tools it may sudo).
 ARG ENABLED_PLUGINS=
 ARG BUILD_TOOLS="python-pip terraform ruff chromium playwright"
 ARG BUILD_TOOLS_APT=
 ARG BUILD_TOOLS_NPM=
 ARG BUILD_TOOLS_PIP=
+ARG PERMISSIONS_TOOLS=
 RUN --mount=type=bind,from=installers,source=/i/plugins,target=/tmp/plugins \
     set -eu; for f in /tmp/plugins/*/install.sh; do \
       [ -f "$f" ] || continue; \

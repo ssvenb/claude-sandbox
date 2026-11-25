@@ -54,7 +54,7 @@ def test_the_host_pipeline_builds_and_runs_the_image(sb, run_sh):
                   CLAUDE_EFFORT="low")  # your shell's: not read
     assert done.returncode == 0, done.stderr
     [build], [run] = calls(done, "build"), calls(done, "run")
-    plugins = "herdr data-mounts upstream-proxy package-managers project-setup dev-server agent-status"
+    plugins = "herdr upstream-proxy project-setup dev-server agent-status"
     assert build == ["build", "-t", "claude-agent:claude", "--build-arg", "AGENT=claude",
                      "--build-arg", "AGENT_VERSION=1.2.3", "--build-arg", f"ENABLED_PLUGINS={plugins}", "."]
     run_id = re.fullmatch(r"RUN_ID=([0-9a-f]{6})", run[4])[1]
@@ -266,13 +266,12 @@ def test_project_names_its_file_and_the_repo_it_works_on(sb, run_sh):
     listing.mkdir(parents=True)
     repo = sb.tmp / "repo"
     repo.mkdir()
-    (repo / "f").touch()
-    mounts = {**BASE["plugins"], "data-mounts": {"mounts": ["f:/f"]}}  # relative: resolved against the repo
-    (listing / "app.json").write_text(json.dumps({"repo": str(repo), **BASE, "plugins": mounts}))
+    mirror = {**BASE["plugins"], "agent-workspace": {"enabled": True}}  # names its mirror after the repo
+    (listing / "app.json").write_text(json.dumps({"repo": str(repo), **BASE, "plugins": mirror}))
     done = run_sh("--project", "app", config=None)
     assert done.returncode == 0, done.stderr
     [run] = calls(done, "run")
-    assert f"{repo}/f:/f" in run and f"📄 Project config: {listing / 'app.json'}" in done.stdout
+    assert any("/repo-" in a and a.endswith(":/workspace") for a in run) and f"📄 Project config: {listing / 'app.json'}" in done.stdout
     for name, message in (("nope", "No project 'nope'"), ("../app", "is not a project name")):
         done = run_sh("--project", name, config=None)
         assert done.returncode and message in done.stderr
@@ -284,7 +283,7 @@ def test_project_names_its_file_and_the_repo_it_works_on(sb, run_sh):
 
 def test_a_projects_repo_may_be_a_git_url_never_cloned_on_this_machine(sb, run_sh):
     """A URL repo (private ones too) is cloned only in the container: HOST_CWD is empty, REPO_URL
-    the URL, and the plugins that need a checkout here refuse it."""
+    the URL."""
     listing = sb.home / ".config/claude-sandbox/projects"
     listing.mkdir(parents=True)
     url = "https://github.com/acme/private-widgets.git"  # unreachable: nothing may fetch it
@@ -294,7 +293,3 @@ def test_a_projects_repo_may_be_a_git_url_never_cloned_on_this_machine(sb, run_s
     assert done.returncode == 0, done.stderr
     assert any("/private-widgets-" in a and a.endswith(":/workspace") for a in calls(done, "run")[0])
     assert not (sb.home / ".cache/claude-sandbox/repos").exists()
-    mounts = {**BASE["plugins"], "data-mounts": {"mounts": ["f:/f"]}}
-    (listing / "app.json").write_text(json.dumps({**BASE, "repo": url, "plugins": mounts}))
-    done = run_sh("--project", "app", config=None)
-    assert done.returncode and "is relative, but the project's repo is a git URL" in done.stderr

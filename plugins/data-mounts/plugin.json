@@ -1,22 +1,18 @@
 {
   "name": "data-mounts",
-  "description": "Bind-mounts extra host directories into the container, listed in the project config. Security: mounts are read-write unless the entry ends in :ro, and anything the agent writes there lands on your host as you.",
+  "description": "Mounts the project's own persistent data directory, ~/.local/share/claude-sandbox/data/<project> on the host, at /data, so files survive from one session to the next. Security: unless read-only, anything the agent writes there lands on your host as you.",
   "priority": 15,
-  "defaultEnabled": true,
+  "defaultEnabled": false,
   "provides": ["data-mounts"],
   "requires": [],
   "requiredEnv": [],
   "settings": [
     {
-      "key": "mounts",
-      "type": "list",
-      "items": {
-        "type": "string",
-        "placeholder": "/srv/datasets:/data:ro",
-        "monospace": true
-      },
-      "label": "Mounts",
-      "description": "host:container[:ro], one per mount; ~ is your home."
+      "key": "readOnly",
+      "type": "boolean",
+      "label": "Read-only",
+      "description": "On, the agent can read /data but not change it.",
+      "default": false
     }
   ]
 }

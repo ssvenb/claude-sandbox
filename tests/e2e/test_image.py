@@ -18,7 +18,6 @@ AGENT = os.environ.get("SANDBOX_E2E_AGENT", "claude")
 MANAGED = json.loads((REPO / "agents" / AGENT / "agent.json").read_text())["managedSettings"]
 PREFIX = json.loads((REPO / "agents" / AGENT / "agent.json").read_text())["git"]["branchPrefix"]
 pytestmark = pytest.mark.skipif(not BASE, reason="SANDBOX_E2E_IMAGE is not set")
-claude_only = pytest.mark.skipif(AGENT != "claude", reason="claude-only plugin")
 
 
 @pytest.fixture(scope="module")
@@ -102,7 +101,7 @@ def test_the_agent_does_not_edit_its_guardrails_by_accident(image):
     probe = f"""touch /opt/plugins/x 2>/dev/null && echo plugins writable
 touch /opt/agents/x 2>/dev/null && echo agents writable
 rm -f {MANAGED} 2>/dev/null; [ -f {MANAGED} ] || echo policy removed
-[ -x /opt/plugins/git-workspace/bin/guard-branch.py ] || echo hook not executable"""
+[ -x /opt/plugins/git-workspace/bin/hooks/pre-push ] || echo hook not executable"""
     assert boot(image, "git-workspace", probe).out == ""
 
 
@@ -131,7 +130,8 @@ def test_git_workspace_creates_the_runs_branch(image):
     assert b.out.splitlines() == [branch, name, f"{AGENT}@sandbox.local", "initial", "node"]
     assert (b.env["AGENT_BRANCH"], b.env["AGENT_BRANCH_PREFIX"]) == (branch, PREFIX)
     assert f"on the branch {branch}, created for this sandbox run (RUN_ID=abc123) off main" in b.briefing
-    assert ("You cannot leave this branch" if AGENT == "claude" else "Stay on this branch") in b.briefing
+    assert f"Only this branch can be pushed: a pre-push hook rejects any other ref. Push it by name (`git push origin {branch}`)." \
+        in b.briefing
 
 
 def test_without_a_repo_the_run_gets_an_empty_one_of_its_own(image):
@@ -167,17 +167,16 @@ def test_resume_finds_the_runs_branch_and_its_pull_request(image):
     assert "A pull request already exists for this branch (#7 https://github.com/e2e/repo/pull/7)" in b.briefing
 
 
-@claude_only
-def test_branch_guard_hook_is_installed_and_enforces_the_branch(image):
-    hook = "/opt/plugins/git-workspace/bin/guard-branch.py"
-    probe = f"""cat {MANAGED}; echo
-printf '%s' '{{"tool_input": {{"command": "git checkout main"}}}}' | {hook} 2>/dev/null; echo "checkout=$?"
-printf '{{"tool_input": {{"command": "git push origin %s"}}}}' "$AGENT_BRANCH" | {hook}; echo "own=$?"
-printf '%s' '{{"tool_input": {{"command": "git push origin main"}}}}' | {hook} 2>/dev/null; echo "main=$?" """
-    b = boot(image, "git-workspace", probe, REPO_URL="/srv/origin.git", BASE_BRANCH="main", BRANCH_GUARD="1")
-    *settings, checkout, own, main = b.out.strip().splitlines()
-    assert json.loads("\n".join(settings))["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == hook
-    assert (checkout, own, main) == ("checkout=2", "own=0", "main=2")
+def test_the_branch_guard_lets_the_agent_push_only_its_own_branch(image):
+    probe = """cd /workspace && git clone -q --bare /srv/origin.git /tmp/o.git && git remote set-url origin /tmp/o.git
+git commit -q --allow-empty -m work
+git push -q origin "$AGENT_BRANCH" 2>/dev/null; echo "own=$?"
+git push -q origin HEAD:main 2>/dev/null; echo "main=$?"
+git push -q --no-verify origin HEAD:main 2>/dev/null; echo "no-verify=$?" """  # a guardrail, not a wall
+    assert boot(image, "git-workspace", probe, REPO_URL="/srv/origin.git", BASE_BRANCH="main",
+                BRANCH_GUARD="1").out.splitlines() == ["own=0", "main=1", "no-verify=0"]
+    assert boot(image, "git-workspace", probe, REPO_URL="/srv/origin.git",
+                BASE_BRANCH="main").out.splitlines() == ["own=0", "main=0", "no-verify=0"]
 
 
 def test_github_auth_logs_gh_in_with_the_minted_token(image):

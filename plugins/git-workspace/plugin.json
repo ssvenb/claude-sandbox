@@ -10,7 +10,7 @@
       "key": "branchGuard",
       "type": "boolean",
       "label": "Branch guard",
-      "description": "Keeps the agent on its own branch: a hook blocks switching or creating branches, and pushes of any other branch (Claude only).",
+      "description": "Lets the agent push only its own branch: a git pre-push hook, for every agent, rejects any other ref. A guardrail: git push --no-verify skips it.",
       "default": true
     },
     {

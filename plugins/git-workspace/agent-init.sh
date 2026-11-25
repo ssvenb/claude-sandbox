@@ -70,7 +70,7 @@ else
       "$pr" >> "$AGENT_PROMPT_FILE"
 
   else
-    # Created HERE, before the agent starts, so the branch guard applies to all of its work.
+    # Created HERE, before the agent starts, so all of its work is on it.
     git checkout -b "$AGENT_BRANCH" "origin/$BASE_BRANCH"
     echo "✅ Created branch $AGENT_BRANCH off origin/$BASE_BRANCH in isolated /workspace (RUN_ID=$RUN_ID)"
 
@@ -81,17 +81,19 @@ else
   fi
 fi
 
-# Only claimed when the guard is actually enforcing it — switched on (branchGuard) and an agent its
-# hook is written for (settings.<agent>.json): describing a restriction that isn't there would just
-# make the agent waste turns working around it.
-if [ "${BRANCH_GUARD:-}" = 1 ] && [ -f "$PLUGIN_DIR/settings.$AGENT.json" ]; then
-  printf ' You cannot leave this branch: a PreToolUse hook blocks every `git checkout`, `git switch`, `git branch` and `git worktree` command outright' >> "$AGENT_PROMPT_FILE"
-  if [ -n "${REPO_URL:-}" ]; then
-    printf ', and allows pushes only to %s. Do not attempt to switch or create a branch, and use `git restore` rather than `git checkout` to discard changes to a file. Push by naming the branch (`git push origin %s`), never `HEAD`: a blocked command does not run at all, so a commit chained before that push is lost too.\n' \
-      "$AGENT_BRANCH" "$AGENT_BRANCH" >> "$AGENT_PROMPT_FILE"
-  else
-    printf '. Do not attempt to switch or create a branch, and use `git restore` rather than `git checkout` to discard changes to a file.\n' >> "$AGENT_PROMPT_FILE"
-  fi
+# The branch guard (branchGuard): git runs bin/hooks/ for every agent, whose pre-push refuses any
+# ref but this run's branch. GIT_CONFIG_* outranks the repo's own core.hooksPath; the hooks chain to
+# the repo's own. Only claimed where it applies — a repo with no remote pushes nowhere — since
+# describing a restriction that isn't there would make the agent waste turns working around it.
+if [ "${BRANCH_GUARD:-}" = 1 ]; then
+  _n=${GIT_CONFIG_COUNT:-0}
+  export "GIT_CONFIG_KEY_$_n=core.hooksPath" "GIT_CONFIG_VALUE_$_n=$PLUGIN_DIR/bin/hooks"
+  export GIT_CONFIG_COUNT=$((_n + 1))
+  unset _n
+fi
+if [ "${BRANCH_GUARD:-}" = 1 ] && [ -n "${REPO_URL:-}" ]; then
+  printf ' Only this branch can be pushed: a pre-push hook rejects any other ref. Push it by name (`git push origin %s`).\n' \
+    "$AGENT_BRANCH" >> "$AGENT_PROMPT_FILE"
 else
   printf ' Stay on this branch for all of your work.\n' >> "$AGENT_PROMPT_FILE"
 fi

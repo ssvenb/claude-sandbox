@@ -49,7 +49,6 @@ export function Field({ spec, slot, name, required, ariaLabel, head, hidden }: F
           {(spec.required || required) && <span className="req" title="Required">*</span>}
         </label>
         {spec.description && <Info text={spec.description} about={spec.label || spec.key || spec.env || name} />}
-        {spec.env && <code title="Set in the env block">{spec.env}</code>}
       </div>
       <div className="control">{control}</div>
     </div>

@@ -36,21 +36,6 @@ export function SettingsCards({ declared, draft, query }: Props) {
   const envField = (spec: SettingSpec, required?: boolean): FieldProps =>
     ({ spec, slot: envSlot(slot(env, spec.env!), spec), name: 'env.' + spec.env, required });
 
-  // env keys nobody declares: a plain name → value list, so nothing in the file goes missing.
-  const declaredEnv = new Set([...declared.kernel.settings, ...declared.agents.flatMap(a => a.settings), ...declared.plugins.flatMap(p => p.settings)]
-    .filter(s => s.env).map(s => s.env!));
-  const others: Slot = {
-    get: () => {
-      const o = Object.fromEntries(Object.entries(env() ?? {}).filter(([k]) => !declaredEnv.has(k)));
-      return Object.keys(o).length ? o : undefined;
-    },
-    set: v => {
-      const held = env();
-      for (const k of Object.keys(held ?? {})) if (!declaredEnv.has(k)) delete held![k];
-      if (v) Object.assign(env(true)!, v);
-    },
-  };
-
   const isAgent = (s: SettingSpec) => s.env === 'AGENT' || s.env === 'AGENT_VERSION';  // the Agents card's own
   const sandbox: CardSpec[] = [
     {
@@ -68,10 +53,6 @@ export function SettingsCards({ declared, draft, query }: Props) {
         // Its own plugins: kept in the file whichever agent runs, applied only with this one.
         cardsTitle: 'Plugins', cards: declared.plugins.filter(p => p.requiredAgent === a.name).map(plugin),
       })),
-    },
-    {
-      key: 'other', title: 'Other variables', description: 'Further sandbox settings for the env block, by name (see .env.example).',
-      fields: [{ spec: { type: 'map', label: 'Variables', placeholder: 'NAME' }, slot: others, name: 'env-other' }],
     },
   ];
 

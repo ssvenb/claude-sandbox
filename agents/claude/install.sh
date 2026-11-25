@@ -11,4 +11,4 @@ npm install -g @playwright/mcp
 # The Claude Agent SDK, which chat.mjs drives the CLI above with for web chats. It lives outside
 # any project; the copy of the CLI it bundles (some 350 MB) goes, since the one above is used.
 npm install --prefix /opt/agent-sdk @anthropic-ai/claude-agent-sdk
-rm -rf /opt/agent-sdk/node_modules/@anthropic-ai/claude-agent-sdk-*
+rm -rf /opt/agent-sdk/node_modules/@anthropic-ai/claude-agent-sdk-* /root/.npm

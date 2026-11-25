@@ -142,8 +142,8 @@ def test_scripts_run_directly_are_executable_in_git():
     modes = {line.split("\t")[1]: line.split()[0] for line in listed.splitlines()}
     direct = ["run.sh", "install.sh", "src/server/serve.sh", "src/server/server.py", "src/server/holder.py", "src/boot/agent-setup.sh"] + [
         path for path in modes if re.match(r"plugins/[^/]+/(host|root|bin)/", path)]
-    for path in direct:
-        assert modes[path] == "100755", path
+    for path in direct:  # a symlink runs its target, which is listed too
+        assert modes[path] in ("100755", "120000"), path
 
 
 def test_example_project_config_is_accepted(sb):

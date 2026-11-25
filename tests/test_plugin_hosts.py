@@ -499,7 +499,7 @@ def test_github_auth_mint_sees_the_repo_url_set_by_later_plugins(sb):
     assert run.out.endswith(f"7 {key} github.com https://github.com/acme/w.git\n")
 
 
-# --- herdr, dev-server, screenshots ------------------------------------------------------
+# --- herdr, dev-server ------------------------------------------------------
 
 @pytest.mark.parametrize("herdr_env, expected", [("1", "HERDR_AGENT=copilot"), (None, "")])
 def test_herdr_labels_the_docker_process_inside_a_herdr_pane(sb, herdr_env, expected):
@@ -622,16 +622,6 @@ def test_dev_server_demo_runs_shared_stages_and_its_setup_then_restarts_on_chang
         assert count(2)
     finally:
         os.killpg(proc.pid, signal.SIGKILL)
-
-
-def test_screenshots_mounts_read_only(sb):
-    sb.plugin("screenshots").dies("no such directory")
-    default = sb.home / "Pictures/Screenshots"
-    default.mkdir(parents=True)
-    assert sb.plugin("screenshots").ok().mounts == [f"{default}:/home/node/Pictures/Screenshots:ro"]
-    (sb.tmp / "shots").mkdir()
-    assert sb.plugin("screenshots", SCREENSHOTS_DIR=sb.tmp / "shots").ok().mounts == [
-        f"{sb.tmp}/shots:/home/node/Pictures/Screenshots:ro"]
 
 
 # --- project-setup -------------------------------------------------------------------------

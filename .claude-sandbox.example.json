@@ -2,10 +2,8 @@
   "repo": "https://github.com/owner/repo",
   "plugins": {
     "data-mounts": {
-      "mounts": [
-        "/srv/datasets:/data:ro",
-        "~/scratch:/scratch"
-      ]
+      "enabled": true,
+      "readOnly": false
     },
     "kvm": {
       "briefing": [

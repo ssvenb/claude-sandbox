@@ -595,8 +595,8 @@ exports. The file's name is the project's (`run.sh --project
 <name>`), and its `repo` the repo the agent works on: a path on this machine, or a git URL. Plugins
 see a path as `$HOST_CWD`; a git URL is not cloned on this machine at all: `$HOST_CWD` is empty,
 `$REPO_URL` is the URL, and git-workspace clones it in the container with the project's
-credentials (so a private repo needs only github-auth's App). `cwd-workspace` and relative
-`data-mounts` paths need a checkout here, and refuse a URL. Without `--project`, `run.sh` works on the directory it was
+credentials (so a private repo needs only github-auth's App). `cwd-workspace` needs a checkout here,
+and refuses a URL. Without `--project`, `run.sh` works on the directory it was
 started in, with no project file (`PROJECT_CONFIG_FILE` names one).
 
 ```json
@@ -979,8 +979,8 @@ of it as hostile:
 - What the host connects to, it checks each time: upstream-proxy's sockets are mounted
   read-only, so no sandbox can put itself between another one and the proxy.
 - Plugins that hand the container a part of your machine by design — `cwd-workspace` (your
-  checkout), `data-mounts` (what you list), `libvirt` (your VMs) — do nothing until you switch them on or
-  list what to mount, and give the agent exactly that: switch one on only for what you would let the agent run on your machine.
+  checkout), `data-mounts` (the project's own directory under `~/.local/share/claude-sandbox/data`, nothing
+  else, read-only if you say so), `libvirt` (your VMs) — do nothing until you switch them on, and give the agent exactly that: switch one on only for what you would let the agent run on your machine.
 
 ## Repository layout
 

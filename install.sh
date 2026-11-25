@@ -105,8 +105,9 @@ elif have docker && have dpkg && [ -n "$(docker ps -q 2>/dev/null)" ]; then
   warn "sysbox-runc is missing, and installing it restarts Docker: stop the running containers (docker ps) and run ./install.sh again, or set ENABLE_DOCKER_CLI=0 in your projects."
 elif have docker && have dpkg \
   && confirm "sysbox-runc is missing (the docker-cli plugin runs sandboxes under it). Install Sysbox's latest .deb from GitHub? It restarts Docker."; then
-  deb=$(curl -fsSL https://api.github.com/repos/nestybox/sysbox/releases/latest \
-    | jq -r --arg suffix "linux_$(dpkg --print-architecture).deb" '.assets[].browser_download_url | select(endswith($suffix))')
+  # A token, where there is one (CI), spares the API's rate limit for anonymous callers; failing, it warns below.
+  deb=$(curl -fsSL ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} https://api.github.com/repos/nestybox/sysbox/releases/latest \
+    | jq -r --arg suffix "linux_$(dpkg --print-architecture).deb" '.assets[].browser_download_url | select(endswith($suffix))') || deb=
   # Readable by apt's _apt user, or apt warns it downloads "unsandboxed as root".
   tmp=$(mktemp -d) && chmod 755 "$tmp"
   if [ -n "$deb" ] && curl -fsSLo "$tmp/sysbox.deb" "$deb" && chmod 644 "$tmp/sysbox.deb" && $sudo apt-get install -y "$tmp/sysbox.deb" && sysbox_registered; then

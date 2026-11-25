@@ -859,7 +859,7 @@ def test_the_gear_configures_the_projects_plugins_in_its_file(board):
     board.click("button[aria-label='Settings']")  # opens on what the file holds now
     board.wait_for_selector("dialog[open]")
     assert board.get_attribute("button[name='enabled-docker-cli']", "aria-checked") == "false"
-    board.click(".card:has(button[name='enabled-docker-cli']) .reset")  # back to its default: no entry
+    board.click("button.reset-all")  # every plugin back to its defaults: no entries
     assert board.get_attribute("button[name='enabled-docker-cli']", "aria-checked") == "true"
     board.fill("input[type=search]", "branch prefix")  # the filter keeps the matching settings
     board.wait_for_selector("input[name='plugins.git-workspace.branchPrefix']", state="visible")  # its card unfolded
@@ -868,8 +868,11 @@ def test_the_gear_configures_the_projects_plugins_in_its_file(board):
     # The JSON view edits the whole file; a typo there is reported, not saved.
     board.click(".modes button:has-text('JSON')")
     text = board.input_value("textarea[name='json']")
-    assert '"retired"' in text and "docker-cli" not in text
-    board.fill("textarea[name='json']", text.replace('"bot"', '"robot"'))
+    assert json.loads(text)["plugins"] == {"git-workspace": {"extra": 1}, "retired": {"x": 1}}  # what no form control holds stays
+    edited = json.loads(text)
+    edited["plugins"]["git-workspace"]["branchPrefix"] = "robot"
+    text = json.dumps(edited)
+    board.fill("textarea[name='json']", text)
     board.click(".modes button:has-text('Form')")
     assert board.input_value("input[name='plugins.git-workspace.branchPrefix']") == "robot"
     board.click(".modes button:has-text('JSON')")
@@ -879,7 +882,7 @@ def test_the_gear_configures_the_projects_plugins_in_its_file(board):
     board.fill("textarea[name='json']", text)
     board.click("dialog button[type=submit]")
     board.wait_for_selector("dialog[open]", state="detached")
-    assert "docker-cli" not in json.loads(file.read_text())["plugins"]
+    assert json.loads(file.read_text())["plugins"] == {"git-workspace": {"branchPrefix": "robot", "extra": 1}, "retired": {"x": 1}}
 
 
 def test_the_menus_settings_add_and_delete_projects_and_edit_your_authentications(board):

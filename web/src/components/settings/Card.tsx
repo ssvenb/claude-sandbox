@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import { filtered, type CardSpec } from './cards';
 import { Field, Info } from './Field';
 
@@ -30,18 +30,19 @@ export function Card({ card, query }: { card: CardSpec; query: string }) {
             {card.fields.map((field, k) => <Field key={field.name} {...field} hidden={hiddenFields[k]} />)}
           </div>
           {card.after}
-          {card.cards && <div className="stack">{card.cards.map(c => <Card key={c.key} card={c} query={hit ? '' : query} />)}</div>}
+          {!!card.cards?.length && card.cardsTitle && <h5 className="sub">{card.cardsTitle}</h5>}
+          {!!card.cards?.length && <div className="stack">{card.cards.map(c => <Card key={c.key} card={c} query={hit ? '' : query} />)}</div>}
         </div></div>
       </div>
     </section>
   );
 }
 
-/** Cards under a heading, which goes when the filter keeps none of them. */
-export function CardGroup({ title, cards, query }: { title: string; cards: CardSpec[]; query: string }) {
+/** Cards under a heading (and what it offers: the plugins' Reset all), which goes when the filter keeps none of them. */
+export function CardGroup({ title, cards, query, action }: { title: string; cards: CardSpec[]; query: string; action?: ReactNode }) {
   return (
     <>
-      <h4 className={cards.every(card => filtered(card, query).hidden) ? 'hidden' : undefined}>{title}</h4>
+      <h4 className={cards.every(card => filtered(card, query).hidden) ? 'hidden' : undefined}>{title}{action}</h4>
       <div className="stack">
         {cards.map(card => <Card key={card.key} card={card} query={query} />)}
       </div>

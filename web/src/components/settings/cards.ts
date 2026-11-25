@@ -21,8 +21,10 @@ export interface CardSpec {
   open?: boolean;
   /** Switched off: dimmed, its settings not shown. */
   off?: boolean;
-  /** Cards under it, folded with it: the agents'. */
+  /** Cards under it, folded with it: the agents', an agent's own plugins. */
   cards?: CardSpec[];
+  /** A heading over those cards. */
+  cardsTitle?: string;
   /** More for the filter to find the card by. */
   more?: string;
 }

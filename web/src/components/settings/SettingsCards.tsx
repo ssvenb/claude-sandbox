@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import type { JsonObject, PluginManifest, ProjectConfig, SettingSpec } from '../../api/types';
 import { CardGroup } from './Card';
 import type { CardSpec } from './cards';
 import { Field, type FieldProps } from './Field';
+import { useForm } from './FormContext';
 import { envSlot, isObject, ON, slot, type Holder, type Slot } from './slots';
 
 interface Props {
@@ -18,6 +20,8 @@ const object = (v: unknown): JsonObject | undefined => (isObject(v as JsonObject
 /** The settings as a form: each setting the sandbox, an agent or a plugin declares gets a control
  *  of its type, each plugin a switch. Whatever the form has no control for stays as it is. */
 export function SettingsCards({ declared, draft, query }: Props) {
+  const form = useForm();
+  const [gen, setGen] = useState(0);  // the plugins reset: their controls are drawn anew
   const env: Holder = create => {
     if (create && !draft.env) draft.env = {};
     return object(draft.env);
@@ -62,6 +66,8 @@ export function SettingsCards({ declared, draft, query }: Props) {
       cards: declared.agents.map(a => ({
         key: 'agent-' + a.name, title: a.name, description: a.description,
         fields: a.settings.map(s => envField(s)), tag: a.name === agentNow ? 'selected' : '',
+        // Its own plugins: kept in the file whichever agent runs, applied only with this one.
+        cardsTitle: 'Plugins', cards: declared.plugins.filter(p => p.requiredAgent === a.name).map(plugin),
       })),
     },
     {
@@ -70,7 +76,7 @@ export function SettingsCards({ declared, draft, query }: Props) {
     },
   ];
 
-  const plugin = (p: PluginManifest): CardSpec => {
+  function plugin(p: PluginManifest): CardSpec {
     const sec = section(p.name);
     const enabled: Slot = {
       get: () => { const e = sec()?.enabled; return e === undefined ? undefined : ON.includes(e); },
@@ -84,7 +90,6 @@ export function SettingsCards({ declared, draft, query }: Props) {
     const kept = Object.keys(sec() ?? {}).filter(k => !declaredKeys.has(k));
     return {
       key: 'plugin-' + p.name, title: p.name, description: p.description, off: !on,
-      tag: p.requiredAgent ? p.requiredAgent + ' only' : '',
       more: ' ' + p.settings.map(s => [s.label, s.key, s.env].join(' ')).join(' ').toLowerCase(),
       right: <Field spec={{ type: 'boolean', label: 'Enabled', default: p.defaultEnabled }} slot={enabled}
         name={'enabled-' + p.name} ariaLabel={p.name + ' enabled'} head />,
@@ -93,12 +98,26 @@ export function SettingsCards({ declared, draft, query }: Props) {
         : { spec, slot: slot(sec, spec.key!), name: `plugins.${p.name}.${spec.key}` }),
       after: kept.length ? <p className="kept">Also holds {kept.join(', ')}: kept as is (edit it in the JSON view).</p> : undefined,
     };
+  }
+
+  // Every plugin back to its defaults: what it declares unset (what the form has no control for stays).
+  const resetPlugins = () => {
+    for (const p of declared.plugins) {
+      const sec = section(p.name)();
+      if (sec) for (const k of ['enabled', ...p.settings.filter(s => s.key).map(s => s.key!)]) delete sec[k];
+      for (const s of p.settings) if (s.env) delete env()?.[s.env];
+    }
+    setGen(g => g + 1);
+    form.changed();
   };
+  const agentNames = new Set(declared.agents.map(a => a.name));
 
   return (
     <>
-      <CardGroup title="Sandbox" cards={sandbox} query={query} />
-      <CardGroup title="Plugins" cards={declared.plugins.map(plugin)} query={query} />
+      <CardGroup key={'sandbox' + gen} title="Sandbox" cards={sandbox} query={query} />
+      <CardGroup key={'plugins' + gen} title="Plugins" query={query}
+        cards={declared.plugins.filter(p => !p.requiredAgent || !agentNames.has(p.requiredAgent)).map(plugin)}
+        action={<button type="button" className="reset-all" onClick={resetPlugins}>Reset all</button>} />
     </>
   );
 }

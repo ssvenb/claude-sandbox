@@ -19,7 +19,7 @@ from conftest import REPO
 BASE = {"agentVersion": "1.2.3", "agents": {"claude": {"homeMount": False, "auth": "tok"}}, "plugins": {
     "github-auth": {"enabled": False}, "git-workspace": {"enabled": False},
     "agent-workspace": {"enabled": False}, "docker-cli": {"enabled": False},
-    "cwd-workspace": {"enabled": True}}}
+    "branch-guard": {"enabled": False}}}
 
 
 @pytest.fixture
@@ -55,8 +55,7 @@ def test_the_host_pipeline_builds_and_runs_the_image(sb, run_sh):
                   CLAUDE_EFFORT="low")  # your shell's: not read
     assert done.returncode == 0, done.stderr
     [build], [run] = calls(done, "build"), calls(done, "run")
-    plugins = ("herdr data-mounts upstream-proxy cwd-workspace package-managers "
-               "project-setup dev-server agent-status branch-guard")
+    plugins = "herdr data-mounts upstream-proxy package-managers project-setup dev-server agent-status"
     assert build == ["build", "-t", "claude-agent:claude", "--build-arg", "AGENT=claude",
                      "--build-arg", "AGENT_VERSION=1.2.3", "--build-arg", f"ENABLED_PLUGINS={plugins}", "."]
     run_id = re.fullmatch(r"RUN_ID=([0-9a-f]{6})", run[4])[1]
@@ -67,9 +66,7 @@ def test_the_host_pipeline_builds_and_runs_the_image(sb, run_sh):
     assert run[-1] == "claude-agent:claude"
     tail = " ".join(run[13:])
     assert "--network" not in run and not any(a.startswith("-p") for a in run)  # publishes nothing
-    for expected in (f"-v {sb.cwd}:/workspace", "-v /dev/null:/workspace/.env:ro",
-                     "-e CWD_WORKSPACE_HIDDEN=/workspace/.env",
-                     "-e CLAUDE_CODE_OAUTH_TOKEN=oauth-tok", "-e CLAUDE_EFFORT=high"):
+    for expected in ("-e CLAUDE_CODE_OAUTH_TOKEN=oauth-tok", "-e CLAUDE_EFFORT=high"):
         assert expected in tail
     # The repo's own secret is neither a sandbox setting nor forwarded anywhere.
     assert not any("hunter2" in arg for call in done.calls for arg in call)
@@ -131,10 +128,10 @@ def test_configuration_errors_stop_the_run_before_docker(run_sh):
 
 def test_unmet_capabilities_stop_the_run_before_docker(run_sh):
     config = json.loads(json.dumps(BASE))
-    config["plugins"]["cwd-workspace"]["enabled"] = False
+    config["plugins"]["branch-guard"]["enabled"] = True
     done = run_sh(config=config)
     assert done.returncode == 1 and done.calls == []
-    assert "Plugin 'branch-guard' requires the 'workspace' capability. Enable one of: cwd-workspace,git-workspace" \
+    assert "Plugin 'branch-guard' requires the 'workspace' capability. Enable one of: git-workspace" \
         in done.stderr
 
 
@@ -158,7 +155,7 @@ def test_web_describes_the_project_and_starts_nothing(sb, run_sh):
     done = run_sh("--web", config={**BASE, "agents": {"claude": {**BASE["agents"]["claude"], "effort": "high"}}})
     assert done.returncode == 0, done.stderr
     said = json.loads(done.stdout)
-    assert said["agent"] == "claude" and "cwd-workspace" in said["plugins"]
+    assert said["agent"] == "claude" and "herdr" in said["plugins"]
     assert said["live"] == [f"{sb.home}/.local/state/claude-sandbox/dev-server/items.json"]
     assert said["lists"] == [] and "checkout" not in said  # agent-workspace is off in BASE
     assert done.calls == []
@@ -270,11 +267,13 @@ def test_project_names_its_file_and_the_repo_it_works_on(sb, run_sh):
     listing.mkdir(parents=True)
     repo = sb.tmp / "repo"
     repo.mkdir()
-    (listing / "app.json").write_text(json.dumps({"repo": str(repo), **BASE}))
+    (repo / "f").touch()
+    mounts = {**BASE["plugins"], "data-mounts": {"mounts": ["f:/f"]}}  # relative: resolved against the repo
+    (listing / "app.json").write_text(json.dumps({"repo": str(repo), **BASE, "plugins": mounts}))
     done = run_sh("--project", "app", config=None)
     assert done.returncode == 0, done.stderr
     [run] = calls(done, "run")
-    assert f"{repo}:/workspace" in run and f"📄 Project config: {listing / 'app.json'}" in done.stdout
+    assert f"{repo}/f:/f" in run and f"📄 Project config: {listing / 'app.json'}" in done.stdout
     for name, message in (("nope", "No project 'nope'"), ("../app", "is not a project name")):
         done = run_sh("--project", name, config=None)
         assert done.returncode and message in done.stderr
@@ -289,13 +288,13 @@ def test_a_projects_repo_may_be_a_git_url_never_cloned_on_this_machine(sb, run_s
     listing = sb.home / ".config/claude-sandbox/projects"
     listing.mkdir(parents=True)
     url = "https://github.com/acme/private-widgets.git"  # unreachable: nothing may fetch it
-    plugins = {**BASE["plugins"], "cwd-workspace": {"enabled": False}, "agent-workspace": {"enabled": True},
-               "branch-guard": {"enabled": False}}
+    plugins = {**BASE["plugins"], "agent-workspace": {"enabled": True}}
     (listing / "app.json").write_text(json.dumps({**BASE, "repo": url, "plugins": plugins}))
     done = run_sh("--project", "app", config=None, GIT_TERMINAL_PROMPT="0")
     assert done.returncode == 0, done.stderr
     assert any("/private-widgets-" in a and a.endswith(":/workspace") for a in calls(done, "run")[0])
     assert not (sb.home / ".cache/claude-sandbox/repos").exists()
-    (listing / "app.json").write_text(json.dumps({**BASE, "repo": url}))  # cwd-workspace on
+    mounts = {**BASE["plugins"], "data-mounts": {"mounts": ["f:/f"]}}
+    (listing / "app.json").write_text(json.dumps({**BASE, "repo": url, "plugins": mounts}))
     done = run_sh("--project", "app", config=None)
-    assert done.returncode and "no checkout on this machine to mount" in done.stderr
+    assert done.returncode and "is relative, but the project's repo is a git URL" in done.stderr

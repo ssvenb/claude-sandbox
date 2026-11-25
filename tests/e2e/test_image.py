@@ -229,12 +229,10 @@ def test_ssh_credentials_belong_to_the_agent_user(image):
     assert b.out.splitlines() == ["node 600", "user ops", "hostname box.mesh", "identityfile ~/.ssh/sandbox_key"]
 
 
-def test_entrypoint_hands_the_workspace_to_the_agent_but_not_masks(image):
-    b = boot(image, "cwd-workspace", "stat -c %U /workspace/sub /workspace/sub/f; stat -c '%U %F' /workspace/.env",
-             before="mkdir /workspace/sub && touch /workspace/sub/f && mknod /workspace/.env c 1 3",
-             CWD_WORKSPACE_HIDDEN="/workspace/.env")
-    assert b.out.splitlines() == ["node", "node", "root character special file"]
-    assert "- `/workspace/.env`" in b.briefing
+def test_entrypoint_hands_the_workspace_to_the_agent(image):
+    b = boot(image, "", "stat -c %U /workspace/sub /workspace/sub/f",
+             before="mkdir /workspace/sub && touch /workspace/sub/f")
+    assert b.out.splitlines() == ["node", "node"]
 
 
 def test_gcp_auth_serves_the_hosts_token_as_a_metadata_server(image):

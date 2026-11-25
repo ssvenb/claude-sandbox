@@ -247,31 +247,6 @@ def test_ca_certs_skips_files_that_are_not_certificates(sb, ca_dir):
     assert run.builds["EXTRA_CA_CERTS"].count("-----BEGIN CERTIFICATE-----") == 2
 
 
-# --- cwd-workspace -------------------------------------------------------------------------
-
-def test_cwd_workspace_mounts_the_checkout_and_masks_its_env(sb):
-    sb.dotenv("SECRET=1\n")
-    run = sb.plugin("cwd-workspace").ok()
-    assert run.mounts == [f"{sb.cwd}:/workspace", "/dev/null:/workspace/.env:ro"]
-    assert run.env == {"CWD_WORKSPACE_HIDDEN": "/workspace/.env"}
-    assert (sb.cwd / ".env").read_text() == "SECRET=1\n"
-
-
-def test_cwd_workspace_masks_only_listed_files_that_exist(sb):
-    (sb.cwd / "secrets").mkdir()
-    (sb.cwd / "secrets/key.json").write_text("{}")
-    sb.dotenv("X=1\n")
-    run = sb.plugin("cwd-workspace", CWD_WORKSPACE_HIDE="secrets/key.json missing.txt").ok()
-    assert run.mounts[1:] == ["/dev/null:/workspace/secrets/key.json:ro"]
-    assert sb.plugin("cwd-workspace", CWD_WORKSPACE_HIDE="").ok().mounts == [f"{sb.cwd}:/workspace"]
-
-
-def test_cwd_workspace_dir_override(sb):
-    run = sb.plugin("cwd-workspace", HOST_WORKSPACE_DIR=f"{sb.cwd}/../project/").ok()
-    assert run.mounts == [f"{sb.cwd}:/workspace"]
-    sb.plugin("cwd-workspace", HOST_WORKSPACE_DIR=sb.tmp / "nope").dies("is not a directory")
-
-
 # --- data-mounts ---------------------------------------------------------------------------
 
 def test_data_mounts(sb):

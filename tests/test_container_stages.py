@@ -150,12 +150,6 @@ def stage(sb, plugin, **env):
     return sb.sh(f". {REPO}/plugins/{plugin}/agent-init.sh", **env).ok()
 
 
-def test_cwd_workspace_names_the_masked_files(sb):
-    assert stage(sb, "cwd-workspace").prompt == ""
-    prompt = stage(sb, "cwd-workspace", CWD_WORKSPACE_HIDDEN="/workspace/.env /workspace/k.json").prompt
-    assert "## Masked files" in prompt and "- `/workspace/.env`\n- `/workspace/k.json`\n" in prompt
-
-
 def test_gcp_auth_starts_its_metadata_server_and_briefs_the_agent(sb):
     plugin = sb.tmp / "gcp-auth"
     shutil.copytree(REPO / "plugins/gcp-auth", plugin)

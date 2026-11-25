@@ -12,13 +12,8 @@ if [ -n "${HOST_UID:-}" ] && [ "$HOST_UID" != 0 ] && [ "$HOST_UID" != "$old" ]; 
 fi
 unset old
 
-# Own the project files for the unprivileged agent user. Skip character devices: those are the
-# read-only /dev/null masks cwd-workspace lays over secret files, and chowning them fails.
-skip=""
-for p in ${CWD_WORKSPACE_HIDDEN:-}; do skip="$skip ! -path $p"; done
-# shellcheck disable=SC2086  # $skip is a deliberately word-split argument list
-find /workspace -xdev ! -type c $skip -exec chown node:node {} +
-unset skip p
+# Own the project files for the unprivileged agent user.
+find /workspace -xdev -exec chown node:node {} +
 
 # shellcheck source=lib/plugins.sh
 . /usr/local/lib/sandbox/plugins.sh

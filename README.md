@@ -336,8 +336,7 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | `upstream-proxy` | 15 | on | any | `upstream-proxy` | — | credential-injecting reverse proxies on the HOST, one per route from the project config, shared by all of a project's running sandboxes, bind-mounted (read-only) as unix sockets and bridged to loopback ports; no routes configured → does nothing |
 | `pr-review` | 25 | off | any | — | `git-credentials` | has the web UI start a review session for a run's pull request once its CI is green and the run's session is deleted, under another GitHub App (`.plugins["pr-review"].auth`), with guardrails against what the pull request says; see [Reviewing pull requests](#reviewing-pull-requests-with-pr-review) |
 | `git-workspace` | 20 | on | any | `workspace` | `git-credentials` | clone the `origin` remote of `run.sh`'s cwd into `/workspace`, per-run branch named after the agent (or `$BRANCH_PREFIX`) and the date, its commit identity, resume briefing |
-| `cwd-workspace` | 20 | off | any | `workspace` | — | bind-mounts the host's cwd (or `$HOST_WORKSPACE_DIR`) at `/workspace`; conflicts with `git-workspace` |
-| `agent-workspace` | 15 | on | any | `workspace-mirror` | — | bind-mounts `$AGENT_WORKSPACE_DIR/<project>-<date>-<RUN_ID>` (default `~/.agent-workspaces/<project>-<date>-<RUN_ID>`, created if missing) at `/workspace`, so the agent's checkout is visible on the host; removed when the container exits, unless `AGENT_WORKSPACE_CLEANUP=0`; complements `git-workspace`, conflicts with `cwd-workspace` |
+| `agent-workspace` | 15 | on | any | `workspace-mirror` | — | bind-mounts `$AGENT_WORKSPACE_DIR/<project>-<date>-<RUN_ID>` (default `~/.agent-workspaces/<project>-<date>-<RUN_ID>`, created if missing) at `/workspace`, so the agent's checkout is visible on the host; removed when the container exits, unless `AGENT_WORKSPACE_CLEANUP=0`; complements `git-workspace` |
 | `package-managers` | 25 | on | any | `package-managers` | — | lets the agent install packages itself, without root or `sudo` — `npm -g`/`pip` into its home, and `apt-home <pkg>...`, which downloads Debian packages with the dependencies the image lacks and unpacks them into `~/.local` (on `PATH` and `LD_LIBRARY_PATH`) without running their maintainer scripts |
 | `project-setup` | 25 | on | any | `project-setup` | — | sets the sandbox up for the target repo, from its project config: builds into the image (at `docker build`, so a change rebuilds it) the recipes in `.tools` (`python-pip`, `terraform`, `ruff`, `chromium` — the Debian browser Claude's Playwright MCP drives — and `playwright`, its own Chromium in `/ms-playwright`; all of them when unset, none for `[]`) and the packages in `.apt`, `.npm` (global) and `.pip`; then runs the `.setup` shell commands (installing dependencies, building) as the agent user in the provisioned `/workspace` at every boot; the core image has only what a fresh Ubuntu has, plus `jq` |
 | `dev-server` | 28 | on | any | `dev-server` | — | starts the project's server (`.plugins["dev-server"].command`) in `/workspace` at every boot, after `project-setup`, for the agent's own checks (`bin/sandbox-server` restarts it), unpublished; with a `.port`, runs the same command in a sibling container on the HOST from the run's checkout (`agent-workspace`'s mirror), after `.demoSetup`, restarted on every change, with what the [sibling plugins](#sibling-plugins) hand the sandbox (and, with `.agentHome` true, the agent's home: your Claude login), and publishes that port as a button on the run's session; see [Dev server](#dev-server); nothing configured → does nothing |
@@ -595,8 +594,7 @@ exports. The file's name is the project's (`run.sh --project
 <name>`), and its `repo` the repo the agent works on: a path on this machine, or a git URL. Plugins
 see a path as `$HOST_CWD`; a git URL is not cloned on this machine at all: `$HOST_CWD` is empty,
 `$REPO_URL` is the URL, and git-workspace clones it in the container with the project's
-credentials (so a private repo needs only github-auth's App). `cwd-workspace` and relative
-`data-mounts` paths need a checkout here, and refuse a URL. Without `--project`, `run.sh` works on the directory it was
+credentials (so a private repo needs only github-auth's App). Relative `data-mounts` paths need a checkout here, and refuse a URL. Without `--project`, `run.sh` works on the directory it was
 started in, with no project file (`PROJECT_CONFIG_FILE` names one).
 
 ```json
@@ -930,11 +928,10 @@ own section holds more: see its manifest, or the settings form):
 | `.agents["copilot"].auth` | Name of the `copilot-token` authentication Copilot runs with. Required unless `homeMount` is on, or a plugin provides the agent's credentials |
 | `.agents["copilot"].homeMount` | `true` (default) mounts a per-run copy of `~/.copilot`, login included; `false` leaves it out |
 | `.agents["copilot"].homeDir` | Host dir copied as the agent's `~/.copilot` (default `$HOME/.copilot`) |
-| `.plugins["<name>"].enabled` | Whether the plugin runs (default: its manifest's `defaultEnabled`: on, except `ca-certs`, `cwd-workspace`, `gcp-auth`, `netbird`, `pr-review` and `ssh-credentials`) |
+| `.plugins["<name>"].enabled` | Whether the plugin runs (default: its manifest's `defaultEnabled`: on, except `ca-certs`, `gcp-auth`, `netbird`, `pr-review` and `ssh-credentials`) |
 | `.plugins["github-auth"].auth` | Name of the `github-app` authentication the sandbox authenticates as |
 | `.plugins["git-workspace"].baseBranch` | Branch to cut from (default: the repo's own default branch, via `origin/HEAD`) |
 | `.plugins["git-workspace"].branchPrefix` | Leading segment of the per-run branch name (default: the agent manifest's `branchPrefix`, else the agent's directory name) |
-| `.plugins["cwd-workspace"].dir` | Host dir mounted at `/workspace` (default: the project's repo) |
 | `.plugins["agent-workspace"].dir` | Host dir holding the per-run mirrors of `/workspace`, created if missing (default: `$HOME/.agent-workspaces`; each run uses `<dir>/<project>-<date>-<RUN_ID>`) |
 | `.plugins["agent-workspace"].cleanup` | Delete the run's mirror directory when the container exits; `false` keeps it for inspection, at one leftover directory per run (default: `true`) |
 | `.plugins["ca-certs"].dir` | Host dir holding extra root certificates, PEM or DER (default `/usr/local/share/ca-certificates`) |
@@ -978,9 +975,8 @@ of it as hostile:
   agent's; Claude's `CLAUDE_HOME_MOUNT` mounts a copy of `~/.claude` per run and takes back only a validated login.
 - What the host connects to, it checks each time: upstream-proxy's sockets are mounted
   read-only, so no sandbox can put itself between another one and the proxy.
-- Plugins that hand the container a part of your machine by design — `cwd-workspace` (your
-  checkout), `data-mounts` (what you list) — do nothing until you switch them on or
-  list what to mount, and give the agent exactly that: switch one on only for what you would let the agent run on your machine.
+- `data-mounts` hands the container a part of your machine by design: it does nothing until you
+  list what to mount, and gives the agent exactly that: list only what you would let the agent run on your machine.
 
 ## Repository layout
 

@@ -1,9 +1,0 @@
-{
-  "name": "package-managers",
-  "description": "Lets the agent install packages itself, without root: npm -g and pip install into its own home, and apt-home unpacks Debian packages there with their dependencies.",
-  "priority": 25,
-  "defaultEnabled": true,
-  "provides": ["package-managers"],
-  "requires": [],
-  "requiredEnv": []
-}

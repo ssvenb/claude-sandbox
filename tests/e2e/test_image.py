@@ -88,7 +88,7 @@ def test_a_chat_boots_into_the_agents_bridge_and_its_sdk(image):
 
 
 def test_the_agent_cli_and_every_plugins_tools_are_installed(image):
-    tools = ["/usr/bin/gh", "docker", "gcloud", "qemu-img", "cloud-localds", "virsh", "ssh", "apt-home",
+    tools = ["/usr/bin/gh", "docker", "gcloud", "qemu-img", "cloud-localds", "virsh", "ssh", "sudo",
              "terraform", "ruff", "chromium", "/usr/local/bin/netbird", AGENT]
     if AGENT == "claude":
         tools.append("playwright-mcp")
@@ -202,13 +202,23 @@ def test_docker_and_device_groups_reach_the_agent(image):
     assert "Docker daemon did not start" in b.log
 
 
-def test_package_managers(image):
-    probe = ("command -v sudo || echo no-sudo\n"
-             "apt-home ./x.deb 2>&1 | grep -q 'not a package name' && echo refused\n"
-             "apt-home tree >/dev/null && tree --version | cut -d' ' -f1\nnpm config get prefix")
-    b = boot(image, "package-managers", probe)
-    assert b.out.splitlines() == ["no-sudo", "refused", "tree", "/home/node/.npm-global"]
-    assert b.env["PATH"].startswith("/home/node/.npm-global/bin:/home/node/.local/bin:")
+def test_permissions_are_off_until_allowed(image):
+    b = boot(image, "permissions", "sudo -n true 2>/dev/null || echo refused\nnpm config get prefix")
+    assert b.out.splitlines() == ["refused", "/usr/local"]
+
+
+def test_permissions_allow_only_the_chosen_tools(image):
+    probe = ("sudo -n apt-get --version >/dev/null && echo apt\n"
+             "sudo -n chown node /usr/local/lib/sandbox/plugins.sh && echo chown\n"
+             "sudo -n true 2>/dev/null || echo refused\nnpm config get prefix")
+    b = boot(image, "permissions", probe, PERMISSIONS_TOOLS="apt chown", PERMISSIONS_HOME_INSTALLS="1")
+    assert b.out.splitlines() == ["apt", "chown", "refused", "/home/node/.npm-global"]
+    assert "`sudo` for these only: /usr/bin/apt, /usr/bin/apt-get, /usr/bin/dpkg, " in b.briefing
+
+
+def test_permissions_full_sudo(image):
+    b = boot(image, "permissions", "sudo -n id -u", PERMISSIONS_SUDO="1")
+    assert b.out.strip() == "0" and "for any command" in b.briefing
 
 
 def test_project_setup_runs_as_the_agent(image):

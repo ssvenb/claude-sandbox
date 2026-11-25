@@ -626,6 +626,21 @@ def test_screenshots_mounts_read_only(sb):
         f"{sb.tmp}/shots:/home/node/Pictures/Screenshots:ro"]
 
 
+# --- permissions ---------------------------------------------------------------------------
+
+def test_permissions_hand_the_build_and_the_boot_the_tools(sb):
+    assert sb.plugin("permissions").ok().builds == {}
+    sb.config({"plugins": {"permissions": {"tools": ["strace", "apt", "apt"]}}})
+    run = sb.plugin("permissions").ok()
+    assert run.builds == {"PERMISSIONS_TOOLS": "apt strace"} and run.env == {"PERMISSIONS_TOOLS": "apt strace"}
+
+
+@pytest.mark.parametrize("value", [["rm"], "apt", ["apt; id"]])
+def test_permissions_reject_unknown_tools(sb, value):
+    sb.config({"plugins": {"permissions": {"tools": value}}})
+    sb.plugin("permissions").dies("must list only")
+
+
 # --- project-setup -------------------------------------------------------------------------
 
 def test_project_setup_without_config_builds_the_default_and_runs_nothing(sb):

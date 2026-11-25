@@ -186,7 +186,6 @@ def test_kvm_briefing_includes_the_projects_own(sb):
 @pytest.mark.parametrize("plugin, phrase", [
     ("libvirt", "`virsh` talks to the host's system daemon"),
     ("screenshots", "/home/node/Pictures/Screenshots"),
-    ("package-managers", "`apt-home <pkg>...` installs Debian packages"),
 ])
 def test_static_briefings(sb, plugin, phrase):
     assert phrase in stage(sb, plugin).prompt
@@ -199,13 +198,20 @@ def test_netbird_briefing(sb, enrolled, phrase):
     assert phrase in stage(sb, "netbird", NB_ENROLLED=enrolled, NB_PEER_NAME="sandbox-abc123").prompt
 
 
-def test_package_managers_install_into_the_agents_home(sb):
-    run = sb.sh(f'. {REPO}/plugins/package-managers/agent-init.sh\n'
-                'echo "$NPM_CONFIG_PREFIX $PIP_BREAK_SYSTEM_PACKAGES"; echo "$PATH"').ok()
+def test_permissions_off_changes_nothing(sb):
+    run = sb.sh(f'. {REPO}/plugins/permissions/agent-init.sh\necho "${{NPM_CONFIG_PREFIX-unset}}"').ok()
+    assert run.out == "unset\n" and run.prompt == ""
+
+
+def test_permissions_home_installs_and_full_sudo(sb):
+    run = sb.sh(f'. {REPO}/plugins/permissions/agent-init.sh\n'
+                'echo "$NPM_CONFIG_PREFIX $PIP_BREAK_SYSTEM_PACKAGES"; echo "$PATH"',
+                PERMISSIONS_HOME_INSTALLS="1", PERMISSIONS_SUDO="1").ok()
     prefix, path = run.out.splitlines()
     assert prefix == f"{sb.home}/.npm-global 1"
-    assert path.startswith(f"{sb.home}/.npm-global/bin:{sb.home}/.local/bin:{sb.home}/.local/usr/bin:")
+    assert path.startswith(f"{sb.home}/.npm-global/bin:{sb.home}/.local/bin:")
     assert (sb.home / ".npm-global/bin").is_dir() and (sb.home / ".local/bin").is_dir()
+    assert "passwordless `sudo` for any command" in run.prompt and "npm install -g" in run.prompt
 
 
 def test_ssh_credentials_writes_a_private_key_and_config(sb):

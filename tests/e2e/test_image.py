@@ -211,14 +211,12 @@ def test_package_managers(image):
     assert b.env["PATH"].startswith("/home/node/.npm-global/bin:/home/node/.local/bin:")
 
 
-def test_project_deps_install_as_root_and_set_up_as_the_agent(image):
-    probe = "e2e-npm; python3 -c 'import e2e_pkg; print(e2e_pkg.OK)'; cat /workspace/setup-user /workspace/setup-cwd"
+def test_project_setup_runs_as_the_agent(image):
+    probe = "cat /workspace/setup-user /workspace/setup-cwd"
     setup = ["id -un > setup-user", "false", "pwd > setup-cwd"]
-    b = boot(image, "git-workspace project-deps", probe, REPO_URL="/srv/origin.git", BASE_BRANCH="main",
-             PROJECT_DEPS_NPM="/opt/e2e/npm-pkg", PROJECT_DEPS_PIP="/opt/e2e/e2e_pkg-1.0-py3-none-any.whl",
-             PROJECT_DEPS_APT="e2e-no-such-package", PROJECT_DEPS_SETUP=json.dumps(setup))
-    assert b.out.splitlines() == ["npm-ok", "pip-ok", "node", "/workspace"]
-    assert "apt install failed (e2e-no-such-package)" in b.log       # reported, not fatal
+    b = boot(image, "git-workspace project-setup", probe, REPO_URL="/srv/origin.git", BASE_BRANCH="main",
+             PROJECT_SETUP=json.dumps(setup))
+    assert b.out.splitlines() == ["node", "/workspace"]
     assert "setup command failed: false" in b.log
     assert "already run for you in /workspace during boot (id -un > setup-user; false; pwd > setup-cwd)" \
         in b.briefing

@@ -8,7 +8,7 @@ set -e
 old=$(id -u node)
 if [ -n "${HOST_UID:-}" ] && [ "$HOST_UID" != 0 ] && [ "$HOST_UID" != "$old" ]; then
   sed -i "s/^node:\([^:]*\):$old:/node:\1:$HOST_UID:/" /etc/passwd  # not usermod: it re-owns the mounts too
-  find /home/node /ms-playwright -xdev -user "$old" -exec chown -h node {} +
+  find /home/node -xdev -user "$old" -exec chown -h node {} +
 fi
 unset old
 

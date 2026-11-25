@@ -818,9 +818,9 @@ def test_the_gear_configures_the_projects_plugins_in_its_file(board):
     board.select_option("select[name='env.GH_AUTH']", "")  # unset
 
     # Lists: + Add a row each; one left empty is not saved.
-    deps = ".card:has(button[name='enabled-project-deps']) .field:has(label:text-is('apt packages'))"
+    deps = ".card:has(button[name='enabled-project-setup']) .field:has(label:text-is('apt packages'))"
     board.click(deps + " button.add")
-    board.fill("input[name='plugins.project-deps.apt.0']", "ripgrep")
+    board.fill("input[name='plugins.project-setup.apt.0']", "ripgrep")
     board.click(deps + " button.add")
 
     # A route: an object in a list, its auth fields following the type picked.
@@ -847,7 +847,7 @@ def test_the_gear_configures_the_projects_plugins_in_its_file(board):
         "repo": str(board.project), "env": {"CLAUDE_EFFORT": "max"},
         "plugins": {"git-workspace": {"branchPrefix": "bot", "extra": 1}, "retired": {"x": 1},
                     "docker-cli": {"enabled": False}, "kvm": {"enabled": True, "briefing": "VMs in /data"},
-                    "project-deps": {"apt": ["ripgrep"]},
+                    "project-setup": {"apt": ["ripgrep"]},
                     "upstream-proxy": {"routes": [{"name": "api", "upstream": "https://api.example.com",
                                                    "allowMethods": ["GET"], "auth": {"credential": "openai", "header": "x-api-key"},
                                                    "containerEnv": {"API_URL": "http://127.0.0.1:8081"},

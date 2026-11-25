@@ -28,17 +28,3 @@ openssl req -x509 -newkey rsa:2048 -nodes -subj "/CN=Sandbox E2E DER CA" -days 3
   -keyout /dev/null -outform DER -out /opt/ca-certs/e2e-der.cer 2>/dev/null
 echo "not a certificate" >/opt/ca-certs/README
 
-# project-deps: an npm package and a wheel that install without the network.
-mkdir -p /opt/e2e/npm-pkg
-printf '{"name": "e2e-npm", "version": "1.0.0", "bin": {"e2e-npm": "cli.js"}}\n' >/opt/e2e/npm-pkg/package.json
-printf '#!/usr/bin/env node\nconsole.log("npm-ok")\n' >/opt/e2e/npm-pkg/cli.js
-chmod 755 /opt/e2e/npm-pkg/cli.js
-python3 - <<'EOF'
-import zipfile
-with zipfile.ZipFile("/opt/e2e/e2e_pkg-1.0-py3-none-any.whl", "w") as whl:
-    whl.writestr("e2e_pkg.py", "OK = 'pip-ok'\n")
-    whl.writestr("e2e_pkg-1.0.dist-info/METADATA", "Metadata-Version: 2.1\nName: e2e-pkg\nVersion: 1.0\n")
-    whl.writestr("e2e_pkg-1.0.dist-info/WHEEL",
-                 "Wheel-Version: 1.0\nGenerator: e2e\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
-    whl.writestr("e2e_pkg-1.0.dist-info/RECORD", "")
-EOF

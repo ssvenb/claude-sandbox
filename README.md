@@ -337,8 +337,8 @@ enabled plugins' `install.sh` execute and a disabled plugin's dependencies stay 
 | `cwd-workspace` | 20 | off | any | `workspace` | — | bind-mounts the host's cwd (or `$HOST_WORKSPACE_DIR`) at `/workspace`; conflicts with `git-workspace` |
 | `agent-workspace` | 15 | on | any | `workspace-mirror` | — | bind-mounts `$AGENT_WORKSPACE_DIR/<project>-<date>-<RUN_ID>` (default `~/.agent-workspaces/<project>-<date>-<RUN_ID>`, created if missing) at `/workspace`, so the agent's checkout is visible on the host; removed when the container exits, unless `AGENT_WORKSPACE_CLEANUP=0`; complements `git-workspace`, conflicts with `cwd-workspace` |
 | `package-managers` | 25 | on | any | `package-managers` | — | lets the agent install packages itself, without root or `sudo` — `npm -g`/`pip` into its home, and `apt-home <pkg>...`, which downloads Debian packages with the dependencies the image lacks and unpacks them into `~/.local` (on `PATH` and `LD_LIBRARY_PATH`) without running their maintainer scripts |
-| `project-deps` | 25 | on | any | `project-deps` | — | installs the dependencies the target repo declares in the project config: apt/npm/pip packages (as root, at boot) and `setup` shell commands (as the agent user, in the provisioned `/workspace`); nothing configured → does nothing |
-| `dev-server` | 28 | on | any | `dev-server` | — | starts the project's server (`.plugins["dev-server"].command`) in `/workspace` at every boot, after `project-deps`, for the agent's own checks (`bin/sandbox-server` restarts it), unpublished; with a `.port`, runs the same command in a sibling container on the HOST from the run's checkout (`agent-workspace`'s mirror), after `.demoSetup`, restarted on every change, with what the [sibling plugins](#sibling-plugins) hand the sandbox (and, with `.agentHome` true, the agent's home: your Claude login), and publishes that port as a button on the run's session; see [Dev server](#dev-server); nothing configured → does nothing |
+| `project-setup` | 25 | on | any | `project-setup` | — | sets the sandbox up for the target repo, from its project config: builds into the image (at `docker build`, so a change rebuilds it) the recipes in `.tools` (`python-pip`, `terraform`, `ruff`, `chromium` — the Debian browser Claude's Playwright MCP drives — and `playwright`, its own Chromium in `/ms-playwright`; all of them when unset, none for `[]`) and the packages in `.apt`, `.npm` (global) and `.pip`; then runs the `.setup` shell commands (installing dependencies, building) as the agent user in the provisioned `/workspace` at every boot; the core image has only what a fresh Ubuntu has, plus `jq` |
+| `dev-server` | 28 | on | any | `dev-server` | — | starts the project's server (`.plugins["dev-server"].command`) in `/workspace` at every boot, after `project-setup`, for the agent's own checks (`bin/sandbox-server` restarts it), unpublished; with a `.port`, runs the same command in a sibling container on the HOST from the run's checkout (`agent-workspace`'s mirror), after `.demoSetup`, restarted on every change, with what the [sibling plugins](#sibling-plugins) hand the sandbox (and, with `.agentHome` true, the agent's home: your Claude login), and publishes that port as a button on the run's session; see [Dev server](#dev-server); nothing configured → does nothing |
 | `branch-guard` | 30 | on | claude | — | `workspace` | `guard-branch.py` PreToolUse hook |
 
 Disable them all and the agent starts plain, in an empty `/workspace` with no GitHub access.
@@ -601,7 +601,8 @@ started in, with no project file (`PROJECT_CONFIG_FILE` names one).
       "routes": [ { "name": "azure-openai", "port": 8082, "upstream": "${AZURE_OPENAI_ENDPOINT}",
                     "auth": { "credential": "azure-openai", "header": "api-key" } } ]
     },
-    "project-deps": {
+    "project-setup": {
+      "tools": ["python-pip"],
       "apt": ["ripgrep"],
       "npm": ["pnpm@9"],
       "pip": ["ruff"],
@@ -706,7 +707,7 @@ effect only once no sandbox of the project is running; a named credential is rea
 
 A sandbox publishes no ports: it has a network of its own, and nothing it listens on reaches you.
 The `dev-server` plugin runs the project's server twice. In the sandbox, at every boot in
-`/workspace` after `project-deps`, for the agent's own checks; the agent controls it with
+`/workspace` after `project-setup`, for the agent's own checks; the agent controls it with
 `/opt/plugins/dev-server/bin/sandbox-server start|stop|restart|status|log`. And, with a `port`, for
 you: once the run's container is up, its `host.sh` starts a sibling container,
 `sandbox-demo-<RUN_ID>`, from the same image, with the run's checkout (`agent-workspace`'s mirror) at
@@ -922,7 +923,7 @@ only required while that agent or plugin is in use.
 | `CLAUDE_EFFORT` | agents/claude | Reasoning effort Claude Code runs at: `low`, `medium` (the sandbox default), `high`, `xhigh`, `max` |
 | `CLAUDE_MODEL` | agents/claude | Model Claude Code starts on, an alias (`opus`) or a full id (default: Claude Code's own default) |
 | `COPILOT_AUTH` | agents/copilot | Name of the `copilot-token` authentication Copilot runs with. Required unless a plugin sets `AGENT_AUTH_PROVIDED=1`, as `copilot-home` does |
-| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_CA_CERTS` / `ENABLE_DEV_SERVER` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_DEPS` / `ENABLE_NETBIRD` / `ENABLE_GCP_AUTH` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_PR_REVIEW` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `gcp-auth`, `netbird`, `pr-review` and `ssh-credentials`) |
+| `ENABLE_GITHUB_AUTH` / `ENABLE_GIT_WORKSPACE` / `ENABLE_CWD_WORKSPACE` / `ENABLE_AGENT_WORKSPACE` / `ENABLE_BRANCH_GUARD` / `ENABLE_COPILOT_HOME` / `ENABLE_DOCKER_CLI` / `ENABLE_CA_CERTS` / `ENABLE_DEV_SERVER` / `ENABLE_UPSTREAM_PROXY` / `ENABLE_PROJECT_SETUP` / `ENABLE_NETBIRD` / `ENABLE_GCP_AUTH` / `ENABLE_SSH_CREDENTIALS` / `ENABLE_PR_REVIEW` | core | plugin switches (default on, except `ca-certs`, `cwd-workspace`, `gcp-auth`, `netbird`, `pr-review` and `ssh-credentials`) |
 | `GH_AUTH` | github-auth | Name of the `github-app` authentication the sandbox authenticates as |
 | `BASE_BRANCH` | git-workspace | Branch to cut from (default: the repo's own default branch, via `origin/HEAD`) |
 | `HOST_WORKSPACE_DIR` | cwd-workspace | Host dir mounted at `/workspace` (default: `run.sh`'s cwd) |

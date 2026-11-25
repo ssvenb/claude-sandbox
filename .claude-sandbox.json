@@ -6,7 +6,7 @@
     "CLAUDE_EFFORT": "medium"
   },
   "plugins": {
-    "project-deps": {
+    "project-setup": {
       "apt": [
         "libatomic1"
       ],

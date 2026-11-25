@@ -1,6 +1,6 @@
 # shellcheck shell=sh
 # Agent stage: start the project's server, and tell the agent it runs and how to restart it.
-# Priority 28: after project-deps (25) installed what the server needs.
+# Priority 28: after project-setup (25) installed what the server needs.
 
 [ -n "${DEV_SERVER_COMMAND:-}" ] || return 0
 

@@ -114,6 +114,18 @@ a.chip.ok { border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
 a.chip.fail { border-color: color-mix(in srgb, var(--fail) 45%, transparent); }
 a.chip.pending { border-color: color-mix(in srgb, var(--lamp) 45%, transparent); }
 a.chip.done { border-color: color-mix(in srgb, var(--ask) 45%, transparent); }
+/* A server the run serves (dev-server's demo): a button in the links' colour, not a state's, with a
+   breathing green lamp (it is up), opening in a tab. */
+a.chip.live { gap: 6px; padding: 3px 10px 3px 9px; font-weight: 600; color: var(--link);
+              background: color-mix(in srgb, var(--link) 12%, transparent); border-color: color-mix(in srgb, var(--link) 45%, transparent);
+              transition: background .12s, border-color .12s, transform .12s; }
+a.chip.live:hover { background: color-mix(in srgb, var(--link) 22%, transparent); border-color: var(--link); transform: translateY(-1px); }
+a.chip.live svg { width: 12px; height: 12px; opacity: .8; }
+a.chip.live .lamp.live { width: 7px; height: 7px; border-color: var(--ok); background: var(--ok);
+                         box-shadow: 0 0 0 0 var(--ok); animation: breathe 2s ease-out infinite; }
+@keyframes breathe { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 60%, transparent); }
+                     70%, 100% { box-shadow: 0 0 0 5px transparent; } }
+@media (prefers-reduced-motion: reduce) { a.chip.live .lamp.live { animation: none; } a.chip.live:hover { transform: none; } }
 
 [hidden], .hidden { display: none !important; }
 /* Fingers need more to aim at than a pointer does. */

@@ -24,6 +24,8 @@ export interface Item {
   url: string;
   title: string;
   ref?: string;
+  /** The port a running session serves it on: a live server (dev-server's demo). */
+  port?: number;
   note?: string;
   status?: ItemStatus;
   status_text?: string;

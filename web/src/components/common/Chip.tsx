@@ -1,6 +1,7 @@
 import type { MouseEvent } from 'react';
 import type { Item, ItemStatus } from '../../api/types';
 import { tip } from '../../lib/items';
+import { Icon } from './Icon';
 
 const MARKS: Record<ItemStatus, string> = { ok: '✓', fail: '✕', pending: '●', done: '⇥' };
 
@@ -19,12 +20,16 @@ interface Props {
   onClick?: (e: MouseEvent<HTMLAnchorElement>) => void;
 }
 
-/** An item on a session's row (its pull request, a port it serves): its mark and its ref, opening its url. */
+/** An item on a session's row (its pull request, a port it serves): its mark and its ref, opening its url.
+ *  A server it runs is a button to open: lit while it is up, with the arrow of a link that leaves the page. */
 export function Chip({ item, onClick }: Props) {
+  const live = item.port !== undefined;
   return (
-    <a className={('chip ' + (item.status ?? '')).trim()} href={item.url} target="_blank" rel="noopener" onClick={onClick} title={tip(item)}>
-      <StatusMark item={item} />
+    <a className={['chip', item.status, live && 'live'].filter(Boolean).join(' ')} href={item.url} target="_blank" rel="noopener"
+      onClick={onClick} title={tip(item)}>
+      {live ? <span className="lamp live" /> : <StatusMark item={item} />}
       {item.ref || item.title}
+      {live && <Icon name="open" />}
     </a>
   );
 }

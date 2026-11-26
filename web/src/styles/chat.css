@@ -216,7 +216,7 @@
   /* The panels beside the chat (components/chat/Pane): on the left what the project's plugins show
      (plugins.ts, ChatParts.aside), on the right the side chats. What a panel holds is an
      aside.side: a popover under the header's button, and on a desk the panel itself, as wide as the
-     reader drags its edge, put away from its own button in its top corner and brought back from the
+     reader drags its edge, put away from the tab on that edge and brought back from the
      header's, which is there only while it is away.
      shortcut: the left panel is one column for one plugin's aside, a second would sit beside the first. */
   .pane { display: contents; }
@@ -245,9 +245,14 @@
                        opacity: 0; transition: opacity .12s .08s; }
     .splitter:hover::after, .splitter:focus-visible::after, :root.resizing .splitter:focus::after { opacity: 1; }
     :root.resizing, :root.resizing * { cursor: col-resize !important; user-select: none; }
-    /* Its hide button sits in the top corner, over the end of its own head, which leaves it room. */
-    .pane > .pane-hide { display: inline-flex; position: absolute; top: 7px; right: 8px; z-index: 1; }
-    :is(#pane-left, #pane-right) > .side > .head { padding-right: 46px; }  /* above a plugin's own #id .head */
+    /* Its hide button is a tab on its edge, by the chat, near the top: on neither the panel's head
+       nor the chat, so it takes room from neither, and above the edge it is dragged by. */
+    .pane > .pane-hide { display: inline-flex; position: absolute; top: 10px; z-index: 3; padding: 3px; border-radius: 999px;
+                         background: var(--panel); border: 1px solid var(--rule); box-shadow: var(--shadow); }
+    .pane > .pane-hide svg { width: 14px; height: 14px; }
+    .pane > .pane-hide:hover, .pane > .pane-hide:focus-visible { color: var(--ink); background: var(--sunk); border-color: var(--muted); }
+    .pane.left > .pane-hide { right: -11px; }
+    .pane.right > .pane-hide { left: -11px; }
     header .pane-toggle[aria-expanded=false] { display: inline-flex; }
     header .pane-toggle.left { order: -3; }
     body:not(:has(.pane.left aside)) header .pane-toggle.left { display: none; }

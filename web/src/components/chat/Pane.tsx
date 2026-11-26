@@ -23,8 +23,8 @@ function toggle(pane: PaneState, side: Side) {
 }
 
 /** A panel beside the chat on a desk: as wide as the reader drags its edge (or moves it with the
- *  arrow keys: a window splitter, as the ARIA practices describe one), and put away from its own
- *  button in its top corner. On a smaller screen it is no box at all: what it holds is a popover. */
+ *  arrow keys: a window splitter, as the ARIA practices describe one), and put away from the tab on
+ *  that edge. On a smaller screen it is no box at all: what it holds is a popover. */
 export function Pane({ side, what, pane, children }: Props) {
   const drag = useRef<{ x: number; width: number } | null>(null);
   const out = side === 'left' ? 1 : -1;  // the way its edge moves to widen it
@@ -61,7 +61,7 @@ export function Pane({ side, what, pane, children }: Props) {
       {children}
       <button id={`hide-${side}`} className="icon pane-hide" aria-expanded={!pane.shut} aria-controls={`pane-${side}`}
         aria-label={`Hide ${what}`} title={`Hide ${what}`} onClick={() => toggle(pane, side)}>
-        <Icon name={`panel${side === 'left' ? 'Left' : 'Right'}` satisfies IconName} />
+        <Icon name={side === 'left' ? 'back' : 'forward'} />
       </button>
       <div className="splitter" role="separator" tabIndex={0} aria-orientation="vertical" aria-controls={`pane-${side}`}
         aria-label={`Width of the ${what}`} aria-valuenow={pane.width} aria-valuemin={pane.min} aria-valuemax={pane.max}

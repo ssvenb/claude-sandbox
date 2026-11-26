@@ -51,9 +51,13 @@ def changes(base_branch=""):
 
 
 def in_container(run_id, args):
-    """This script, fed on stdin to python3 in the run's container, as its agent user, in /workspace."""
+    """This script, fed on stdin to python3 in the run's container, as its agent user, in /workspace.
+    `node` is looked up in the container, by setpriv as entrypoint.sh does: the boot gives it your
+    uid there, and `docker exec -u node` may not see that (under Sysbox it ran as the image's 1000,
+    which git refused the agent's checkout to as "dubious ownership")."""
     with open(__file__, "rb") as me:
-        return subprocess.run(["docker", "exec", "-i", "-u", "node", "-w", "/workspace", f"sandbox-{run_id}",
+        return subprocess.run(["docker", "exec", "-i", "-u", "root", "-e", "HOME=/home/node", "-w", "/workspace",
+                               f"sandbox-{run_id}", "setpriv", "--reuid=node", "--regid=node", "--init-groups",
                                "python3", "-", *args], stdin=me, check=False).returncode
 
 

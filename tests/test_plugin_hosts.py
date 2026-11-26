@@ -1056,8 +1056,12 @@ def test_git_workspace_lists_a_runs_changes_in_its_container_not_on_the_host(sb)
     done = subprocess.run([REPO / "plugins/git-workspace/host/changes.py", "trunk"], cwd=checkout,
                           env=sb._env({"WEB_RUN_ID": "abc123"}), check=True, capture_output=True, text=True)
     assert json.loads(done.stdout) == [] and not planted.exists()
-    assert (sb.tmp / "argv").read_text().split() == ["exec", "-i", "-u", "node", "-w", "/workspace",
-                                                     "sandbox-abc123", "python3", "-", "trunk"]
+    # As the agent's user as the container knows it: the boot gave `node` your uid there, which
+    # `docker exec -u node` did not see under Sysbox (it ran as 1000, and git refused the checkout).
+    assert (sb.tmp / "argv").read_text().split() == ["exec", "-i", "-u", "root", "-e", "HOME=/home/node",
+                                                     "-w", "/workspace", "sandbox-abc123",
+                                                     "setpriv", "--reuid=node", "--regid=node", "--init-groups",
+                                                     "python3", "-", "trunk"]
     assert (sb.tmp / "stdin").read_text() == (REPO / "plugins/git-workspace/host/changes.py").read_text()
 
 def test_git_workspace_tells_the_page_how_to_list_a_runs_changes(sb, described):

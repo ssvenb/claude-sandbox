@@ -1050,8 +1050,7 @@ def read_auth():
     path = auth.auth_file(os.environ)
     entries = {name: {k: MASKED if k in auth.SECRETS and v not in (None, "") else v for k, v in e.items()}
                if isinstance(e, dict) else e for name, e in stored_auth().items()}
-    return {"file": str(path), "exists": path.exists(), "config": entries, "filesDir": str(auth.files_dir(os.environ)),
-            "files": auth_files(),
+    return {"file": str(path), "exists": path.exists(), "config": entries, "files": auth_files(),
             "types": {t: {"required": list(r), "optional": list(o)} for t, (r, o) in auth.TYPES.items()}}
 
 
@@ -1073,7 +1072,7 @@ MAX_AUTH_FILE = 1 << 20
 
 def put_auth_file(name, field, data):
     """Stores an uploaded file at its place for the entry `name`, readable by you alone; `data`
-    None deletes it. Where it is now, and whether."""
+    None deletes it. Whether it is there now (never where: that is no business of the page)."""
     if field not in FILE_FIELDS:
         raise ValueError(f"{field} is not a file of an authentication (those are: {', '.join(FILE_FIELDS)})")
     try:
@@ -1095,7 +1094,7 @@ def put_auth_file(name, field, data):
         with os.fdopen(fd, "wb") as f:
             f.write(data)
         os.replace(tmp, path)
-    return {"path": str(path), "exists": path.is_file()}
+    return {"exists": path.is_file()}
 
 
 def write_auth(entries):

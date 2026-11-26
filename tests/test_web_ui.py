@@ -915,7 +915,7 @@ def test_the_menus_settings_add_and_delete_projects_and_edit_your_authentication
     key = auth.parent / "auth-files/coder/privateKey"
     board.click("[data-card=auth] .item .toggle:has-text('coder')")
     field = ".field:has(label:text-is('privateKeyFile'))"
-    assert board.text_content(f"{field} .file code") == str(key)
+    assert "auth-files" not in board.text_content(field)  # its place is not shown
     assert board.text_content(f"{field} .state") == "not there"
     with board.expect_file_chooser() as chooser:
         board.click(f"{field} button.upload")

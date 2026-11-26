@@ -8,9 +8,9 @@
 
 # SSH_PRIVATE_KEY_FILE, SSH_HOST_USER and SSH_KNOWN_HOSTS_FILE come from the ssh-key authentication
 # SSH_AUTH names (auth.json).
-[ -f "$SSH_PRIVATE_KEY_FILE" ] || die "ssh-credentials: the privateKeyFile of authentication '${SSH_AUTH:-}' is not there: $SSH_PRIVATE_KEY_FILE"
+[ -f "$SSH_PRIVATE_KEY_FILE" ] || die "ssh-credentials: authentication '${SSH_AUTH:-}' has no private key yet: upload it in the sandbox settings."
 grep -q 'PRIVATE KEY' "$SSH_PRIVATE_KEY_FILE" \
-  || die "ssh-credentials: the privateKeyFile of authentication '${SSH_AUTH:-}' does not look like a private key: $SSH_PRIVATE_KEY_FILE (did you point it at the .pub?)"
+  || die "ssh-credentials: the privateKeyFile of authentication '${SSH_AUTH:-}' does not look like a private key (was the .pub uploaded?)"
 if grep -q 'ENCRYPTED' "$SSH_PRIVATE_KEY_FILE"; then
   die "ssh-credentials: the privateKeyFile of authentication '${SSH_AUTH:-}' is passphrase-protected; the sandbox boots non-interactively and cannot unlock it. Use a dedicated key without a passphrase."
 fi
@@ -23,6 +23,6 @@ pass_env SSH_HOST_PATTERN SSH_HOST_USER SSH_HOST_SUFFIX
 
 # Pinned host keys, if you have them, instead of trust-on-first-use.
 if [ -n "${SSH_KNOWN_HOSTS_FILE:-}" ]; then
-  [ -f "$SSH_KNOWN_HOSTS_FILE" ] || die "ssh-credentials: the knownHostsFile of authentication '${SSH_AUTH:-}' is not there: $SSH_KNOWN_HOSTS_FILE"
+  [ -f "$SSH_KNOWN_HOSTS_FILE" ] || die "ssh-credentials: the known_hosts file of authentication '${SSH_AUTH:-}' is gone: upload it in the sandbox settings again."
   pass_value SSH_KNOWN_HOSTS "$(cat "$SSH_KNOWN_HOSTS_FILE")"
 fi

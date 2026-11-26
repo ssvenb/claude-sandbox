@@ -64,7 +64,6 @@ export function AuthCards({ auth, projects, draft, query, onChanged }: Props) {
 
   const [present, setPresent] = useState(auth.files ?? {});
   const files: AuthFiles = {
-    dir: auth.filesDir,
     has: (n, f) => !!present[n]?.includes(f),
     put: (n, f, exists) => setPresent(p => ({ ...p, [n]: [...(p[n] ?? []).filter(x => x !== f), ...(exists ? [f] : [])] })),
   };
@@ -117,7 +116,7 @@ export function AuthCards({ auth, projects, draft, query, onChanged }: Props) {
         }} />
         <Card query={query} card={{
           key: 'auth', title: 'Authentications',
-          description: 'Every identity, key and token a sandbox may use, each under a name; projects and plugins only name one. Saved readable by you alone; a saved key, token or client secret is never shown again, and kept while you leave it as it is. A file (a private key, known_hosts) has its one place under the entry\'s name: uploaded there at once, or put there by hand.',
+          description: 'Every identity, key and token a sandbox may use, each under a name; projects and plugins only name one. Saved readable by you alone; a saved key, token or client secret is never shown again, and kept while you leave it as it is. A file (a private key, known_hosts) is uploaded at once.',
           more: ' ' + Object.keys(draft).join(' ').toLowerCase(),
           fields: [{ spec: { type: 'list', label: 'Entries', items: entrySpec(auth.types) }, slot: entries, name: 'auth' }],
         }} />

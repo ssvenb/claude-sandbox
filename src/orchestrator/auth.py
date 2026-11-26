@@ -21,12 +21,9 @@ they need not know. A setting of type "auth" without `fills` names an entry its 
 (upstream-proxy's routes, whose host proxy reads the file; run.sh hands every stage its path as
 SANDBOX_AUTH_FILE). The web UI offers the names of the entries of the right type.
 
-A field ending in "File" (a private key, a known_hosts file) is not in the entry: each has its one
-place, next to the file, under the entry's name and the field's (FILES):
-
-    ~/.config/claude-sandbox/auth-files/coder/privateKey
-
-Uploaded there through the web UI, or put there by hand (readable by you alone).
+A field ending in "File" (a private key, a known_hosts file) is not in the entry, nor configured
+anywhere: each has its one fixed place under the entry's name (file_path), uploaded there through
+the web UI (readable by you alone).
 """
 from __future__ import annotations
 

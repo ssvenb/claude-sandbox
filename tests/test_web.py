@@ -708,6 +708,42 @@ def test_deleting_tidies_up_only_what_a_plugin_offered_for_that_run(tmp_path, mo
     assert web.tidy(s, ["u9"], offered) == ["#9: ❌ gh pr close: gone"]
 
 
+def test_a_demo_is_up_once_its_server_answers_not_once_its_port_is_published(monkeypatch):
+    """Docker takes a published port's connections before the server in the container listens, and
+    closes them unanswered: the demo's lamp is lit by an HTTP answer, of any status."""
+    def until(item, up):
+        for _ in range(100):
+            if web.answering(item)["up"] == up:
+                return True
+            time.sleep(0.05)
+    monkeypatch.setattr(web, "UP_EVERY", 0)
+    published = socket.create_server(("127.0.0.1", 0))  # takes the connection, says nothing
+    item = {"run_id": "0a1b2c", "port": 5173, "upstream": ["127.0.0.1", published.getsockname()[1]]}
+
+    def mute():
+        while True:
+            try:
+                published.accept()[0].close()
+            except OSError:
+                return
+    threading.Thread(target=mute, daemon=True).start()
+    assert web.answering(item) == {**item, "up": False}  # asked in the background: not up until it said so
+    time.sleep(0.3)
+    assert web.answering(item)["up"] is False
+    published.close()
+    with socket.create_server(("127.0.0.1", 0)) as app:
+        item = {**item, "upstream": ["127.0.0.1", app.getsockname()[1]]}
+
+        def answer():
+            c = app.accept()[0]
+            c.recv(1024)
+            c.sendall(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+            c.close()
+        threading.Thread(target=answer, daemon=True).start()
+        assert until(item, True)
+    assert web.answering({"ref": "#3"}) == {"ref": "#3"}  # no upstream: nothing to ask
+
+
 def test_a_running_sessions_live_items_are_read_afresh_on_every_poll(tmp_path, monkeypatch):
     """web_live_items: a file a plugin keeps current (the central port proxy's published ports),
     re-read for each running session; an ended session, or a terminal, shows none."""

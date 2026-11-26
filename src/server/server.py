@@ -1811,8 +1811,11 @@ def web_bind(bind):
 
 
 def allowed(hosts, name):
-    """A name of ours: listed, or under a listed `.domain` (a demo of this server behind another's
-    subdomains, <RUN_ID>-<port>.<its name>, which pass the Host header through)."""
+    """A name of ours: listed, under a listed `.domain`, or a demo subdomain <RUN_ID>-<port>.<a listed
+    name> (this server as a run's demo, behind another's relay, which passes the Host header through:
+    whoever owns the listed name owns that one too, so it stops DNS rebinding as well)."""
+    if (sub := PORT_HOST.fullmatch(name)) and sub[3] in hosts:
+        return True
     return name in hosts or any(h.startswith(".") and name.endswith(h) for h in hosts)
 
 

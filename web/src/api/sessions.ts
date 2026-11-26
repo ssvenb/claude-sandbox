@@ -48,7 +48,7 @@ export const getAuth = () => api<AuthConfig>('/api/auth');
 export const saveAuth = (config: JsonObject) => post<AuthConfig>('/api/auth', { config });
 /** Stores a file of an authentication at its place (`file` null: deletes it). */
 export const putAuthFile = (name: string, field: string, file: Blob | null) =>
-  api<{ path: string; exists: boolean }>(
+  api<{ exists: boolean }>(
     `/api/auth/file${file ? '' : '/delete'}?${new URLSearchParams({ name, field })}`, { method: 'POST', body: file ?? undefined });
 export const addProject = (name: string, repo: string) => post('/api/projects', { name, repo });
 export const deleteProject = (name: string) => post('/api/projects/delete', { name });

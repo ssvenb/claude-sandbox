@@ -113,9 +113,8 @@
   .chips label:has(input:checked) { border-color: var(--link); color: var(--link); }
   .chips input { margin: 0; accent-color: var(--link); }
   .kept { font-size: 12px; }
-  /* A file of an authentication: its place, whether it is there, and a button to upload it there. */
+  /* A file of an authentication: whether it is there, and a button to upload it. */
   .control > .file { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-  .file > code { flex: 1 1 200px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
   .file > .muted { flex: 1 1 200px; color: var(--muted); font-size: 12px; }
   .file > .state { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--rule); color: var(--muted); }
   .file > .state.ok { border-color: var(--ok); color: var(--ok); }

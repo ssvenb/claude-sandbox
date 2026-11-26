@@ -134,9 +134,7 @@ export interface AuthConfig {
   file: string;
   exists: boolean;
   config: JsonObject;
-  /** Where each entry's files are: <filesDir>/<name>/<field without "File">. */
-  filesDir: string;
-  /** The files in place there: entry name → its fields that have one. */
+  /** The files in place (each at its fixed place, never shown): entry name → its fields that have one. */
   files: Record<string, string[]>;
   types: Record<string, { required: string[]; optional: string[] }>;
 }

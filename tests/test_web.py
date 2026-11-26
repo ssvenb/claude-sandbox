@@ -347,7 +347,8 @@ def test_projects_are_added_and_deleted_and_authentications_saved_readable_by_yo
     file = ui.tmp / ".config/claude-sandbox/auth.json"
     got = json.load(ui("/api/auth"))
     files = file.parent / "auth-files"
-    assert (got["file"], got["exists"], got["config"], got["filesDir"], got["files"]) == (str(file), False, {}, str(files), {})
+    assert (got["file"], got["exists"], got["config"], got["files"]) == (str(file), False, {}, {})
+    assert "auth-files" not in json.dumps(got)  # where the files are is never shown
     assert got["types"]["github-app"] == {"required": ["appId", "privateKeyFile"], "optional": ["host", "username"]}
     entries = {"coder": {"type": "github-app", "appId": "1"}, "openai": {"type": "api-key", "key": "sk"}}
     masked = {"coder": entries["coder"], "openai": {"type": "api-key", "key": web.MASKED}}
@@ -367,7 +368,7 @@ def test_projects_are_added_and_deleted_and_authentications_saved_readable_by_yo
     upload = lambda q, data: ui("/api/auth/file?" + q, data)  # noqa: E731
     got = json.load(upload("name=coder&field=privateKeyFile", b"-----BEGIN KEY-----\n"))
     key = files / "coder/privateKey"
-    assert got == {"path": str(key), "exists": True} and key.read_bytes() == b"-----BEGIN KEY-----\n"
+    assert got == {"exists": True} and key.read_bytes() == b"-----BEGIN KEY-----\n"
     assert key.stat().st_mode & 0o777 == 0o600 and key.parent.stat().st_mode & 0o777 == files.stat().st_mode & 0o777 == 0o700
     assert json.load(ui("/api/auth"))["files"] == {"coder": ["privateKeyFile"]}
     for q, data in (("name=coder&field=appId", b"x"), ("name=../x&field=privateKeyFile", b"x"),

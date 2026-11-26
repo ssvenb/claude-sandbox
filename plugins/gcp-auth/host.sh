@@ -16,7 +16,7 @@ fi
 # Workload identity federation: the host's own credential (e.g. an X.509 cert) instead of a login.
 GCP_CREDENTIAL_FILE=${GCP_CREDENTIAL_FILE:-}
 [ -z "$GCP_CREDENTIAL_FILE" ] || [ -r "$GCP_CREDENTIAL_FILE" ] \
-  || die "gcp-auth: the credentialFile of authentication '${GCP_AUTH:-}' is not readable: $GCP_CREDENTIAL_FILE"
+  || die "gcp-auth: the credentialFile of authentication '${GCP_AUTH:-}' is not readable: upload it in the sandbox settings again."
 
 GCP_AUTH_DIR=$PLUGIN_DIR
 gcp_auth_mint() {

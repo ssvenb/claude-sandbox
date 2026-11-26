@@ -435,7 +435,7 @@ def test_git_workspace_branch_prefix_comes_from_the_projects_file_alone(sb):
 # --- github-auth ---------------------------------------------------------------------------
 
 def test_github_auth_needs_the_key_file(sb):
-    sb.plugin("github-auth", GH_APP_ID=1, GH_PRIVATE_KEY_FILE=sb.tmp / "none.pem").dies("the privateKeyFile of authentication")
+    sb.plugin("github-auth", GH_APP_ID=1, GH_PRIVATE_KEY_FILE=sb.tmp / "none.pem").dies("has no private key yet: upload it in the sandbox settings")
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root reads any file")
@@ -662,7 +662,7 @@ KEY = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaA==\n-----END OPENSSH PRIVA
 
 
 @pytest.mark.parametrize("content, message", [
-    (None, "the privateKeyFile of authentication"),
+    (None, "has no private key yet"),
     ("ssh-ed25519 AAAA user@host\n", "does not look like a private key"),
     ("-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\n", "passphrase-protected"),
 ])
@@ -681,7 +681,7 @@ def test_ssh_credentials_passes_the_key_config_and_known_hosts(sb):
     assert run.env == {"SSH_PRIVATE_KEY": KEY.rstrip("\n"), "SSH_HOST_PATTERN": "box-*",
                        "SSH_HOST_USER": "ops", "SSH_KNOWN_HOSTS": "host ssh-ed25519 AAAA"}
     sb.plugin("ssh-credentials", SSH_PRIVATE_KEY_FILE=sb.tmp / "key",
-              SSH_KNOWN_HOSTS_FILE=sb.tmp / "nope").dies("the knownHostsFile of authentication")
+              SSH_KNOWN_HOSTS_FILE=sb.tmp / "nope").dies("the known_hosts file of authentication")
 
 
 # --- upstream-proxy ------------------------------------------------------------------------

@@ -506,7 +506,7 @@ Recognised output:
 ```sh
 # shellcheck shell=bash
 # GH_APP_ID and GH_PRIVATE_KEY_FILE are filled from the authentication GH_AUTH names.
-[ -f "$GH_PRIVATE_KEY_FILE" ] || die "github-auth: the App's private key is not there: $GH_PRIVATE_KEY_FILE"
+[ -f "$GH_PRIVATE_KEY_FILE" ] || die "github-auth: the App has no private key yet: upload it in the sandbox settings."
 
 GITHUB_AUTH_DIR=$PLUGIN_DIR   # $PLUGIN_DIR is gone by the time the function runs
 github_auth_mint() {
@@ -754,17 +754,9 @@ else), each under a name:
 }
 ```
 
-A field ending in `File` (a private key, a `known_hosts` file, a credential config) is not a path you
-configure: each has its one place, next to this file, under the entry's name and the field's
-(`privateKeyFile` without `File`):
-
-```
-~/.config/claude-sandbox/auth-files/coder/privateKey
-~/.config/claude-sandbox/auth-files/my-ssh/knownHosts
-```
-
-The menu's Settings uploads it there (readable by you alone) and shows whether it is in place; or
-put it there yourself. An optional one is used while it is there.
+A field ending in `File` (a private key, a `known_hosts` file, a credential config) is not
+configured at all: the menu's Settings uploads the file for its entry, keeps it readable by you
+alone, and shows whether it is in place. An optional one is used while it is there.
 
 | Type | Named by | Fields |
 |------|----------|--------|

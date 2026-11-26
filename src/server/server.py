@@ -314,7 +314,7 @@ class Session:
         return {**{k: getattr(self, k) for k in ("id", "project", "kind", "run_id", "started", "exit", "ui")},
                 "status": self.shown(), "workspace": checkout(self.project, self.run_id),
                 "plugins": described.get(self.project, {}).get("plugins", []),
-                "items": live_items(self.project, self.run_id) if self.exit is None else []}
+                "items": [answering(i) for i in live_items(self.project, self.run_id)] if self.exit is None else []}
 
 
 IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
@@ -1177,6 +1177,38 @@ def live_items(project, run_id):
 
 
 PORT_HOST = re.compile(r"([0-9a-f]{6})-([1-9][0-9]{0,4})\.(.+)")  # <RUN_ID>-<port>.<this server's name>
+UP_EVERY = 3  # seconds a server's answer (or its silence) is taken for: the page asks as often
+_up, _up_lock = {}, threading.Lock()  # (host, port) → (when it was asked, it answered), and asked now
+
+
+def _ask(where):
+    """Whether a server answers HTTP at all, its status whatever: Docker publishes the port (and
+    takes the connection) before the demo in the container listens, which then closes it unanswered."""
+    try:
+        with socket.create_connection(where, timeout=1) as c:
+            c.settimeout(2)
+            c.sendall(b"HEAD / HTTP/1.0\r\nHost: localhost\r\n\r\n")
+            up = c.recv(5) == b"HTTP/"
+    except OSError:
+        up = False
+    with _up_lock:
+        _up[where] = (time.monotonic(), up)
+
+
+def answering(item):
+    """A live item with the upstream it is relayed to (dev-server's demo), told whether that answers
+    yet (`up`): as last asked, and asked again in the background once that is old."""
+    if not isinstance(item.get("upstream"), list) or len(item["upstream"]) != 2:
+        return item
+    where = tuple(item["upstream"])
+    with _up_lock:
+        when, up = _up.get(where, (None, False))
+        if when is None or (when != -1 and time.monotonic() - when > UP_EVERY):
+            _up[where] = (-1, up)  # being asked: one question at a time
+            threading.Thread(target=_ask, args=(where,), daemon=True).start()
+    return {**item, "up": up}
+
+
 AUTH_COOKIE = "_oauth2_proxy"  # serve-oauth.sh's sign-in (and its _N, _csrf parts): never for a demo
 
 

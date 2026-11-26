@@ -655,8 +655,9 @@ def test_a_port_the_session_publishes_is_a_button_on_its_window_while_published(
                                        {"run_id": RUN, "ref": ":5173", "title": "through the web UI's subdomain", "port": 5173,
                                         "url": f"//{RUN}-5173.{{hostport}}/"}]))
     board.wait_for_selector(f"{ROW} a.chip:has-text(':3000')")
-    # A server it runs (dev-server's demo, which says its port) is a button lit while it is up.
-    assert board.query_selector(f"{ROW} a.chip.live:has-text(':5173') .lamp") and not board.query_selector("a.chip.live:has-text(':3000')")
+    # A server it runs (dev-server's demo, which says its port) is a button, its lamp lit once it answers.
+    assert board.query_selector(f"{ROW} a.chip.live:has-text(':5173') .lamp:not(.up)")  # nothing answers it
+    assert not board.query_selector("a.chip.live:has-text(':3000')")
     host = board.base.split("//", 1)[1]
     assert board.get_attribute(f"{ROW} a.chip:has-text(':5173')", "href") == f"//{RUN}-5173.{host}/"
     assert board.get_attribute(f"{ROW} a.chip:has-text(':3000')", "href") == f"{board.base}/published"

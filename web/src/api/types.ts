@@ -26,6 +26,8 @@ export interface Item {
   ref?: string;
   /** The port a running session serves it on: a live server (dev-server's demo). */
   port?: number;
+  /** It answers yet (the server asks it): a demo is published before its server listens. */
+  up?: boolean;
   note?: string;
   status?: ItemStatus;
   status_text?: string;

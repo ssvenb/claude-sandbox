@@ -175,6 +175,55 @@ def test_allow_host_adds_a_name_to_the_allowlist(tmp_path):
     finally:
         server.server_close()
 
+
+def test_an_allowed_dot_domain_takes_any_name_under_it():
+    # A demo of this server, reached as <RUN_ID>-<port>.box.example.com through another's relay.
+    assert web.allowed({".box.example.com"}, "0a1b2c-8790.box.example.com")
+    assert not web.allowed({".box.example.com"}, "box.example.com.evil") and not web.allowed({".box.example.com"}, "xbox.example.com")
+    assert not web.allowed({"box.example.com"}, "0a1b2c-8790.box.example.com")
+
+
+def test_a_runs_published_port_is_a_subdomain_relayed_without_the_sign_ins_cookies(tmp_path, monkeypatch):
+    app = socket.create_server(("127.0.0.1", 0))  # the demo's server: answers with the request it got
+
+    def serve():
+        while True:
+            try:
+                conn, _ = app.accept()
+            except OSError:
+                return
+            with conn:
+                head = b""
+                while b"\r\n\r\n" not in head and (chunk := conn.recv(4096)):
+                    head += chunk
+                conn.sendall(b"HTTP/1.0 200 OK\r\n\r\n" + head)
+    threading.Thread(target=serve, daemon=True).start()
+    items = tmp_path / "items.json"  # as dev-server's host.sh writes them
+    items.write_text(json.dumps([{"run_id": "0a1b2c", "port": 3000, "upstream": ["127.0.0.1", app.getsockname()[1]]}]))
+    monkeypatch.setattr(web, "described", {"proj": {"live": [str(items)]}})
+    server = web.serve(0, tmp_path / "projects", allow_hosts=["box.example.com"])
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    def ask(host, cookie="a=1"):
+        with socket.create_connection(("127.0.0.1", server.server_address[1]), timeout=5) as c:
+            c.sendall(f"GET /x?y=1 HTTP/1.1\r\nHost: {host}\r\nCookie: {cookie}\r\n\r\n".encode())
+            got = b""
+            while chunk := c.recv(4096):
+                got += chunk
+            return got.decode()
+    try:
+        got = ask("0a1b2c-3000.box.example.com", "_oauth2_proxy=me; a=1; _oauth2_proxy_csrf=x; b=2")
+        assert got.startswith("HTTP/1.0 200") and "GET /x?y=1 HTTP/1.1" in got
+        assert "Host: 0a1b2c-3000.box.example.com" in got and "Cookie: a=1; b=2" in got and "me" not in got
+        assert "Cookie" not in ask("0a1b2c-3000.box.example.com:4180", "_oauth2_proxy=me")  # nothing else
+        assert ask("0a1b2c-3001.box.example.com").startswith("HTTP/1.0 502")  # not published
+        assert ask("0a1b2c-3000.evil.example").startswith("HTTP/1.0 403")  # not our name: our own guard's
+    finally:
+        server.shutdown()
+        server.server_close()
+        app.close()
+
+
 def test_the_pages_are_one_built_app_and_what_it_loads_is_served_under_its_own_path(ui):
     page = ui("/").read()
     assert b'<div id="root">' in page and ui("/").headers["Content-Type"].startswith("text/html")
@@ -1154,7 +1203,9 @@ def test_serve_oauth_runs_the_server_behind_the_proxy_and_ends_with_it(tmp_path)
             pytest.fail("the server did not come up")
         args = (tmp_path / "args").read_text()
         assert "--email-domain=levatioai.com" in args and f"--upstream=http://127.0.0.1:{upstream}/" in args
-        assert args.rstrip().endswith("--extra")
+        # One sign-in for the demo servers too, subdomains of the host, under the name the server strips.
+        assert "--cookie-domain=.box.example.com" in args and "--redirect-url=https://box.example.com/oauth2/callback" in args
+        assert args.rstrip().endswith("--extra --cookie-name=_oauth2_proxy")
         os.kill(int((tmp_path / "pid").read_text()), 15)  # the proxy ending ends the server too
         p.wait(timeout=10)
         with pytest.raises(OSError):

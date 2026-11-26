@@ -1176,6 +1176,20 @@ def live_items(project, run_id):
     return found
 
 
+PORT_HOST = re.compile(r"([0-9a-f]{6})-([1-9][0-9]{0,4})\.(.+)")  # <RUN_ID>-<port>.<this server's name>
+AUTH_COOKIE = "_oauth2_proxy"  # serve-oauth.sh's sign-in (and its _N, _csrf parts): never for a demo
+
+
+def published(run_id, port):
+    """Where a run's port is published on this machine (a live item's `upstream`: dev-server's demo)."""
+    for project in list(described):
+        for item in live_items(project, run_id):
+            if item.get("port") == port and isinstance(item.get("upstream"), list):
+                host, host_port = item["upstream"]
+                return host, host_port
+    raise ValueError(f"port {port} of {run_id} is not published")
+
+
 def checkout(project, run_id):
     """A run's /workspace on this machine, where a plugin of the project says it keeps one."""
     pattern = described.get(project, {}).get("checkout")
@@ -1457,7 +1471,7 @@ class Handler(BaseHTTPRequestHandler):
         host = self.headers.get("Host", "")
         origin = self.headers.get("Origin")
         # https too: behind a TLS proxy (serve-oauth.sh) the page is https://<Host>, the same site.
-        if host.rsplit(":", 1)[0] in self.server.hosts and origin in (None, f"http://{host}", f"https://{host}"):
+        if allowed(self.server.hosts, host.rsplit(":", 1)[0]) and origin in (None, f"http://{host}", f"https://{host}"):
             global page_origin
             page_origin = origin or f"{self.headers.get('X-Forwarded-Proto', 'http')}://{host}"
             return True
@@ -1475,10 +1489,24 @@ class Handler(BaseHTTPRequestHandler):
     def tunnel(self, plugin):
         """Pass one request under /plugins/<plugin>/ to that plugin's server, and its answer back, as
         raw bytes: that carries its WebSockets too, and puts it on our origin and behind our guard."""
-        if not self.guard():
-            return
+        if self.guard():
+            self.relay(lambda: connect(plugin_server(plugin)))
+
+    def port(self, run_id, port):
+        """A request to <RUN_ID>-<port>.<our name>: to that run's published port (its demo server), behind whatever
+        sign-in is in front of us (serve-oauth.sh). Not our guard's: the page is the sandbox's, on an
+        origin of its own. Our sign-in's cookies stay here: the demo would sign in as you with them."""
+        cookies = [c for c in self.headers.get("Cookie", "").split(";") if c.strip() and
+                   not c.strip().startswith(AUTH_COOKIE)]
+        del self.headers["Cookie"]
+        if cookies:
+            self.headers["Cookie"] = ";".join(cookies).strip()
+        self.relay(lambda: socket.create_connection(published(run_id, port), timeout=10))
+
+    def relay(self, upstream):
         try:
-            up = connect(plugin_server(plugin))
+            up = upstream()
+            up.settimeout(None)
         except (ValueError, OSError) as e:
             return self.reply(502, {"error": str(e)})
         upgrade = "upgrade" in self.headers.get("Connection", "").lower()
@@ -1516,6 +1544,9 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
     def route(self, mine):
+        sub = PORT_HOST.fullmatch(self.headers.get("Host", "").rsplit(":", 1)[0])
+        if sub and sub[3] in self.server.hosts:
+            return self.port(sub[1], int(sub[2]))
         m = re.match(r"/plugins/([\w-]+)(?:[/?]|$)", self.path)
         self.tunnel(m[1]) if m else mine()
 
@@ -1777,6 +1808,12 @@ def web_bind(bind):
     return bind or "0.0.0.0"
 
 
+def allowed(hosts, name):
+    """A name of ours: listed, or under a listed `.domain` (a demo of this server behind another's
+    subdomains, <RUN_ID>-<port>.<its name>, which pass the Host header through)."""
+    return name in hosts or any(h.startswith(".") and name.endswith(h) for h in hosts)
+
+
 def serve(port, projects_file, bind="127.0.0.1", allow_hosts=()):
     # Loopback by default: there is no login, so anyone who can reach the port can start
     # sandboxes as you. --bind 0.0.0.0 opens it to your network; the Host allowlist still
@@ -1797,7 +1834,7 @@ if __name__ == "__main__":
     parser.add_argument("--bind", default="127.0.0.1",
                         help="address to listen on; 0.0.0.0 for every interface (default: %(default)s)")
     parser.add_argument("--allow-host", action="append", default=[], metavar="NAME",
-                        help="another name the page may be opened by, e.g. a VPN's DNS name (repeatable)")
+                        help="another name the page may be opened by, e.g. a VPN's DNS name; .DOMAIN for any under it (repeatable)")
     parser.add_argument("--projects", type=Path,
                         default=Path.home() / ".config/claude-sandbox/projects",
                         help="directory with a <name>.json per project (default: %(default)s)")

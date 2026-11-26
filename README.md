@@ -63,7 +63,15 @@ The OAuth client is a Google Cloud *Web application* client with the redirect UR
 no API, and so no Terraform resource, for these clients. A consent screen of type **Internal** also
 keeps out every account outside the Workspace. oauth2-proxy sets its cookie `Secure`, so serve it over
 HTTPS: run it behind a TLS proxy, or pass `-- --https-address=:443 --tls-cert-file=... --tls-key-file=...`.
-Demo servers (see [Dev server](#dev-server)) do not go through the proxy.
+The sessions' demo servers (see [Dev server](#dev-server)) sit behind the same sign-in, each on a
+subdomain, `https://<RUN_ID>-<port>.<host>/`: so `*.<host>` needs the DNS record and the TLS
+certificate too (over NetBird: a wildcard DNS record for the peer's address). The proxy sets its
+cookie for the whole domain (and keeps the name `_oauth2_proxy`); the server relays a subdomain's
+requests to that demo, and takes the sign-in's cookies out first, or the demo would sign in as you
+with them. The demos themselves then listen on `127.0.0.1` only, whatever address the web UI's
+server has. The Host header passes through, so a demo that checks it must accept the subdomain:
+this repo's own server takes `--allow-host .<host>` for any name under `<host>`. Signing in from a
+demo's page (an expired cookie) lands you on the dashboard; the demo's button then works.
 
 The home page is a dashboard of all your sandboxes. On top is a box to start a session by writing
 its first message, with the project it is for beside it. Under it, on the left, is what is
@@ -561,7 +569,7 @@ request, with its CI). An item is `{title, url}` plus optional `ref` (a short id
 | `web_session_item RUN_ID JSON_ITEM` | an item on that run's session row, shown while the page lists a session of the run |
 | `web_tie_items JQ_FILTER` | hands items listed so far (by plugins of a lower `priority`) to the run the filter names for each (a RUN_ID; `null` or `""` leaves the item be): such an item moves onto that run's session row while one is listed, else stays in its section with a **Resume** button |
 | `web_map_items JQ_FILTER` | rewrites every item listed so far (by plugins of a lower `priority`) |
-| `web_live_items FILE` | items from a JSON array in FILE, each with its `run_id`, on the row of that run's running session; the server re-reads the file on every poll, so it suits what comes and goes within seconds (a run's demo server, see [Dev server](#dev-server)); `{host}` in a `url` stands for the host name the page was opened by |
+| `web_live_items FILE` | items from a JSON array in FILE, each with its `run_id`, on the row of that run's running session; the server re-reads the file on every poll, so it suits what comes and goes within seconds (a run's demo server, see [Dev server](#dev-server)); `{host}` in a `url` stands for the host name the page was opened by, `{hostport}` for that with its port; an item with a `port` and an `upstream` (`[address, port]` on this machine) is what the web UI's subdomain `<RUN_ID>-<port>.<host>` relays to |
 | `web_note TEXT` | one line saying why there is nothing to list |
 | `web_poll SECONDS` | nothing: has the server describe the project at least this often, page or no page (see [Watching and starting](#watching-and-starting-web_poll-web_start)) |
 | `web_start JSON` | nothing: a session the server starts by itself, once per `key`, removed when its agent has finished |
@@ -720,7 +728,8 @@ the demo needs and the sandbox must not have: credentials of its own, seed data)
 command, restarted whenever a file the agent edits changes (not `.git`, `node_modules`, `.venv`,
 `__pycache__` or `dist`), and every 10 seconds while it is not running. The port is published on
 this machine at a free port, on the address the web UI listens on (`SANDBOX_WEB_BIND`, `127.0.0.1`
-for a run started from a terminal), and shows as a button on the run's session, on the dashboard
+for a run started from a terminal; on `127.0.0.1` under `serve-oauth.sh`, whose links are the web
+UI's subdomains, see [Web UI](#web-ui)), and shows as a button on the run's session, on the dashboard
 and in its chat. It goes with the run; `docker logs sandbox-demo-<RUN_ID>` has its output.
 
 ```json
@@ -951,7 +960,8 @@ Where the files are is the only thing your environment says: `SANDBOX_PROJECTS_D
 [Authentications](#authentications--configclaude-sandboxauthjson)). The web UI sets
 `SANDBOX_WEB_BIND` / `SANDBOX_WEB_NAME` for every `run.sh` it starts: the address it listens on,
 and the host name its `--bind` gave for it (plugins that publish what a session serves default
-to it).
+to it); `serve-oauth.sh` adds `SANDBOX_WEB_SUBDOMAINS=1`: what a session serves is then reached
+through the web UI's subdomains, behind its sign-in.
 
 Volume mounts are contributed by plugins via `pass_mount`; the core `docker run` has none. The agent's
 user, `node`, takes the uid of whoever runs `run.sh` (`HOST_UID`, set by the boot in

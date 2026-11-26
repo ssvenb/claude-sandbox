@@ -530,16 +530,19 @@ case $1 in info) echo 'runc sysbox-runc' ;; inspect) echo sha256:img ;; port) ec
     assert "--runtime" not in alone and ".claude" not in alone and "-e DEMO_SERVER_PLUGINS= " in alone
 
 
-@pytest.mark.parametrize("bind, name, url", [(None, None, "http://{host}:49153/"),
-                                              ("100.64.0.1", "box.vpn", "http://box.vpn:49153/")])
-def test_dev_server_demo_runs_the_checkout_in_a_sibling_container_and_links_it(sb, bind, name, url):
+@pytest.mark.parametrize("bind, name, via_web, url", [
+    (None, None, None, "http://{host}:49153/"),
+    ("100.64.0.1", "box.vpn", None, "http://box.vpn:49153/"),
+    # Behind serve-oauth.sh's sign-in: on loopback alone, linked as the web UI's subdomain it relays.
+    ("0.0.0.0", None, "1", "//abc123-5173.{hostport}/")])
+def test_dev_server_demo_runs_the_checkout_in_a_sibling_container_and_links_it(sb, bind, name, via_web, url):
     mirror = sb.home / ".agent-workspaces/project-20260102-abc123"
     mirror.mkdir(parents=True)
     calls = sb.tmp / "calls"
     sb.stub("docker", f'''echo "$*" >>"{calls}"
 case $1 in
   inspect) echo sha256:img ;;
-  port) echo "${{SANDBOX_WEB_BIND:-127.0.0.1}}:49153" ;;
+  port) echo "127.0.0.1:49153" ;;
 esac
 ''')
     sb.config(DEMO)
@@ -547,12 +550,13 @@ esac
     # The container comes up in the background: wait for its link, then the run ends (exit hooks).
     run = sb.staged(f'ENABLED_PLUGINS=dev-server\nplugins_host_stage\n'
                     f'until grep -q abc123 "{items}" 2>/dev/null; do sleep 0.1; done; cat "{items}"',
-                    SANDBOX_WEB_BIND=bind, SANDBOX_WEB_NAME=name).ok()
+                    SANDBOX_WEB_BIND=bind, SANDBOX_WEB_NAME=name, SANDBOX_WEB_SUBDOMAINS=via_web).ok()
     assert run.env == {"DEV_SERVER_COMMAND": DEMO["plugins"]["dev-server"]["command"]}  # the sandbox's own
     [item] = json.loads(run.out.splitlines()[-1])
     assert item["run_id"] == "abc123" and item["url"] == url
+    assert (item["port"], item["upstream"]) == (5173, ["127.0.0.1", 49153])  # what the web UI relays to
     docker_run = next(line for line in calls.read_text().splitlines() if line.startswith("run "))
-    assert f"-v {mirror}:/workspace -p {bind or '127.0.0.1'}::5173" in docker_run
+    assert f"-v {mirror}:/workspace -p {'127.0.0.1' if via_web else bind or '127.0.0.1'}::5173" in docker_run
     assert '-e DEMO_SERVER_SETUP=["echo $DEMO_TOKEN >.token"]' in docker_run
     assert "--name sandbox-demo-abc123" in docker_run and docker_run.endswith(" sha256:img")
     assert "--runtime" not in docker_run and "docker.sock" not in docker_run and ".claude" not in docker_run

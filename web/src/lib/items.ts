@@ -8,8 +8,11 @@ export const tip = (i: Item): string =>
     .join('\n');
 
 /** What a plugin publishes for a running session (its servers' ports) links from wherever this
- *  page was opened: `{host}` in its url is this page's own host name. */
-export const here = (i: Item): Item => ({ ...i, url: i.url.replaceAll('{host}', location.hostname) });
+ *  page was opened: `{host}` in its url is this page's own host name, `{hostport}` that with its port. */
+export const here = (i: Item): Item => ({
+  ...i,
+  url: i.url.replaceAll('{hostport}', location.host).replaceAll('{host}', location.hostname),
+});
 
 /** The items a session carries itself, while it runs. */
 export const liveItems = (s: Session): Item[] => (s.items ?? []).map(here);

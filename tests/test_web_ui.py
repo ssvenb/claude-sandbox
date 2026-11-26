@@ -646,10 +646,14 @@ def test_a_runs_pull_request_is_on_its_session_or_with_none_listed_on_its_projec
 def test_a_port_the_session_publishes_is_a_button_on_its_window_while_published(board):
     board.resume()
     port = board.base.rsplit(":", 1)[1]
-    # As the central port proxy writes it: `{host}` is whatever name the page was opened by.
+    # As dev-server writes it: `{host}` is whatever name the page was opened by.
     board.ports.write_text(json.dumps([{"run_id": RUN, "ref": ":3000", "title": "Port 3000 of the sandbox",
-                                        "url": f"http://{{host}}:{port}/published"}]))
+                                        "url": f"http://{{host}}:{port}/published"},
+                                       {"run_id": RUN, "ref": ":5173", "title": "through the web UI's subdomain",
+                                        "url": f"//{RUN}-5173.{{hostport}}/"}]))
     board.wait_for_selector(f"{ROW} a.chip:has-text(':3000')")
+    host = board.base.split("//", 1)[1]
+    assert board.get_attribute(f"{ROW} a.chip:has-text(':5173')", "href") == f"//{RUN}-5173.{host}/"
     assert board.get_attribute(f"{ROW} a.chip:has-text(':3000')", "href") == f"{board.base}/published"
     published = opens_tab(board, lambda: board.click(f"{ROW} a.chip:has-text(':3000')"))
     assert published.url == f"{board.base}/published"

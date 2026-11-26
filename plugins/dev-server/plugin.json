@@ -21,7 +21,7 @@
       "key": "port",
       "type": "integer",
       "label": "Demo port",
-      "description": "The port the command listens on: set, the command also runs in a demo container next to the sandbox, restarted on every change, published on this machine where the web UI listens and shown on the run's session. Needs agent-workspace. Empty: no demo container."
+      "description": "The port the command listens on: set, the command also runs in a demo container next to the sandbox, restarted on every change, published on this machine where the web UI listens (behind serve-oauth.sh's sign-in: a subdomain of the web UI) and shown on the run's session. Needs agent-workspace. Empty: no demo container."
     },
     {
       "key": "demoSetup",

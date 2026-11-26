@@ -926,11 +926,11 @@ def test_the_menus_settings_add_and_delete_projects_and_edit_your_authentication
     board.click("[data-card=auth] .item .toggle:has-text('coder')")
     field = ".field:has(label:text-is('privateKeyFile'))"
     assert "auth-files" not in board.text_content(field)  # its place is not shown
-    assert board.text_content(f"{field} .state") == "not there"
+    assert board.text_content(f"{field} .file").strip() == "" and board.is_visible(f"{field} button.dropzone")  # icons only
     with board.expect_file_chooser() as chooser:
-        board.click(f"{field} button.upload")
+        board.click(f"{field} button.dropzone")
     chooser.value.set_files([{"name": "coder.pem", "mimeType": "application/x-pem-file", "buffer": b"PEM"}])
-    board.wait_for_selector(f"{field} .state.ok:text-is('in place')")
+    board.wait_for_selector(f"{field} .filecard .tile[aria-label^='Not a PEM key · 3 B']")  # what it is, on hover
     assert key.read_bytes() == b"PEM" and key.stat().st_mode & 0o777 == 0o600
     board.click(".field:has(label:text-is('Entries')) > .control > .entries > button.add")
     board.fill("input[name='auth.1.name']", "openai")

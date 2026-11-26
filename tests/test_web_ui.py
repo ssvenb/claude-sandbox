@@ -652,9 +652,11 @@ def test_a_port_the_session_publishes_is_a_button_on_its_window_while_published(
     # As dev-server writes it: `{host}` is whatever name the page was opened by.
     board.ports.write_text(json.dumps([{"run_id": RUN, "ref": ":3000", "title": "Port 3000 of the sandbox",
                                         "url": f"http://{{host}}:{port}/published"},
-                                       {"run_id": RUN, "ref": ":5173", "title": "through the web UI's subdomain",
+                                       {"run_id": RUN, "ref": ":5173", "title": "through the web UI's subdomain", "port": 5173,
                                         "url": f"//{RUN}-5173.{{hostport}}/"}]))
     board.wait_for_selector(f"{ROW} a.chip:has-text(':3000')")
+    # A server it runs (dev-server's demo, which says its port) is a button lit while it is up.
+    assert board.query_selector(f"{ROW} a.chip.live:has-text(':5173') .lamp") and not board.query_selector("a.chip.live:has-text(':3000')")
     host = board.base.split("//", 1)[1]
     assert board.get_attribute(f"{ROW} a.chip:has-text(':5173')", "href") == f"//{RUN}-5173.{host}/"
     assert board.get_attribute(f"{ROW} a.chip:has-text(':3000')", "href") == f"{board.base}/published"
@@ -1094,8 +1096,14 @@ def test_side_chats_are_asked_beside_the_chat_and_the_panels_are_dragged_and_put
     assert width("#pane-left") == 200
     edge.dblclick()
     assert width("#pane-right") == 380
-    # Put away from its own button in its top corner, the chat takes its room; the browser keeps both.
-    # The header's button, there only while a panel is away, brings it back; the focus goes between the two.
+    # Put away from the tab on its edge, by the chat and over neither head, the chat takes its room; the
+    # browser keeps both. The header's button, there only while a panel is away, brings it back; the
+    # focus goes between the two.
+    for side, edge in (("left", 1), ("right", 0)):
+        hide = ends(f"#hide-{side}")
+        assert hide[0] < ends(f"#pane-{side}")[edge] < hide[1]
+    assert ends("#changes .head b")[1] < ends("#changes .head b + *")[0]  # its count where the head ends, room made for nothing
+    assert ends("#pane-left")[1] - ends("#changes .head b + *")[1] < 20
     before = width("#scroll")
     assert tab.is_hidden("header .pane-toggle")
     tab.click("#pane-right button[aria-label='Hide side chats']")

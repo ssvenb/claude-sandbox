@@ -1544,7 +1544,9 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
     def route(self, mine):
-        sub = PORT_HOST.fullmatch(self.headers.get("Host", "").rsplit(":", 1)[0])
+        # Only the server serve-oauth.sh starts relays subdomains: any other (this server as a run's
+        # demo, behind that one's relay, which passes the Host header through) serves them itself.
+        sub = self.server.subdomains and PORT_HOST.fullmatch(self.headers.get("Host", "").rsplit(":", 1)[0])
         if sub and sub[3] in self.server.hosts:
             return self.port(sub[1], int(sub[2]))
         m = re.match(r"/plugins/([\w-]+)(?:[/?]|$)", self.path)
@@ -1822,6 +1824,7 @@ def serve(port, projects_file, bind="127.0.0.1", allow_hosts=()):
     server.daemon_threads = True
     port = server.server_address[1]
     server.hosts = local_names(bind) | set(allow_hosts)
+    server.subdomains = bool(os.environ.get("SANDBOX_WEB_SUBDOMAINS"))  # serve-oauth.sh's: it relays demos
     server.projects_file = projects_file
     os.environ["SANDBOX_PROJECTS_DIR"] = str(projects_file)  # for read_config, and every run.sh it starts
     server.bind = bind

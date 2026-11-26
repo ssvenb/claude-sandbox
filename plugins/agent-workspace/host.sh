@@ -16,12 +16,27 @@ if [ "$RESUME" = 1 ]; then
   [ -n "$existing" ] && run_dir="$existing"
 fi
 
+# agent_workspace_remove <dir>: delete a run's mirror. What the agent's own containers wrote into it
+# (a database under docker-cli's daemon) belongs to a user of theirs, mapped by Sysbox to a uid that
+# is not yours, so your `rm` cannot delete it: what is left is deleted by root in a throwaway
+# container of the sandbox's image (no network, nothing else mounted), the directory itself by you.
+agent_workspace_remove() {
+  local dir=$1
+  rm -rf -- "$dir" 2>/dev/null && return 0
+  docker run --rm --pull never --network none --user 0 --entrypoint find -v "$dir:/mirror" \
+    "claude-agent:${AGENT:-claude}" /mirror -mindepth 1 -delete >/dev/null 2>&1 || true
+  rm -rf -- "$dir" 2>/dev/null && return 0
+  echo "⚠️  agent-workspace: could not remove everything in $dir (files owned by another user, from" \
+    "the agent's containers); remove it with: sudo rm -rf '$dir'" >&2
+  return 1
+}
+
 # `git clone` refuses a non-empty target, so the run directory has to start empty. Only reachable
 # on --resume, where the re-clone fetches the branch back from origin: all that is lost is work the
 # previous container never committed, which a run without this plugin loses anyway.
 if [ -n "$(ls -A "$run_dir" 2>/dev/null)" ]; then
   echo "⚠️  Clearing $run_dir so the run can populate /workspace from scratch."
-  rm -rf -- "${run_dir:?}"
+  agent_workspace_remove "${run_dir:?}" || die "agent-workspace: $run_dir has to be empty for the run to start"
 fi
 
 mkdir -p "$run_dir" || die "agent-workspace: cannot create $run_dir in its workspaces directory"
@@ -36,5 +51,5 @@ echo "📂 /workspace is mirrored to $run_dir on this machine"
 # AGENT_WORKSPACE_CLEANUP=0 to keep the checkout around for inspection.
 case "${AGENT_WORKSPACE_CLEANUP:-1}" in
   1|true|yes|on)
-    on_exit "echo '🧹 Removing $run_dir'; rm -rf -- '${run_dir:?}'" ;;
+    on_exit "echo '🧹 Removing $run_dir'; agent_workspace_remove '${run_dir:?}' || true" ;;
 esac

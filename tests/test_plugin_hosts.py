@@ -189,6 +189,37 @@ def test_agent_workspace_mounts_a_fresh_dir_and_removes_it_after(sb):
     assert not run_dir.exists()
 
 
+def _undeletable_mirror(sb):
+    """A run's mirror holding a file your rm cannot delete, as one a container's own user wrote."""
+    run_dir = sb.tmp / "mirrors/project-20260102-abc123"
+    (run_dir / "neo4j/data").mkdir(parents=True)
+    (run_dir / "neo4j/data/store").write_text("x")
+    (run_dir / "neo4j/data").chmod(0o555)
+    return run_dir
+
+
+def test_agent_workspace_removes_what_its_containers_wrote_as_root(sb):
+    run_dir = _undeletable_mirror(sb)
+    calls = sb.tmp / "docker-calls"
+    # Stands in for root in the throwaway container, who may delete anything under the mount.
+    sb.stub("docker", f'''echo "$*" >>"{calls}"
+chmod -R u+w "{run_dir}" && find "{run_dir}" -mindepth 1 -delete
+''')
+    run = sb.plugin("agent-workspace", AGENT_WORKSPACE_DIR=sb.tmp / "mirrors", AGENT="claude", RESUME=1).ok()
+    assert "Clearing" in run.out and "Permission denied" not in run.out + run.err
+    assert not run_dir.exists()  # emptied for the run, then removed on exit
+    call = calls.read_text()
+    assert f"-v {run_dir}:/mirror" in call and "--network none" in call and "claude-agent:claude" in call
+
+
+def test_agent_workspace_says_how_to_remove_what_it_cannot(sb):
+    run_dir = _undeletable_mirror(sb)
+    sb.stub("docker", "exit 1")
+    run = sb.plugin("agent-workspace", AGENT_WORKSPACE_DIR=sb.tmp / "mirrors", RESUME=1).dies("has to be empty")
+    assert f"sudo rm -rf '{run_dir}'" in run.err and "Permission denied" not in run.err
+    (run_dir / "neo4j/data").chmod(0o755)
+
+
 def test_agent_workspace_names_a_url_repos_dir_after_the_repo(sb):
     for url in ("https://github.com/acme/widgets.git", "git@github.com:widgets.git"):
         run = sb.plugin("agent-workspace", AGENT_WORKSPACE_DIR=sb.tmp / "m", HOST_CWD="", REPO_URL=url).ok()

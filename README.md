@@ -70,7 +70,8 @@ cookie for the whole domain (and keeps the name `_oauth2_proxy`); the server rel
 requests to that demo, and takes the sign-in's cookies out first, or the demo would sign in as you
 with them. The demos themselves then listen on `127.0.0.1` only, whatever address the web UI's
 server has. The Host header passes through, so a demo that checks it must accept the subdomain:
-this repo's own server takes `--allow-host .<host>` for any name under `<host>`. Signing in from a
+this repo's own server accepts `<RUN_ID>-<port>.<host>` for any `--allow-host <host>` (and
+`--allow-host .<host>` for any name under `<host>`). Signing in from a
 demo's page (an expired cookie) lands you on the dashboard; the demo's button then works.
 
 The home page is a dashboard of all your sandboxes. On top is a box to start a session by writing

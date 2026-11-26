@@ -180,7 +180,8 @@ def test_an_allowed_dot_domain_takes_any_name_under_it():
     # A demo of this server, reached as <RUN_ID>-<port>.box.example.com through another's relay.
     assert web.allowed({".box.example.com"}, "0a1b2c-8790.box.example.com")
     assert not web.allowed({".box.example.com"}, "box.example.com.evil") and not web.allowed({".box.example.com"}, "xbox.example.com")
-    assert not web.allowed({"box.example.com"}, "0a1b2c-8790.box.example.com")
+    assert web.allowed({"box.example.com"}, "0a1b2c-8790.box.example.com")  # a demo of it, behind its relay
+    assert not web.allowed({"box.example.com"}, "x.box.example.com") and not web.allowed({"box.example.com"}, "0a1b2c-8790.evil.example")
 
 
 def test_a_runs_published_port_is_a_subdomain_relayed_without_the_sign_ins_cookies(tmp_path, monkeypatch):

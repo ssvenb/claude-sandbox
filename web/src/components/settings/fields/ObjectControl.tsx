@@ -26,7 +26,7 @@ export function ObjectFields({ spec, slot, name, set, keepEmpty }: FieldsProps) 
             set(Object.keys(o).length || keepEmpty ? o : undefined);
           },
         };
-        return <Field key={key} spec={f} slot={inner} name={`${name}.${key}`} />;
+        return <Field key={key} spec={f} slot={inner} name={`${name}.${key}`} parent={held} />;
       })}
     </div>
   );

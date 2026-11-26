@@ -364,26 +364,36 @@ def test_an_auth_setting_names_an_entry_whose_fields_fill_its_owners_variables(s
     file = sb.home / ".config/claude-sandbox/auth.json"
     file.parent.mkdir(parents=True)
     file.write_text(json.dumps({
-        "coder": {"type": "github-app", "appId": 123, "privateKeyFile": "~/keys/coder.pem"},
-        "reviewer": {"type": "github-app", "appId": "456", "privateKeyFile": "/k/reviewer.pem", "username": "rev"},
+        "coder": {"type": "github-app", "appId": 123, "privateKeyFile": "~/keys/ignored.pem"},  # a path: not read
+        "reviewer": {"type": "github-app", "appId": "456", "username": "rev"},
         "data": {"type": "gcp-service-account", "serviceAccount": "sa@p.iam.gserviceaccount.com"},
         "max": {"type": "claude-token", "token": "oat-1"},
-        "broken": {"type": "github-app", "appId": "7"}}))
+        "broken": {"type": "github-app"},
+        "bad/name": {"type": "github-app", "appId": "8"}}))
     file.chmod(0o600)
     env = {"HOME": str(sb.home), "GH_APP_ID": "999", "GH_HOST": "ghe.example"}
     assert auth.apply_auth(env, owners) == [] and env["GH_APP_ID"] == "999"  # none named: nothing filled
     env.update(GH_AUTH="reviewer", GCP_AUTH="data", CLAUDE_AUTH="max")
     assert auth.apply_auth(env, owners) == ["reviewer", "data", "max"]
-    assert (env["GH_APP_ID"], env["GH_PRIVATE_KEY_FILE"], env["GH_USERNAME"]) == ("456", "/k/reviewer.pem", "rev")
+    files = sb.home / ".config/claude-sandbox/auth-files"
+    # A file has its one place under the entry's name; a required one is filled while missing too.
+    assert (env["GH_APP_ID"], env["GH_PRIVATE_KEY_FILE"], env["GH_USERNAME"]) == ("456", str(files / "reviewer/privateKey"), "rev")
     assert env["GH_HOST"] == "ghe.example"  # what the entry leaves out stays as it was
     assert env["GCP_SERVICE_ACCOUNT"] == "sa@p.iam.gserviceaccount.com" and env["CLAUDE_CODE_OAUTH_TOKEN"] == "oat-1"
     env["GH_AUTH"] = "coder"
     auth.apply_auth(env, owners)
-    assert (env["GH_APP_ID"], env["GH_PRIVATE_KEY_FILE"]) == ("123", os.path.expanduser("~/keys/coder.pem"))
-    assert auth.names(env, "github-app") == ["broken", "coder", "reviewer"]
-    for name, message in (("nobody", "No authentication 'nobody' in .* \\(it has: broken, coder, data, max, reviewer\\)"),
+    assert (env["GH_APP_ID"], env["GH_PRIVATE_KEY_FILE"]) == ("123", str(files / "coder/privateKey"))
+    # An optional one only while it is there.
+    assert auth.apply_auth(env, owners) and "GCP_CREDENTIAL_FILE" not in env
+    (files / "data").mkdir(parents=True)
+    (files / "data/credential").write_text("{}")
+    auth.apply_auth(env, owners)
+    assert env["GCP_CREDENTIAL_FILE"] == str(files / "data/credential")
+    assert auth.names(env, "github-app") == ["bad/name", "broken", "coder", "reviewer"]
+    for name, message in (("nobody", "No authentication 'nobody' in .* \\(it has: bad/name, broken, coder, data, max, reviewer\\)"),
                           ("data", "Authentication 'data' in .* is a gcp-service-account, not a github-app"),
-                          ("broken", "Authentication 'broken' in .* lacks privateKeyFile")):
+                          ("broken", "Authentication 'broken' in .* lacks appId"),
+                          ("bad/name", "Authentication .bad/name.: a name with a file takes letters")):
         with pytest.raises(orchestrator.Die, match=f"github-auth: GH_AUTH={name}: {message}"):
             auth.apply_auth({**env, "GH_AUTH": name}, owners)
     file.chmod(0o644)  # it holds keys and tokens

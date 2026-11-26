@@ -5,6 +5,7 @@ import { message } from '../../api/client';
 import { addProject, deleteProject } from '../../api/sessions';
 import type { AuthConfig, Json, JsonObject, SettingSpec } from '../../api/types';
 import { BusyButton } from '../common/BusyButton';
+import { AuthFilesContext, type AuthFiles } from './AuthFiles';
 import { Card } from './Card';
 import { useForm } from './FormContext';
 import { isObject, type Slot } from './slots';
@@ -34,7 +35,7 @@ function entrySpec(types: AuthConfig['types']): SettingSpec {
       { key: 'name', label: 'Name', required: true, monospace: true },
       { key: 'type', type: 'enum', label: 'Type', required: true, choices: Object.keys(types) },
       ...[...fields].map(([key, { of, requiredIn }]): SettingSpec => ({
-        key, label: key, type: key.endsWith('File') ? 'path' : 'string', monospace: true,
+        key, label: key, type: key.endsWith('File') ? 'file' : 'string', monospace: true,
         required: requiredIn === of.length, when: { type: of },
       })),
     ],
@@ -61,6 +62,13 @@ export function AuthCards({ auth, projects, draft, query, onChanged }: Props) {
     },
   };
 
+  const [present, setPresent] = useState(auth.files ?? {});
+  const files: AuthFiles = {
+    dir: auth.filesDir,
+    has: (n, f) => !!present[n]?.includes(f),
+    put: (n, f, exists) => setPresent(p => ({ ...p, [n]: [...(p[n] ?? []).filter(x => x !== f), ...(exists ? [f] : [])] })),
+  };
+
   const [listed, setListed] = useState(projects);
   const [error, setError] = useState('');
   const name = useRef<HTMLInputElement>(null), repo = useRef<HTMLInputElement>(null);
@@ -84,34 +92,36 @@ export function AuthCards({ auth, projects, draft, query, onChanged }: Props) {
     confirm(`Delete the project ${p}? Its file goes; its repo stays where it is.`) && act(() => deleteProject(p), l => l.filter(x => x !== p));
 
   return (
-    <div className="stack">
-      <Card query={query} card={{
-        key: 'projects', title: 'Projects', fields: [],
-        description: 'A file each in the projects folder. Added and deleted at once; its own settings are behind its gear.',
-        more: ' ' + listed.join(' ').toLowerCase(),
-        after: <>
-          <div className="entries">
-            <div className="entry">
-              <input ref={name} className="key mono" name="new-project.name" placeholder="name" aria-label="New project's name" spellCheck={false} />
-              <input ref={repo} className="mono" name="new-project.repo" placeholder="~/code/my-app, a git URL, or empty" aria-label="New project's repo" spellCheck={false} />
-              <BusyButton className="add" onClick={add}>+ Add</BusyButton>
-            </div>
-            <p className="error" role="alert">{error}</p>
-            {listed.map(p => (
-              <div className="entry" key={p}>
-                <span className="mono">{p}</span>
-                <BusyButton className="remove" title="Delete" aria-label={'Delete project ' + p} onClick={() => remove(p)}>✕</BusyButton>
+    <AuthFilesContext.Provider value={files}>
+      <div className="stack">
+        <Card query={query} card={{
+          key: 'projects', title: 'Projects', fields: [],
+          description: 'A file each in the projects folder. Added and deleted at once; its own settings are behind its gear.',
+          more: ' ' + listed.join(' ').toLowerCase(),
+          after: <>
+            <div className="entries">
+              <div className="entry">
+                <input ref={name} className="key mono" name="new-project.name" placeholder="name" aria-label="New project's name" spellCheck={false} />
+                <input ref={repo} className="mono" name="new-project.repo" placeholder="~/code/my-app, a git URL, or empty" aria-label="New project's repo" spellCheck={false} />
+                <BusyButton className="add" onClick={add}>+ Add</BusyButton>
               </div>
-            ))}
-          </div>
-        </>,
-      }} />
-      <Card query={query} card={{
-        key: 'auth', title: 'Authentications',
-        description: 'Every identity, key and token a sandbox may use, each under a name; projects and plugins only name one. Saved readable by you alone; a saved key, token or client secret is never shown again, and kept while you leave it as it is.',
-        more: ' ' + Object.keys(draft).join(' ').toLowerCase(),
-        fields: [{ spec: { type: 'list', label: 'Entries', items: entrySpec(auth.types) }, slot: entries, name: 'auth' }],
-      }} />
-    </div>
+              <p className="error" role="alert">{error}</p>
+              {listed.map(p => (
+                <div className="entry" key={p}>
+                  <span className="mono">{p}</span>
+                  <BusyButton className="remove" title="Delete" aria-label={'Delete project ' + p} onClick={() => remove(p)}>✕</BusyButton>
+                </div>
+              ))}
+            </div>
+          </>,
+        }} />
+        <Card query={query} card={{
+          key: 'auth', title: 'Authentications',
+          description: 'Every identity, key and token a sandbox may use, each under a name; projects and plugins only name one. Saved readable by you alone; a saved key, token or client secret is never shown again, and kept while you leave it as it is. A file (a private key, known_hosts) has its one place under the entry\'s name: uploaded there at once, or put there by hand.',
+          more: ' ' + Object.keys(draft).join(' ').toLowerCase(),
+          fields: [{ spec: { type: 'list', label: 'Entries', items: entrySpec(auth.types) }, slot: entries, name: 'auth' }],
+        }} />
+      </div>
+    </AuthFilesContext.Provider>
   );
 }

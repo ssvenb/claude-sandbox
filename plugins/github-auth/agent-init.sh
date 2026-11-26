@@ -46,6 +46,12 @@ watch its CI (`gh pr checks --watch`) until every check is green. If a check fai
 problem comes up, read why (`gh run view --log-failed`), fix the cause, push the fix and watch CI
 again. The task is not finished until the pull request's CI is green.
 
+When your work changes what the UI looks like, show it in the pull request's description with
+screenshots of the changed views (light and dark, if the UI has both). Commit the images under
+`.github/pr-screenshots/`, push, remove them again in the next commit so the final diff does not
+carry them, and link them by the first commit's SHA:
+`![what it shows](https://github.com/OWNER/NAME/blob/<sha>/.github/pr-screenshots/<file>.png?raw=true)`.
+
 Leave whole test suites to GitHub CI, which runs the unit tests on every push: push your branch
 and watch its checks instead of running a full suite locally. Locally, run only the selection of
 tests that covers what you changed.
@@ -53,13 +59,15 @@ tests that covers what you changed.
 If the sandbox itself gets in your way (a hook blocks something it should not, a tool or
 credential is missing, its instructions are wrong or unclear), file an issue on the sandbox's
 own repository: `gh issue create --repo ssvenb/claude-sandbox`. Say what you ran, what happened
-and what you expected, and tell the user you filed it. Problems with the project you are
-working on go to the user, not there.
+and what you expected, and tell the user you filed it. Filing is all you can do there: you
+cannot comment on, close or reopen those issues (GraphQL answers "Resource not accessible by
+integration"), and that is intended. Once you have filed one, following it up is the user's job.
+Problems with the project you are working on go to the user, not there.
 
 You have two GitHub tokens, both re-minted every 40 minutes. `/run/credentials/github-token` is
 scoped to this run's repository (push, pull requests, issues, CI) and is what `gh` is logged in
 with. `/run/credentials/github-token-all` reaches every other repository of the GitHub App,
-read-only except that it may create and edit issues. `gh` (a wrapper at `/usr/local/bin/gh`) and
+read-only except that it may create issues (not comment on or close them). `gh` (a wrapper at `/usr/local/bin/gh`) and
 git pick the token by the repository a command targets: `-R/--repo`, `gh api repos/OWNER/NAME/…`,
 `gh repo <cmd> OWNER/NAME`, else the current directory's origin. If a call is refused (401, 403,
 or 404 on a repository that exists), it probably went out with the wrong token: name the

@@ -15,14 +15,23 @@ import sys
 from pathlib import Path
 
 
-def git(*args):
-    return subprocess.run(["git", *args], capture_output=True, text=True).stdout
+def git(*args, check=True):
+    """git's output; with `check`, its failure (not a repository, dubious ownership) an error, never
+    an empty answer that would read as "no changes"."""
+    done = subprocess.run(["git", *args], capture_output=True, text=True)
+    if check and done.returncode:
+        sys.exit(f"changes.py: git {args[0]}: {(done.stderr.strip().splitlines() or ['failed'])[0]}")
+    return done.stdout
 
 
 def changes(base_branch=""):
     tips = [f"origin/{base_branch}", base_branch] if base_branch else ["origin/HEAD", "origin/main", "main", "origin/master", "master"]
-    main = next((b for b in tips if git("rev-parse", "-q", "--verify", b + "^{commit}")), "HEAD")
-    base = git("merge-base", "HEAD", main).strip() or "HEAD"
+    main = next((b for b in tips if git("rev-parse", "-q", "--verify", b + "^{commit}", check=False)), None)
+    # No branch to have left (a repo of the run's own, git-workspace's for a project with no repo,
+    # with no remote and only the run's branch), or none in common with it: all it has is changed,
+    # committed or not, even before its first commit.
+    base = (main and git("merge-base", "HEAD", main, check=False).strip()) \
+        or git("hash-object", "-t", "tree", "/dev/null").strip()  # the empty tree
     found = {}
     status = git("diff", "--no-renames", "--name-status", "-z", base).split("\0")
     for kind, path in zip(status[::2], status[1::2]):

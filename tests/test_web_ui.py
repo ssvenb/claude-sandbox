@@ -29,9 +29,12 @@ sync_api = pytest.importorskip("playwright.sync_api")
 RUN = "abc123"  # the run the fixture's first pull request and checkout belong to
 
 # `docker exec … python3 - ARG…` (git-workspace's changes, run in the run's container) runs here, in
-# the checkout the server runs it in, without the server's environment as in a container.
+# the checkout the server runs it in, without the server's environment as in a container; asked
+# first for the agent's uid:gid (`docker exec -u 0 …`), it answers with ours.
 # `docker run` is VS Code's container (FAKE_DOCKER); every other docker call does nothing.
-DOCKER = '#!/bin/sh\n[ "$1" = run ] && exec fake-docker "$@"\n[ "$1" = exec ] || exit 0\nwhile [ "$1" != python3 ]; do shift; done\nexec env -u WEB_RUN_ID "$@"\n'
+DOCKER = ('#!/bin/sh\n[ "$1" = run ] && exec fake-docker "$@"\n[ "$1" = exec ] || exit 0\n'
+          '[ "$3" = 0 ] && { echo "$(id -u):$(id -g)"; exit 0; }\n'
+          'while [ "$1" != python3 ]; do shift; done\nexec env -u WEB_RUN_ID "$@"\n')
 
 
 def tool(path, body):

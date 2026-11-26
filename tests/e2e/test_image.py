@@ -8,9 +8,9 @@ runs a probe as the agent user.
 import json
 import os
 import subprocess
+import time
 
 import pytest
-
 from conftest import REPO
 
 BASE = os.environ.get("SANDBOX_E2E_IMAGE")
@@ -140,6 +140,28 @@ def test_without_a_repo_the_run_gets_an_empty_one_of_its_own(image):
     assert b.out.splitlines() == [f"{PREFIX}/20260102-abc123", f"{AGENT}@sandbox.local", "node"]
     assert "a new git repository at /workspace, with no remote" in b.briefing
     assert "allows pushes" not in b.briefing
+
+
+def test_the_web_server_lists_a_running_runs_changes_as_its_agent_user(image):
+    """changes.py from the host, as the web server runs it (WEB_RUN_ID): into the run's container, as
+    the agent. The entrypoint renumbers node to the host user's uid, which `docker exec -u node`
+    misses: git there would refuse the checkout as someone else's and find no repository."""
+    run_id = os.urandom(3).hex()
+    name = f"sandbox-{run_id}"
+    subprocess.run(["docker", "run", "-d", "--rm", "--name", name,
+                    *run_args("git-workspace", "touch /workspace/new.txt; exec sleep 300", {"HOST_UID": "4242"}), image],
+                   check=True, capture_output=True)
+    try:
+        for _ in range(120):
+            if subprocess.run(["docker", "exec", name, "test", "-e", "/workspace/new.txt"], check=False).returncode == 0:
+                break
+            time.sleep(1)
+        done = subprocess.run([REPO / "plugins/git-workspace/host/changes.py"], env={**os.environ, "WEB_RUN_ID": run_id},
+                              capture_output=True, text=True, timeout=60, check=False)
+        assert done.returncode == 0, done.stderr
+        assert json.loads(done.stdout) == [{"path": "new.txt", "status": "A", "removed": 0, "added": 0}]
+    finally:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
 
 
 def test_an_explicit_branch_prefix_is_also_the_identity(image):

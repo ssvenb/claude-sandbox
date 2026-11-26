@@ -1,7 +1,7 @@
 // The server's API, call by call.
 import { api, post } from './client';
 import type { Answers } from './events';
-import type { AppState, AuthConfig, JsonObject, NewSession, Offer, Picture, ProjectConfig, Upload, ProjectInfo, Session } from './types';
+import type { AppState, AuthConfig, AuthFileInfo, JsonObject, NewSession, Offer, Picture, ProjectConfig, Upload, ProjectInfo, Session } from './types';
 
 const session = (id: string) => `/api/sessions/${id}`;
 const project = (path: string) => 'project=' + encodeURIComponent(path);
@@ -48,7 +48,7 @@ export const getAuth = () => api<AuthConfig>('/api/auth');
 export const saveAuth = (config: JsonObject) => post<AuthConfig>('/api/auth', { config });
 /** Stores a file of an authentication at its place (`file` null: deletes it). */
 export const putAuthFile = (name: string, field: string, file: Blob | null) =>
-  api<{ exists: boolean }>(
+  api<{ exists: boolean; file: AuthFileInfo | null }>(
     `/api/auth/file${file ? '' : '/delete'}?${new URLSearchParams({ name, field })}`, { method: 'POST', body: file ?? undefined });
 export const addProject = (name: string, repo: string) => post('/api/projects', { name, repo });
 export const deleteProject = (name: string) => post('/api/projects/delete', { name });

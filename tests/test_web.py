@@ -426,9 +426,22 @@ def test_projects_are_added_and_deleted_and_authentications_saved_readable_by_yo
     upload = lambda q, data: ui("/api/auth/file?" + q, data)  # noqa: E731
     got = json.load(upload("name=coder&field=privateKeyFile", b"-----BEGIN KEY-----\n"))
     key = files / "coder/privateKey"
-    assert got == {"exists": True} and key.read_bytes() == b"-----BEGIN KEY-----\n"
+    told = {"kind": "Key", "size": 20, "modified": int(key.stat().st_mtime)}  # what it is, never its bytes
+    assert got == {"exists": True, "file": told} and key.read_bytes() == b"-----BEGIN KEY-----\n"
     assert key.stat().st_mode & 0o777 == 0o600 and key.parent.stat().st_mode & 0o777 == files.stat().st_mode & 0o777 == 0o700
-    assert json.load(ui("/api/auth"))["files"] == {"coder": ["privateKeyFile"]}
+    assert json.load(ui("/api/auth"))["files"] == {"coder": {"privateKeyFile": told}}
+    hosts = files / "coder/knownHosts"
+    hosts.write_bytes(b"# mine\ngithub.com ssh-ed25519 AAAA\n\nexample.org ssh-rsa AAAA\n")
+    assert json.load(ui("/api/auth"))["files"]["coder"]["knownHostsFile"]["kind"] == "2 hosts"
+    hosts.unlink()
+    for pem, kind in ((b"-----BEGIN OPENSSH PRIVATE KEY-----", "OpenSSH private key"),
+                      (b"-----BEGIN RSA PRIVATE KEY-----", "RSA private key"), (b"ssh-rsa AAAA", "Not a PEM key")):
+        key.write_bytes(pem)
+        assert web.describe_file(key, "privateKeyFile")["kind"] == kind
+    for data, kind in ((b'{"type": "service_account"}', "Service-account key"), (b"{", "Not JSON")):
+        key.write_bytes(data)
+        assert web.describe_file(key, "credentialFile")["kind"] == kind
+    key.write_bytes(b"-----BEGIN KEY-----\n")
     for q, data in (("name=coder&field=appId", b"x"), ("name=../x&field=privateKeyFile", b"x"),
                     ("name=coder&field=privateKeyFile", b""), ("name=coder&field=privateKeyFile", b"x" * (web.MAX_AUTH_FILE + 1))):
         assert upload(q, data).status == 400

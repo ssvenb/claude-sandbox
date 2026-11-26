@@ -64,8 +64,11 @@ export function AuthCards({ auth, projects, draft, query, onChanged }: Props) {
 
   const [present, setPresent] = useState(auth.files ?? {});
   const files: AuthFiles = {
-    has: (n, f) => !!present[n]?.includes(f),
-    put: (n, f, exists) => setPresent(p => ({ ...p, [n]: [...(p[n] ?? []).filter(x => x !== f), ...(exists ? [f] : [])] })),
+    get: (n, f) => present[n]?.[f] ?? null,
+    put: (n, f, info) => setPresent(p => {
+      const { [f]: _, ...rest } = p[n] ?? {};
+      return { ...p, [n]: info ? { ...rest, [f]: info } : rest };
+    }),
   };
 
   const [listed, setListed] = useState(projects);

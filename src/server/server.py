@@ -1058,13 +1058,46 @@ FILE_FIELDS = sorted({f for r, o in auth.TYPES.values() for f in (*r, *o) if aut
 
 
 def auth_files():
-    """Which files are in place, uploaded or put there by hand: entry name → its fields that have one."""
+    """Which files are in place, uploaded or put there by hand: entry name → field → what it is
+    (describe_file)."""
     found = {}
     for d in sorted(auth.files_dir(os.environ).glob("*/")):
-        have = [f for f in FILE_FIELDS if auth.NAME.fullmatch(d.name) and auth.file_path(os.environ, d.name, f).is_file()]
+        if not auth.NAME.fullmatch(d.name):
+            continue
+        have = {f: describe_file(p, f) for f in FILE_FIELDS if (p := auth.file_path(os.environ, d.name, f)).is_file()}
         if have:
             found[d.name] = have
     return found
+
+
+PEM = re.compile(rb"-----BEGIN ([A-Z0-9 ]+)-----")
+
+
+def describe_file(path, field):
+    """What a file of an authentication is, told without a byte of it: its kind (how many hosts a
+    known_hosts names, the type of a JSON credential, else the label of its first PEM block), its size, and when it was put there."""
+    st = path.stat()
+    with open(path, "rb") as f:
+        head = f.read(MAX_AUTH_FILE)
+    if field == "knownHostsFile":
+        hosts = sum(1 for line in head.splitlines() if line.strip() and not line.lstrip().startswith(b"#"))
+        kind = f"{hosts} host{'' if hosts == 1 else 's'}"
+    elif field == "credentialFile":
+        try:
+            got = json.loads(head)
+        except ValueError:
+            got = None
+        kind = "Not JSON" if not isinstance(got, dict) else {
+            "service_account": "Service-account key", "authorized_user": "User credentials",
+            "external_account": "Workload identity config"}.get(got.get("type"), "JSON credentials")
+    elif m := PEM.search(head):
+        label = m.group(1).decode()
+        words = [{"RSA": "RSA", "EC": "EC", "DSA": "DSA", "OPENSSH": "OpenSSH"}.get(w, w.lower()) for w in label.split()]
+        kind = " ".join(words)
+        kind = kind[0].upper() + kind[1:]
+    else:
+        kind = "Not a PEM key"
+    return {"kind": kind, "size": st.st_size, "modified": int(st.st_mtime)}
 
 
 MAX_AUTH_FILE = 1 << 20
@@ -1094,7 +1127,8 @@ def put_auth_file(name, field, data):
         with os.fdopen(fd, "wb") as f:
             f.write(data)
         os.replace(tmp, path)
-    return {"exists": path.is_file()}
+    there = path.is_file()
+    return {"exists": there, "file": describe_file(path, field) if there else None}
 
 
 def write_auth(entries):

@@ -926,7 +926,8 @@ def test_the_menus_settings_add_and_delete_projects_and_edit_your_authentication
     board.click("[data-card=auth] .item .toggle:has-text('coder')")
     field = ".field:has(label:text-is('privateKeyFile'))"
     assert "auth-files" not in board.text_content(field)  # its place is not shown
-    assert board.text_content(f"{field} .file").strip() == "" and board.is_visible(f"{field} button.dropzone")  # icons only
+    board.wait_for_selector(f"{field} button.dropzone")
+    assert board.text_content(f"{field} .file").strip() == ""  # icons only
     with board.expect_file_chooser() as chooser:
         board.click(f"{field} button.dropzone")
     chooser.value.set_files([{"name": "coder.pem", "mimeType": "application/x-pem-file", "buffer": b"PEM"}])

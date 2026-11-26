@@ -133,13 +133,22 @@ export interface PluginManifest extends SettingsPart {
   requiredEnv?: string[];
 }
 
+/** What a file of an authentication is, told without a byte of it. */
+export interface AuthFileInfo {
+  /** "RSA private key", "OpenSSH private key", "3 hosts", "Not a PEM key"… */
+  kind: string;
+  size: number;
+  /** When it was put there, in seconds. */
+  modified: number;
+}
+
 /** Your authentications' file, and what each type of entry holds. */
 export interface AuthConfig {
   file: string;
   exists: boolean;
   config: JsonObject;
-  /** The files in place (each at its fixed place, never shown): entry name → its fields that have one. */
-  files: Record<string, string[]>;
+  /** The files in place (each at its fixed place, never shown): entry name → field → what it is. */
+  files: Record<string, Record<string, AuthFileInfo>>;
   types: Record<string, { required: string[]; optional: string[] }>;
 }
 

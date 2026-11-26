@@ -1,10 +1,12 @@
 import { createContext, useContext } from 'react';
+import type { AuthFileInfo } from '../../api/types';
 
 /** Which of your authentications' files are in place, each uploaded through the form. */
 export interface AuthFiles {
-  has: (name: string, field: string) => boolean;
-  /** A file was uploaded, or deleted. */
-  put: (name: string, field: string, exists: boolean) => void;
+  /** What the entry's file is, or null when there is none. */
+  get: (name: string, field: string) => AuthFileInfo | null;
+  /** A file was uploaded (what it is), or deleted (null). */
+  put: (name: string, field: string, info: AuthFileInfo | null) => void;
 }
 
 export const AuthFilesContext = createContext<AuthFiles | null>(null);

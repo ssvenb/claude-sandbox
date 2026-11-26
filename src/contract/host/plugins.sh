@@ -114,7 +114,7 @@ web_session_item() {
 # web_live_items <file>: a JSON array of items, each with its `run_id`, that the web server re-reads
 # on every poll of the page and puts on the row of that run's running session — for what comes and
 # goes within seconds (a port a session's server publishes), where waiting for the project to be
-# described again would not do. A `url` may say `{host}` for the name the page was opened by. The
+# described again would not do. A `url` may say `{host}` for the name the page was opened by (`{hostport}`: with its port). The
 # file need not exist yet.
 web_live_items() { WEB_JSON=$(jq -c --arg file "$1" '.live += [$file]' <<<"$WEB_JSON"); }
 

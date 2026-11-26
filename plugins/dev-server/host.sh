@@ -22,6 +22,7 @@ echo "🚀 dev-server: starting \`$DEV_SERVER_COMMAND\` at boot"
 DEMO_SERVER_PORT=$(plugin_config '.port' '')
 [ -n "$DEMO_SERVER_PORT" ] || return 0
 [[ $DEMO_SERVER_PORT =~ ^[0-9]+$ ]] || die "dev-server: .plugins[\"dev-server\"].port must be a port number (got: '$DEMO_SERVER_PORT')."
+DEMO_SERVER_PORT=$((10#$DEMO_SERVER_PORT))
 DEMO_SERVER_SETUP=$(plugin_config_json '.demoSetup' '[]')
 printf '%s' "$DEMO_SERVER_SETUP" | jq -e 'type == "array" and all(type == "string")' >/dev/null 2>&1 \
   || die "dev-server: .plugins[\"dev-server\"].demoSetup must be an array of strings."
@@ -45,12 +46,17 @@ DEMO_SERVER_MIRROR=$(ls -d "${AGENT_WORKSPACE_DIR:-$HOME/.agent-workspaces}"/*-"
 [ -n "$DEMO_SERVER_MIRROR" ] || die "dev-server: a port needs agent-workspace's mirror of /workspace, which the demo container serves."
 
 # Where the web UI listens (src/server/server.py exports it for every run it starts), so the link
-# works from wherever the page was opened: {host} is the name the page was opened by.
+# works from wherever the page was opened: {host} is the name the page was opened by. Behind
+# src/server/serve-oauth.sh's sign-in (SANDBOX_WEB_SUBDOMAINS) the port listens on loopback alone,
+# anywhere else it would skip the sign-in, and the link is the web UI's subdomain
+# <RUN_ID>-<port>.<its host>, which its server relays to the item's `upstream`.
 DEMO_SERVER_BIND=${SANDBOX_WEB_BIND:-127.0.0.1}
+[ -z "${SANDBOX_WEB_SUBDOMAINS:-}" ] || DEMO_SERVER_BIND=127.0.0.1
 case $DEMO_SERVER_BIND in
   0.0.0.0|127.0.0.1) DEMO_SERVER_HOST='{host}' ;;
   *) DEMO_SERVER_HOST=${SANDBOX_WEB_NAME:-$DEMO_SERVER_BIND} ;;
 esac
+DEMO_SERVER_VIA_WEB=${SANDBOX_WEB_SUBDOMAINS:-}
 DEMO_SERVER_STATE=$HOME/.local/state/claude-sandbox/dev-server
 mkdir -p "$DEMO_SERVER_STATE"
 
@@ -75,7 +81,9 @@ demo_server_items() {
     --entrypoint /opt/plugins/dev-server/bin/demo-server "$image" >/dev/null || exit 1
   published=$(docker port "$name" "$DEMO_SERVER_PORT/tcp" | head -n 1)
   url="http://$DEMO_SERVER_HOST:${published##*:}/"
-  demo_server_items ". + [{run_id: \"$RUN_ID\", ref: \"demo\", url: \"$url\", title: \"The run's checkout, served by $name (docker logs $name)\"}]"
+  [ -z "$DEMO_SERVER_VIA_WEB" ] || url="//$RUN_ID-$DEMO_SERVER_PORT.{hostport}/"
+  demo_server_items ". + [{run_id: \"$RUN_ID\", ref: \"demo\", url: \"$url\", port: $DEMO_SERVER_PORT,
+    upstream: [\"127.0.0.1\", ${published##*:}], title: \"The run's checkout, served by $name (docker logs $name)\"}]"
   echo "🧪 dev-server: $url"
 ) >>"$DEMO_SERVER_STATE/$RUN_ID.log" 2>&1 &
 DEMO_SERVER_PID=$!
@@ -83,4 +91,4 @@ echo "🧪 dev-server: starts with the container (log: $DEMO_SERVER_STATE/$RUN_I
 
 # demo_server_items and DEMO_SERVER_STATE stay defined for the hook.
 on_exit "kill $DEMO_SERVER_PID 2>/dev/null || true; docker rm -f sandbox-demo-$RUN_ID >/dev/null 2>&1 || true; rm -f '$DEMO_SERVER_STATE/$RUN_ID.log'; demo_server_items ."
-unset DEMO_SERVER_PORT DEMO_SERVER_SETUP DEMO_SERVER_PLUGINS DEMO_SERVER_ARGS DEMO_SERVER_MIRROR DEMO_SERVER_BIND DEMO_SERVER_HOST DEMO_SERVER_PID
+unset DEMO_SERVER_PORT DEMO_SERVER_VIA_WEB DEMO_SERVER_SETUP DEMO_SERVER_PLUGINS DEMO_SERVER_ARGS DEMO_SERVER_MIRROR DEMO_SERVER_BIND DEMO_SERVER_HOST DEMO_SERVER_PID

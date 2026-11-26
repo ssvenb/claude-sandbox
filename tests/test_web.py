@@ -201,11 +201,15 @@ def test_a_runs_published_port_is_a_subdomain_relayed_without_the_sign_ins_cooki
     items = tmp_path / "items.json"  # as dev-server's host.sh writes them
     items.write_text(json.dumps([{"run_id": "0a1b2c", "port": 3000, "upstream": ["127.0.0.1", app.getsockname()[1]]}]))
     monkeypatch.setattr(web, "described", {"proj": {"live": [str(items)]}})
+    monkeypatch.setenv("SANDBOX_WEB_SUBDOMAINS", "1")  # as serve-oauth.sh starts it
     server = web.serve(0, tmp_path / "projects", allow_hosts=["box.example.com"])
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.delenv("SANDBOX_WEB_SUBDOMAINS")
+    demo = web.serve(0, tmp_path / "projects", allow_hosts=[".box.example.com"])  # this server as a demo
+    threading.Thread(target=demo.serve_forever, daemon=True).start()
 
-    def ask(host, cookie="a=1"):
-        with socket.create_connection(("127.0.0.1", server.server_address[1]), timeout=5) as c:
+    def ask(host, cookie="a=1", to=server):
+        with socket.create_connection(("127.0.0.1", to.server_address[1]), timeout=5) as c:
             c.sendall(f"GET /x?y=1 HTTP/1.1\r\nHost: {host}\r\nCookie: {cookie}\r\n\r\n".encode())
             got = b""
             while chunk := c.recv(4096):
@@ -218,9 +222,13 @@ def test_a_runs_published_port_is_a_subdomain_relayed_without_the_sign_ins_cooki
         assert "Cookie" not in ask("0a1b2c-3000.box.example.com:4180", "_oauth2_proxy=me")  # nothing else
         assert ask("0a1b2c-3001.box.example.com").startswith("HTTP/1.0 502")  # not published
         assert ask("0a1b2c-3000.evil.example").startswith("HTTP/1.0 403")  # not our name: our own guard's
+        # Behind the relay, the demo answers the subdomain itself, rather than relaying it once more.
+        got = ask("0a1b2c-3000.box.example.com", to=demo)
+        assert "not published" not in got and "GET /x?y=1" not in got
     finally:
-        server.shutdown()
-        server.server_close()
+        for s in (server, demo):
+            s.shutdown()
+            s.server_close()
         app.close()
 
 

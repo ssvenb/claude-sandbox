@@ -1050,8 +1050,52 @@ def read_auth():
     path = auth.auth_file(os.environ)
     entries = {name: {k: MASKED if k in auth.SECRETS and v not in (None, "") else v for k, v in e.items()}
                if isinstance(e, dict) else e for name, e in stored_auth().items()}
-    return {"file": str(path), "exists": path.exists(), "config": entries,
+    return {"file": str(path), "exists": path.exists(), "config": entries, "filesDir": str(auth.files_dir(os.environ)),
+            "files": auth_files(),
             "types": {t: {"required": list(r), "optional": list(o)} for t, (r, o) in auth.TYPES.items()}}
+
+
+FILE_FIELDS = sorted({f for r, o in auth.TYPES.values() for f in (*r, *o) if auth.file_field(f)})
+
+
+def auth_files():
+    """Which files are in place, uploaded or put there by hand: entry name → its fields that have one."""
+    found = {}
+    for d in sorted(auth.files_dir(os.environ).glob("*/")):
+        have = [f for f in FILE_FIELDS if auth.NAME.fullmatch(d.name) and auth.file_path(os.environ, d.name, f).is_file()]
+        if have:
+            found[d.name] = have
+    return found
+
+
+MAX_AUTH_FILE = 1 << 20
+
+
+def put_auth_file(name, field, data):
+    """Stores an uploaded file at its place for the entry `name`, readable by you alone; `data`
+    None deletes it. Where it is now, and whether."""
+    if field not in FILE_FIELDS:
+        raise ValueError(f"{field} is not a file of an authentication (those are: {', '.join(FILE_FIELDS)})")
+    try:
+        path = auth.file_path(os.environ, name, field)
+    except Die as e:
+        raise ValueError(str(e)) from None
+    if data is None:
+        path.unlink(missing_ok=True)
+    else:
+        if not data:
+            raise ValueError("the file is empty")
+        if len(data) > MAX_AUTH_FILE:
+            raise ValueError(f"the file is larger than {MAX_AUTH_FILE >> 10} KiB: not a key")
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(path.parent.parent, 0o700)
+        os.chmod(path.parent, 0o700)
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+    return {"path": str(path), "exists": path.is_file()}
 
 
 def write_auth(entries):
@@ -1062,6 +1106,10 @@ def write_auth(entries):
     for name, e in entries.items():
         if not isinstance(e, dict) or e.get("type") not in auth.TYPES:
             raise ValueError(f"{name}: .type must be one of {', '.join(auth.TYPES)}")
+        for k in [k for k in e if auth.file_field(k)]:  # a file has its own place (auth.file_path), no path
+            del e[k]
+        if any(map(auth.file_field, (*auth.TYPES[e["type"]][0], *auth.TYPES[e["type"]][1]))) and not auth.NAME.fullmatch(name):
+            raise ValueError(f"{name}: a name with a file takes letters, digits, '_', '-' and '.' only")
         for k in auth.SECRETS:  # left as read_auth showed it: the value saved under this name
             if e.get(k) == MASKED:
                 stored = stored_auth() if stored is None else stored
@@ -1576,6 +1624,9 @@ class Handler(BaseHTTPRequestHandler):
             elif url.path == "/api/auth":
                 write_auth(json.loads(body).get("config"))
                 self.reply(200, read_auth())
+            elif url.path in ("/api/auth/file", "/api/auth/file/delete"):  # the body: the file itself
+                self.reply(200, put_auth_file(query.get("name"), query.get("field"),
+                                              None if url.path.endswith("/delete") else body))
             elif url.path == "/api/projects":
                 req = json.loads(body)
                 add_project(req.get("name"), req.get("repo"))

@@ -346,19 +346,37 @@ def test_projects_are_added_and_deleted_and_authentications_saved_readable_by_yo
 
     file = ui.tmp / ".config/claude-sandbox/auth.json"
     got = json.load(ui("/api/auth"))
-    assert (got["file"], got["exists"], got["config"]) == (str(file), False, {})
+    files = file.parent / "auth-files"
+    assert (got["file"], got["exists"], got["config"], got["filesDir"], got["files"]) == (str(file), False, {}, str(files), {})
     assert got["types"]["github-app"] == {"required": ["appId", "privateKeyFile"], "optional": ["host", "username"]}
-    entries = {"coder": {"type": "github-app", "appId": "1", "privateKeyFile": "~/k.pem"}, "openai": {"type": "api-key", "key": "sk"}}
+    entries = {"coder": {"type": "github-app", "appId": "1"}, "openai": {"type": "api-key", "key": "sk"}}
     masked = {"coder": entries["coder"], "openai": {"type": "api-key", "key": web.MASKED}}
-    assert json.load(post("/api/auth", {"config": entries}))["config"] == masked  # a secret is never sent back
+    # A path is not saved: a file has its one place (auth.file_path), however the entry was sent.
+    sent = {**entries, "coder": {**entries["coder"], "privateKeyFile": "~/k.pem"}}
+    assert json.load(post("/api/auth", {"config": sent}))["config"] == masked  # a secret is never sent back
     assert json.loads(file.read_text()) == entries and json.load(ui("/api/auth"))["config"] == masked
     assert file.stat().st_mode & 0o777 == 0o600
     assert post("/api/auth", {"config": masked}).status == 200  # left as shown: the saved key stays
     assert json.loads(file.read_text()) == entries
     assert post("/api/auth", {"config": {"renamed": masked["openai"]}}).status == 400  # none saved under that name
-    for bad in ([], {"x": "y"}, {"x": {"type": "nope"}}, {"x": {"type": "api-key"}}):
+    for bad in ([], {"x": "y"}, {"x": {"type": "nope"}}, {"x": {"type": "api-key"}}, {"a b": {"type": "ssh-key"}}):
         assert post("/api/auth", {"config": bad}).status == 400
     assert json.loads(file.read_text()) == entries
+
+    # A file is uploaded to its place under the entry's name, readable by you alone; and deleted.
+    upload = lambda q, data: ui("/api/auth/file?" + q, data)  # noqa: E731
+    got = json.load(upload("name=coder&field=privateKeyFile", b"-----BEGIN KEY-----\n"))
+    key = files / "coder/privateKey"
+    assert got == {"path": str(key), "exists": True} and key.read_bytes() == b"-----BEGIN KEY-----\n"
+    assert key.stat().st_mode & 0o777 == 0o600 and key.parent.stat().st_mode & 0o777 == files.stat().st_mode & 0o777 == 0o700
+    assert json.load(ui("/api/auth"))["files"] == {"coder": ["privateKeyFile"]}
+    for q, data in (("name=coder&field=appId", b"x"), ("name=../x&field=privateKeyFile", b"x"),
+                    ("name=coder&field=privateKeyFile", b""), ("name=coder&field=privateKeyFile", b"x" * (web.MAX_AUTH_FILE + 1))):
+        assert upload(q, data).status == 400
+    assert not (file.parent / "x").exists() and key.read_bytes() == b"-----BEGIN KEY-----\n"
+    assert json.load(ui("/api/auth/file/delete?name=coder&field=privateKeyFile", b""))["exists"] is False
+    assert not key.exists() and json.load(ui("/api/auth"))["files"] == {}
+    assert ui("/api/auth/file?name=coder&field=privateKeyFile", b"k", Origin="http://evil.example").status == 403
 
 
 def test_a_runs_checkout_is_found_where_a_plugin_says_it_is(tmp_path, monkeypatch):

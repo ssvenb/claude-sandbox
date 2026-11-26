@@ -3,8 +3,8 @@ machine, outside every project, each under a name:
 
     ~/.config/claude-sandbox/auth.json        (SANDBOX_AUTH_FILE points somewhere else; chmod 600)
     {
-      "coder":    {"type": "github-app", "appId": "123456", "privateKeyFile": "~/keys/coder.pem"},
-      "reviewer": {"type": "github-app", "appId": "234567", "privateKeyFile": "~/keys/reviewer.pem"},
+      "coder":    {"type": "github-app", "appId": "123456"},
+      "reviewer": {"type": "github-app", "appId": "234567"},
       "data":     {"type": "gcp-service-account", "serviceAccount": "sandbox@my-project.iam.gserviceaccount.com"},
       "openai":   {"type": "api-key", "key": "sk-…"}
     }
@@ -20,18 +20,25 @@ With GH_AUTH=reviewer its stages run with GH_APP_ID and GH_PRIVATE_KEY_FILE set 
 they need not know. A setting of type "auth" without `fills` names an entry its owner reads itself
 (upstream-proxy's routes, whose host proxy reads the file; run.sh hands every stage its path as
 SANDBOX_AUTH_FILE). The web UI offers the names of the entries of the right type.
+
+A field ending in "File" (a private key, a known_hosts file) is not in the entry: each has its one
+place, next to the file, under the entry's name and the field's (FILES):
+
+    ~/.config/claude-sandbox/auth-files/coder/privateKey
+
+Uploaded there through the web UI, or put there by hand (readable by you alone).
 """
 from __future__ import annotations
 
 import json
-import os
+import re
 from pathlib import Path
 
 from . import Die
 from .config import tostring
 
-# Each type: its required fields, then its optional ones. A field ending in "File" is a path on
-# this machine, `~` expanded.
+# Each type: its required fields, then its optional ones. A field ending in "File" is a file at its
+# own place (file_path), never a value of the entry.
 TYPES = {
     "github-app": (("appId", "privateKeyFile"), ("host", "username")),
     "gcp-service-account": ((), ("serviceAccount", "project", "credentialFile")),
@@ -45,6 +52,27 @@ TYPES = {
 
 # The fields that hold a secret itself rather than where one is: the web UI never sends them back.
 SECRETS = ("key", "token", "clientSecret")
+
+
+NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
+
+
+def file_field(field: str) -> bool:
+    return field.endswith("File")
+
+
+def files_dir(env: dict) -> Path:
+    """Where the entries' files are: one directory per entry, next to the authentications' file."""
+    return auth_file(env).parent / "auth-files"
+
+
+def file_path(env: dict, name: str, field: str) -> Path:
+    """The one place of the entry `name`'s file `field` (privateKeyFile: <files_dir>/<name>/privateKey)."""
+    if not file_field(field):
+        raise Die(f"{field} is not a file of an authentication")
+    if not NAME.fullmatch(name or ""):
+        raise Die(f"Authentication '{name}': a name with a file takes letters, digits, '_', '-' and '.' only.")
+    return files_dir(env) / name / field.removesuffix("File")
 
 
 def auth_file(env: dict) -> Path:
@@ -85,7 +113,7 @@ def entry(env: dict, name: str, kind: str, entries: dict | None = None) -> dict:
         raise Die(f"No authentication '{name}' in {path} (it has: {', '.join(sorted(entries)) or 'none'}).")
     if found.get("type") != kind:
         raise Die(f"Authentication '{name}' in {path} is a {found.get('type')}, not a {kind}.")
-    missing = [f for f in TYPES.get(kind, ((), ()))[0] if found.get(f) in (None, "")]
+    missing = [f for f in TYPES.get(kind, ((), ()))[0] if not file_field(f) and found.get(f) in (None, "")]
     if missing:
         raise Die(f"Authentication '{name}' in {path} lacks {', '.join(missing)}.")
     return found
@@ -105,9 +133,16 @@ def apply_auth(env: dict, owners) -> list[str]:
                 found = entry(env, name, spec["auth"], entries)
             except Die as e:
                 raise Die(f"{owner}: {spec['env']}={name}: {e}") from None
+            required = TYPES.get(spec["auth"], ((), ()))[0]
             for key, var in spec["fills"].items():
-                if found.get(key) not in (None, ""):
-                    value = tostring(found[key])
-                    env[var] = os.path.expanduser(value) if key.endswith("File") else value
+                if file_field(key):  # a required one even while missing: its stage says where it belongs
+                    try:
+                        path = file_path(env, name, key)
+                    except Die as e:
+                        raise Die(f"{owner}: {spec['env']}={name}: {e}") from None
+                    if key in required or path.is_file():
+                        env[var] = str(path)
+                elif found.get(key) not in (None, ""):
+                    env[var] = tostring(found[key])
             used.append(name)
     return used

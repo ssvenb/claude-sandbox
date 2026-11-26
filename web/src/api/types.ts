@@ -92,7 +92,7 @@ export interface NewSession {
 export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 export type JsonObject = { [key: string]: Json };
 
-export type SettingType = 'string' | 'path' | 'boolean' | 'enum' | 'integer' | 'text' | 'json' | 'list' | 'map' | 'object';
+export type SettingType = 'string' | 'path' | 'boolean' | 'enum' | 'integer' | 'text' | 'json' | 'list' | 'map' | 'object' | 'file';
 
 /** One setting, as a manifest declares it: its type picks its control. */
 export interface SettingSpec {
@@ -134,6 +134,10 @@ export interface AuthConfig {
   file: string;
   exists: boolean;
   config: JsonObject;
+  /** Where each entry's files are: <filesDir>/<name>/<field without "File">. */
+  filesDir: string;
+  /** The files in place there: entry name → its fields that have one. */
+  files: Record<string, string[]>;
   types: Record<string, { required: string[]; optional: string[] }>;
 }
 

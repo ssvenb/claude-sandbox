@@ -910,6 +910,18 @@ def test_the_menus_settings_add_and_delete_projects_and_edit_your_authentication
     # Authentications: an entry each, its fields those of its type; what the form has none for is kept.
     assert board.input_value("input[name='auth.0.appId']") == "1"
     assert board.text_content("[data-card=auth] .kind h5") == "github-app"  # grouped by type
+
+    # A file is no path to type: it has its place under the entry's name, uploaded there at once.
+    key = auth.parent / "auth-files/coder/privateKey"
+    board.click("[data-card=auth] .item .toggle:has-text('coder')")
+    field = ".field:has(label:text-is('privateKeyFile'))"
+    assert board.text_content(f"{field} .file code") == str(key)
+    assert board.text_content(f"{field} .state") == "not there"
+    with board.expect_file_chooser() as chooser:
+        board.click(f"{field} button.upload")
+    chooser.value.set_files([{"name": "coder.pem", "mimeType": "application/x-pem-file", "buffer": b"PEM"}])
+    board.wait_for_selector(f"{field} .state.ok:text-is('in place')")
+    assert key.read_bytes() == b"PEM" and key.stat().st_mode & 0o777 == 0o600
     board.click(".field:has(label:text-is('Entries')) > .control > .entries > button.add")
     board.fill("input[name='auth.1.name']", "openai")
     board.select_option("select[name='auth.1.type']", "api-key")
@@ -919,7 +931,7 @@ def test_the_menus_settings_add_and_delete_projects_and_edit_your_authentication
     board.fill("input[name='auth.1.key']", "sk")
     board.click("dialog button[type=submit]")
     board.wait_for_selector("dialog[open]", state="detached")
-    assert json.loads(auth.read_text()) == {"coder": {"type": "github-app", "appId": "1", "privateKeyFile": "~/k.pem", "extra": 1},
+    assert json.loads(auth.read_text()) == {"coder": {"type": "github-app", "appId": "1", "extra": 1},  # no path any more
                                             "openai": {"type": "api-key", "key": "sk"}}
     assert auth.stat().st_mode & 0o777 == 0o600
 

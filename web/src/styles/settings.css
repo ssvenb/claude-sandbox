@@ -113,6 +113,14 @@
   .chips label:has(input:checked) { border-color: var(--link); color: var(--link); }
   .chips input { margin: 0; accent-color: var(--link); }
   .kept { font-size: 12px; }
+  /* A file of an authentication: its place, whether it is there, and a button to upload it there. */
+  .control > .file { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .file > code { flex: 1 1 200px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+  .file > .muted { flex: 1 1 200px; color: var(--muted); font-size: 12px; }
+  .file > .state { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--rule); color: var(--muted); }
+  .file > .state.ok { border-color: var(--ok); color: var(--ok); }
+  .file > .upload { font-size: 13px; }
+  .file > .error { flex-basis: 100%; margin: 0; color: var(--fail); font-size: 12px; }
 
   @media (max-width: 900px) {
     dialog { width: 100vw; max-width: 100vw; max-height: 100dvh; height: 100dvh; margin: 0; border-radius: 0; border: 0; }

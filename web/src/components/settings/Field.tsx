@@ -1,5 +1,5 @@
 import { useId } from 'react';
-import type { SettingSpec } from '../../api/types';
+import type { JsonObject, SettingSpec } from '../../api/types';
 import { Control } from './Control';
 import { useForm } from './FormContext';
 import type { Slot, Value } from './slots';
@@ -15,6 +15,7 @@ export interface FieldProps {
   head?: boolean;
   /** Filtered out. It stays in the form, so what was typed in it is kept. */
   hidden?: boolean;
+  parent?: () => JsonObject;
 }
 
 /** An ⓘ that shows `text` in a view of its own, over the form, until clicked away. */
@@ -28,10 +29,10 @@ export function Info({ text, about }: { text: string; about: string }) {
   );
 }
 
-const WIDE = ['list', 'map', 'object', 'json', 'text'];
+const WIDE = ['list', 'map', 'object', 'json', 'text', 'file'];
 
 /** One setting: its label, its control, and its description behind an ⓘ. */
-export function Field({ spec, slot, name, required, ariaLabel, head, hidden }: FieldProps) {
+export function Field({ spec, slot, name, required, ariaLabel, head, hidden, parent }: FieldProps) {
   const form = useForm();
   const id = useId();
   const kind = spec.type ?? 'string';
@@ -39,7 +40,7 @@ export function Field({ spec, slot, name, required, ariaLabel, head, hidden }: F
     slot.set(v);
     form.changed();
   };
-  const control = <Control kind={kind} spec={spec} slot={slot} name={name} set={set} id={id} ariaLabel={ariaLabel} />;
+  const control = <Control kind={kind} spec={spec} slot={slot} name={name} set={set} id={id} ariaLabel={ariaLabel} parent={parent} />;
   if (head) return <div className="control">{control}</div>;
   return (
     <div className={'field' + (WIDE.includes(kind) ? ' wide' : '') + (hidden ? ' hidden' : '')}>

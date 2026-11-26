@@ -1,5 +1,6 @@
-import type { SettingSpec, SettingType } from '../../api/types';
+import type { JsonObject, SettingSpec, SettingType } from '../../api/types';
 import { EnumControl } from './fields/EnumControl';
+import { FileControl } from './fields/FileControl';
 import { IntegerControl } from './fields/IntegerControl';
 import { JsonControl } from './fields/JsonControl';
 import { ListControl } from './fields/ListControl';
@@ -20,6 +21,8 @@ export interface ControlProps {
   set: (v: Value) => void;
   id?: string;
   ariaLabel?: string;
+  /** The object the value is a field of, if it is one. */
+  parent?: () => JsonObject;
 }
 
 /** What a field shows while it is empty: its default, else its own placeholder. */
@@ -37,6 +40,7 @@ export function Control({ kind, ...props }: ControlProps & { kind: SettingType }
     case 'list': return <ListControl {...props} />;
     case 'map': return <MapControl {...props} />;
     case 'object': return <ObjectControl {...props} />;
+    case 'file': return <FileControl {...props} />;
     default: return <StringControl {...props} mono={kind === 'path'} />;
   }
 }

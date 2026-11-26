@@ -29,7 +29,7 @@ export function Info({ text, about }: { text: string; about: string }) {
   );
 }
 
-const WIDE = ['list', 'map', 'object', 'json', 'text', 'file'];
+const WIDE = ['list', 'map', 'object', 'json', 'text'];
 
 /** One setting: its label, its control, and its description behind an ⓘ. */
 export function Field({ spec, slot, name, required, ariaLabel, head, hidden, parent }: FieldProps) {

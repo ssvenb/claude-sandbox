@@ -23,8 +23,9 @@ const when = (seconds: number) => {
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(d.getFullYear() !== now.getFullYear() && { year: 'numeric' }) });
 };
 
-/** A file of an authentication: no path to pick or to see. With none there, a place to drop one or
- *  browse for it; with one there, what it is (its kind, size and when it came), to replace or delete.
+/** A file of an authentication: no path to pick or to see, and no text drawn. With none there, a
+ *  place to drop one or tap to browse; with one there, a key with a tick (what it is on hover), to
+ *  replace or delete.
  *  Uploaded at once, it is the one the entry uses. */
 export function FileControl({ spec, name, id, parent }: ControlProps) {
   const files = useAuthFiles();
@@ -39,6 +40,10 @@ export function FileControl({ spec, name, id, parent }: ControlProps) {
   const what = WHAT[field] ?? { noun: 'the file', hint: 'Up to 1 MiB', icon: 'key' as const };
   const named = fileName(entry);
   const info: AuthFileInfo | null = named ? files.get(entry, field) : null;
+  // No text is drawn: what it is, or what it takes, is told on hover and to a screen reader.
+  const described = !info ? "" : `${info.kind} · ${size(info.size)} · uploaded ${when(info.modified)}`;
+  const hint = !named ? (entry ? "Give the entry a name of letters, digits, '_', '-' and '.' first" : 'Name the entry first')
+    : `Upload ${what.noun} (${what.hint}): drop it here or browse`;
 
   const put = async (file: File | null) => {
     setError('');
@@ -79,18 +84,16 @@ export function FileControl({ spec, name, id, parent }: ControlProps) {
       {info ? (
         <div className={'filecard' + (over ? ' over' : '') + (busy ? ' loading' : '') + (fresh ? ' fresh' : '')} {...drop}
           onAnimationEnd={() => setFresh(false)}>
-          <span className="tile">
+          <span className="tile" role="img" aria-label={described}
+            title={described}>
             <Icon name={what.icon} />
             <span className="tick"><Icon name="check" /></span>
           </span>
-          <span className="about">
-            <b className="kind">{over ? 'Drop to replace' : busy ? 'Uploading…' : info.kind}</b>
-            <span className="meta" title={'Uploaded ' + new Date(info.modified * 1000).toLocaleString()}>
-              {size(info.size)} · {when(info.modified)}
-            </span>
-          </span>
           <span className="acts">
-            <button type="button" className="replace" disabled={busy} onClick={browse}>Replace</button>
+            <button type="button" className="replace icon" disabled={busy} onClick={browse}
+              title={'Replace ' + label} aria-label={'Replace ' + label}>
+              <Icon name="upload" />
+            </button>
             <BusyButton className="remove icon" title={'Delete ' + label} aria-label={'Delete ' + label}
               onClick={() => confirm(`Delete the ${label} of ${entry}?`) && put(null)}>
               <Icon name="trash" />
@@ -99,20 +102,8 @@ export function FileControl({ spec, name, id, parent }: ControlProps) {
         </div>
       ) : (
         <button type="button" className={'dropzone' + (over ? ' over' : '') + (busy ? ' loading' : '')} disabled={!named || busy}
-          onClick={browse} {...drop}>
+          onClick={browse} {...drop} title={hint} aria-label={hint}>
           <span className="tile"><Icon name="upload" /></span>
-          <span className="about">
-            {!named ? (
-              <span className="lead">{entry ? "A name of letters, digits, '_', '-' and '.' first" : 'Name the entry first'}</span>
-            ) : busy ? (
-              <span className="lead">Uploading…</span>
-            ) : over ? (
-              <span className="lead">Drop it to upload</span>
-            ) : (
-              <span className="lead">Drop {what.noun} here, or <u>browse</u></span>
-            )}
-            <span className="meta">{what.hint}</span>
-          </span>
         </button>
       )}
       {error && <p className="error" role="alert">{error}</p>}

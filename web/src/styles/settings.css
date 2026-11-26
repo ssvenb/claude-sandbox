@@ -113,43 +113,35 @@
   .chips label:has(input:checked) { border-color: var(--link); color: var(--link); }
   .chips input { margin: 0; accent-color: var(--link); }
   .kept { font-size: 12px; }
-  /* A file of an authentication. With none there, a dashed place to drop one on (or tap to
-     browse); with one there, a card of what it is: its kind on a tile with a tick, its size and
-     when it came, and Replace / delete on the right. Either takes a file dropped on it. */
+  /* A file of an authentication, drawn without text. With none there, a dashed place to drop one
+     on (or tap to browse); with one there, a card: the file's tile with a tick on the left, replace
+     and delete on the right. Either takes a file dropped on it. */
   .control > .file { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
   .file .tile { position: relative; flex: none; width: 34px; height: 34px; border-radius: 9px;
                 display: grid; place-items: center; }
   .file .tile > svg { width: 18px; height: 18px; }
-  .file .about { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; text-align: left; }
-  .file .meta { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: -.01em;
-                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-  .file .dropzone { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px;
+  .file .dropzone { display: flex; align-items: center; justify-content: center; width: 100%; padding: 8px;
                     border: 1.5px dashed var(--rule); border-radius: 10px; background: var(--panel);
                     color: var(--ink); transition: border-color .15s, background-color .15s; }
   .file .dropzone .tile { color: var(--muted); background: var(--sunk); transition: color .15s, transform .2s; }
-  .file .dropzone .lead { font-size: 13.5px; }
-  .file .dropzone u { text-decoration-color: var(--lamp-fill); text-decoration-thickness: 2px;
-                      text-underline-offset: 3px; font-weight: 600; }
   .file .dropzone:hover:not(:disabled) { border-color: var(--muted); }
   .file .dropzone:hover:not(:disabled) .tile { color: var(--ink); transform: translateY(-1px); }
   .file .dropzone.over { border-style: solid; border-color: var(--lamp-fill); background: var(--lamp-wash); }
   .file .dropzone.over .tile { color: var(--lamp-ink); background: var(--lamp-fill); transform: translateY(-2px); }
-  .file .dropzone:disabled:not(.loading) .lead { color: var(--muted); font-size: 12.5px; }
   .file .dropzone.loading { opacity: 1; }
 
-  .file .filecard { display: flex; align-items: center; gap: 12px; padding: 8px 6px 8px 8px;
+  .file .filecard { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 6px 8px 8px;
                     border: 1px solid var(--rule); border-radius: 10px; background: var(--panel);
                     transition: border-color .15s, background-color .15s; }
-  .file .filecard .tile { color: var(--ok); background: var(--ok-wash); }
+  .file .filecard .tile { color: var(--ok); background: var(--ok-wash); cursor: help; }
   .file .filecard .tick { position: absolute; right: -4px; bottom: -4px; width: 15px; height: 15px; border-radius: 50%;
                           display: grid; place-items: center; background: var(--ok); color: var(--panel);
                           box-shadow: 0 0 0 2px var(--panel); }
   .file .filecard .tick svg { width: 9px; height: 9px; }
-  .file .filecard .kind { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .file .filecard .acts { display: flex; align-items: center; gap: 2px; flex: none; }
-  .file .filecard .replace { font-size: 12.5px; padding: 4px 10px; border-color: transparent; color: var(--link); font-weight: 600; }
-  .file .filecard .replace:hover:not(:disabled) { border-color: transparent; background: var(--sunk); }
+  .file .filecard .replace { border-color: transparent; border-radius: 8px; }
+  .file .filecard .replace:hover:not(:disabled) { color: var(--link); background: var(--sunk); }
   .file .filecard .remove { border-color: transparent; border-radius: 8px; }
   .file .filecard .remove:hover { color: var(--fail); background: var(--fail-wash); }
   .file .filecard.over { border-color: var(--lamp-fill); background: var(--lamp-wash); }

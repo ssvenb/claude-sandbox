@@ -1056,11 +1056,13 @@ def test_git_workspace_lists_a_runs_changes_in_its_container_not_on_the_host(sb)
     subprocess.run(["git", "init", "-q", checkout], check=True)
     planted = sb.tmp / "planted"
     subprocess.run(["git", "-C", checkout, "config", "core.fsmonitor", f"touch {planted}; false"], check=True)
-    sb.stub("docker", f'printf "%s\\n" "$@" >"{sb.tmp}/argv"; cat >"{sb.tmp}/stdin"; echo "[]"')
+    # The agent user by number: the entrypoint renumbers `node`, which `docker exec -u node` misses.
+    sb.stub("docker", f'if [ "$3" = 0 ]; then echo 999:1000; exit; fi\n'
+                      f'printf "%s\\n" "$@" >"{sb.tmp}/argv"; cat >"{sb.tmp}/stdin"; echo "[]"')
     done = subprocess.run([REPO / "plugins/git-workspace/host/changes.py", "trunk"], cwd=checkout,
                           env=sb._env({"WEB_RUN_ID": "abc123"}), check=True, capture_output=True, text=True)
     assert json.loads(done.stdout) == [] and not planted.exists()
-    assert (sb.tmp / "argv").read_text().split() == ["exec", "-i", "-u", "node", "-w", "/workspace",
+    assert (sb.tmp / "argv").read_text().split() == ["exec", "-i", "-u", "999:1000", "-w", "/workspace",
                                                      "sandbox-abc123", "python3", "-", "trunk"]
     assert (sb.tmp / "stdin").read_text() == (REPO / "plugins/git-workspace/host/changes.py").read_text()
 

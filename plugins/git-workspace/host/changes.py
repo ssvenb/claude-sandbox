@@ -51,9 +51,17 @@ def changes(base_branch=""):
 
 
 def in_container(run_id, args):
-    """This script, fed on stdin to python3 in the run's container, as its agent user, in /workspace."""
+    """This script, fed on stdin to python3 in the run's container, as its agent user, in /workspace.
+    That user by number, asked of the container: its entrypoint gives `node` the uid of whoever
+    started the run, in /etc/passwd, but `docker exec -u node` still finds the image's (1000), to
+    whom git refuses the checkout (dubious ownership) and finds no repository there."""
+    container = f"sandbox-{run_id}"
+    user = subprocess.run(["docker", "exec", "-u", "0", container, "sh", "-c", 'echo "$(id -u node):$(id -g node)"'],
+                          capture_output=True, text=True, check=False)
+    if user.returncode or not user.stdout.strip():
+        sys.exit(f"changes.py: no agent user in {container}: {(user.stderr.strip().splitlines() or ['failed'])[0]}")
     with open(__file__, "rb") as me:
-        return subprocess.run(["docker", "exec", "-i", "-u", "node", "-w", "/workspace", f"sandbox-{run_id}",
+        return subprocess.run(["docker", "exec", "-i", "-u", user.stdout.strip(), "-w", "/workspace", container,
                                "python3", "-", *args], stdin=me, check=False).returncode
 
 

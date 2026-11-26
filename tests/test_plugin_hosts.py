@@ -1021,6 +1021,32 @@ def test_git_workspace_lists_the_files_a_run_changed_since_it_left_main(tmp_path
     assert changes("main") == changes()  # the base named, as BASE_BRANCH does
 
 
+def test_git_workspace_lists_everything_in_a_repo_with_no_branch_to_have_left(tmp_path):
+    """A project with no repo: git-workspace starts one of the run's own, no remote, only the run's
+    branch. What its agent committed is changed as much as what it did not."""
+    git = lambda *a: subprocess.run(["git", "-C", tmp_path, "-c", "user.name=t", "-c", "user.email=t@t", *a],  # noqa: E731
+                                    check=True, capture_output=True)
+    changes = lambda: json.loads(subprocess.run([REPO / "plugins/git-workspace/host/changes.py"],  # noqa: E731
+                                                cwd=tmp_path, check=True, capture_output=True).stdout)
+    git("init", "-q", "-b", "claude/20260102-abc123")
+    (tmp_path / "staged.txt").write_text("a\n")
+    git("add", ".")
+    assert changes() == [{"path": "staged.txt", "status": "A", "added": 1, "removed": 0}]  # before any commit
+    git("commit", "-qm", "first")
+    (tmp_path / "staged.txt").write_text("a\nb\n")
+    git("commit", "-qam", "second")
+    (tmp_path / "new.txt").write_text("x\n")
+    assert changes() == [{"path": "new.txt", "status": "A", "added": 1, "removed": 0},
+                         {"path": "staged.txt", "status": "A", "added": 2, "removed": 0}]
+
+
+def test_git_workspace_says_when_git_fails_rather_than_list_no_changes(tmp_path):
+    """Not a repository (or one git refuses: dubious ownership) is no answer, not an empty list."""
+    done = subprocess.run([REPO / "plugins/git-workspace/host/changes.py"], cwd=tmp_path,
+                          env={**os.environ, "GIT_CEILING_DIRECTORIES": str(tmp_path.parent)},
+                          capture_output=True, text=True)
+    assert done.returncode != 0 and done.stdout == "" and "not a git repository" in done.stderr.lower()
+
 
 
 def test_git_workspace_lists_a_runs_changes_in_its_container_not_on_the_host(sb):

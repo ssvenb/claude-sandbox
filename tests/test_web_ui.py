@@ -447,7 +447,8 @@ def test_a_session_has_one_tab_with_a_lamp_in_the_colour_of_what_its_agent_does(
     assert board.query_selector("details") is None and board.query_selector("text=1 ended") is None  # with nothing to unfold
     with tab.expect_navigation():  # resuming takes this tab to the run's new session
         tab.click(".over button:has-text('Resume')")
-    tab.wait_for_selector("header .state.idle")
+    tab.wait_for_selector("header .state.question")  # stopped mid-question, it carries on: asks again
+    assert "carries on where it left off" in tab.inner_text("body")
     assert tab.url.endswith("#" + [s for s in state(board) if s["exit"] is None][0]["id"])
     assert len(state(board)) == 1  # the ended one is replaced: a run stays one session
     board.wait_for_selector("ul.ended", state="detached")

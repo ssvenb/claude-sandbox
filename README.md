@@ -162,7 +162,7 @@ A session runs until you end it: closing its
 tab, or the whole browser, leaves it running, and clicking it opens it again with the whole
 conversation. Each session has two
 buttons for that. **Stop** (the red square, on its window and in its tab) removes its container
-and keeps it listed among its project's ended sessions, its tab showing how it ended, so you can read it and resume it with the play button. **Delete**
+and keeps it listed among its project's ended sessions, its tab showing how it ended, so you can read it and resume it with the play button. A resumed chat carries on as it was stopped: one stopped mid-turn or mid-question is told so (in a tag its replay leaves out), and what was typed or picked before its agent was ready still reaches it. **Delete**
 (the trash can, in its tab and on an ended session) stops it if it still runs, removes it from the list and closes its tabs: its
 chat, VS Code and its pull request (the last two only while the page that opened them has
 not been reloaded).
@@ -210,7 +210,7 @@ all bundled; only the fonts come from a CDN. To work on it, run the server and `
 It listens on loopback only and has no login — use an SSH tunnel to reach it from elsewhere.
 Sessions outlive the server: each runs under `src/server/holder.py`, which keeps its output while no server
 listens, and the next server takes them back from `~/.local/state/claude-sandbox/sessions`, running or
-ended, so a restart (the dashboard's update button, say) cuts nothing off. Under systemd each holder
+ended, so a restart (the dashboard's update button, say) cuts nothing off. One whose holder went without saying how it ended (the machine rebooted) is resumed, once Docker answers, and carries on as it was. Under systemd each holder
 runs in a scope of its own (`systemd-run --user --scope`), outside the server unit's cgroup.
 
 ## How a run boots

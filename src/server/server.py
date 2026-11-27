@@ -49,7 +49,7 @@ HOLDER = HERE / "holder.py"
 STATE = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "claude-sandbox/sessions"
 META = ("id", "project", "kind", "run_id", "started", "ui")
 SAVED = ("exit", "events", "info", "todos", "tasks", "ready", "state", "waiting", "pending", "title", "activity",
-         "said", "cost", "context", "sent", "offset", "sides", "sided")  # of a chat
+         "said", "cost", "context", "sent", "offset", "sides", "sided", "stopped_in", "killed", "resuming")  # of a chat
 # Where the page was last opened (http://<Host>), from the last request guard() let in: the address
 # web_on_status is told a session's page by (on_status()).
 page_origin = None
@@ -255,6 +255,9 @@ class Session:
             try:
                 s._attach(s._resume_from(), tries=1)
             except OSError:  # its holder is gone too: ended, maybe while no server listened
+                # Gone without a word, killed with the machine (a reboot): resumed (revive()).
+                # One that ended by itself, saying how, stays ended, as it would have under a server.
+                s.revive = not (folder / "exit").exists()
                 out = folder / "out"
                 if out.exists():
                     s._data(out.read_bytes()[max(0, s._resume_from()):])
@@ -423,6 +426,9 @@ class Chat(Session):
         # Its side chats, where the run's conversation is asked about beside it: id → {id, title,
         # state, events}, the ids counted up (`sided`), and where each one's streamed text and results go.
         self.sides, self.sided, self.side_maps = {}, 0, {}
+        # What it was doing when it stopped (stopped_in: its status as shown, killed: what ran in
+        # the background), and what a resumed run carries on from that, once its agent is ready.
+        self.stopped_in, self.killed, self.resuming = None, [], None
 
     def saved(self):
         return {k: getattr(self, k) for k in SAVED}
@@ -473,6 +479,7 @@ class Chat(Session):
         if self.partial:  # its last line, without a newline
             self._line(self.partial)
             self.partial = b""
+        self._stopping()
         self.exit, self.tasks = code, []
         for side in self.sides.values():
             side["state"] = "idle"
@@ -524,6 +531,12 @@ class Chat(Session):
                 pending, self.pending = self.pending, {}
                 for command in pending.values():
                     self._send(command)
+                if self.resuming:  # stopped mid-turn or mid-question: it goes on from there
+                    self._send({"type": "prompt", "text": carry_on(self.resuming)})
+                    self._tell({"type": "notice", "level": "info", "text": "This session was stopped while "
+                                + ("it worked" if self.resuming["state"] == "working" else "it asked you something")
+                                + ": it carries on where it left off."}, keep=True)
+                    self.resuming, self.state, self.finished = None, "working", False
                 waiting, self.waiting = self.waiting, []
                 for event, command in waiting:
                     event.pop("queued", None)
@@ -667,8 +680,30 @@ class Chat(Session):
 
     def stop(self):
         if self.exit is None:
+            self._stopping()
             self._ctl({"eof": True})
         super().stop()
+
+    def _stopping(self):
+        """Notes what it is doing as it stops, before its bridge's last words (idle, on its way out)
+        or its end clear that: what a resumed run carries on from (carry())."""
+        with lock:
+            if self.stopped_in is None and self.exit is None:
+                self.stopped_in = self.shown()
+                self.killed = [str(t.get("text") or t.get("id")) for t in self.tasks]
+
+    def carry(self, old):
+        """Takes over from the ended session of its run: its name, the prompts and picks that never
+        reached its agent, and the turn or question it was stopped in. Caller holds `lock`."""
+        self.title = self.title or old.title
+        if old.resuming:  # stopped again before it could carry on
+            self.resuming = old.resuming
+        elif old.stopped_in in ("working", "question"):
+            self.resuming = {"state": old.stopped_in, "tasks": old.killed}
+        for command in old.pending.values():
+            self.tell(command)
+        for _, command in old.waiting:
+            self.prompt(command.get("text", ""), command.get("images"), command.get("files"))
 
     def status(self):
         """starting until the agent is ready, then what its bridge says: working, idle, question."""
@@ -684,6 +719,17 @@ class Chat(Session):
         return {**super().json(), "title": self.title, "activity": self.activity, "said": self.said,
                 "agent": self.info.get("agent"), "model": self.info.get("model"), "cost": self.cost,
                 "context": self.context, "waiting": len(self.waiting), "todos": self.todos}
+
+
+def carry_on(resuming):
+    """What a resumed agent is told of the turn it was stopped in. In a tag, so a replay of the
+    conversation does not show it as the user's."""
+    where = ("working on your turn" if resuming["state"] == "working"
+             else "waiting for the user's answer to your question (ask it again)")
+    tasks = resuming.get("tasks") or []
+    killed = f" What ran in the background was stopped with it: {'; '.join(tasks)}. Start again what you still need." if tasks else ""
+    return (f"<session-resumed>This session was stopped while you were {where}, and has been resumed.{killed}"
+            " Carry on where you left off.</session-resumed>")
 
 
 def describe(project, keep=False):
@@ -1361,7 +1407,9 @@ def hold(folder, mode, argv, cwd):
 
 
 def restore():
-    """Takes back the sessions the server before this one left, running or ended."""
+    """Takes back the sessions the server before this one left, running or ended; those that went
+    while none listened are resumed (revive())."""
+    revived = []
     for meta in sorted(STATE.glob("*/meta.json"), key=lambda m: m.stat().st_mtime):
         state = meta.parent / "state.json"
         try:
@@ -1375,6 +1423,33 @@ def restore():
             sessions[s.id] = s
         if s.kind == "shell":  # a shell on this machine, from before there were none: ended, not taken back
             remove(s)
+        elif getattr(s, "revive", False):
+            revived.append(s)
+    if revived:
+        threading.Thread(target=revive, args=(revived,), daemon=True).start()
+
+
+DOCKER_WAIT = 300  # seconds revive() waits for Docker after a reboot
+
+
+def revive(ended):
+    """Resumes the sessions that went while no server listened (a reboot, a crash): each in the
+    state it was in (carry()). Once Docker answers, which after a boot may take a while."""
+    for _ in range(DOCKER_WAIT):
+        try:
+            if subprocess.run(["docker", "info"], capture_output=True, timeout=30).returncode == 0:
+                break
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        time.sleep(1)
+    for s in ended:
+        with lock:
+            if sessions.get(s.id) is not s:  # resumed or deleted meanwhile
+                continue
+        try:
+            start(s.project, "resume", s.run_id, ui=s.ui, once=s.once)
+        except (OSError, ValueError) as e:
+            print(f"  could not resume session {s.id} ({s.project} {s.run_id}): {e}", file=sys.stderr, flush=True)
 
 
 def drop(s):
@@ -1497,7 +1572,7 @@ def start(project, kind, run_id, task=None, ui=None, images=None, sets=None, onc
     elif kind != "resume" or not RUN_ID.fullmatch(run_id or ""):
         raise ValueError("kind must be run, or resume with a 6-hex-char run_id")
     with lock:
-        title = ""
+        ended = None
         for s in list(sessions.values()):
             if (s.project, s.run_id) != (project, run_id):
                 continue
@@ -1506,12 +1581,12 @@ def start(project, kind, run_id, task=None, ui=None, images=None, sets=None, onc
             # a run is one session however often it is resumed, and a resumed chat replays it.
             if s.exit is None:
                 return s
-            title = title or getattr(s, "title", "")
+            ended = ended or s
             drop(s)
         s = (Session if ui == "terminal" else Chat)(
             project, kind, run_id, task, **({"images": images} if images else {}), sets=sets, once=once)
-        if isinstance(s, Chat):
-            s.title = s.title or title
+        if isinstance(s, Chat) and isinstance(ended, Chat):
+            s.carry(ended)
         sessions[s.id] = s
         return s
 

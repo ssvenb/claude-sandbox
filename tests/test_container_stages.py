@@ -248,9 +248,10 @@ def test_copilot_is_given_its_task_instead_of_told_to_wait(sb, prompt):
 
 def test_general_briefing_states_the_testing_rules():
     brief = (REPO / "src/boot/briefing.md").read_text()
-    for rule in ("covered by unit tests", "every\nbug you find", "integration tests",
-                 "must be covered by an integration test instead",
-                 "Fix bugs test first", "run it and see it fail", "only\nthen fix the bug"):
+    for rule in ("must be covered by unit tests", "also be covered by integration tests",
+                 "covered by a regression test", "an integration test if the bug only shows",
+                 "Fix bugs test first", "run it against the unfixed code. It must fail",
+                 "Green: fix the bug", "Refactor:"):
         assert rule in brief
 
 

@@ -434,7 +434,8 @@ def test_a_resumed_copilot_run_replays_its_session_or_starts_a_new_one(tmp_path)
     history = [{"type": "user.message", "data": {"content": "Fix the bug"}},
                {"type": "assistant.turn_start", "data": {}},
                {"type": "assistant.message", "data": {"messageId": "m0", "content": "Fixed."}},
-               {"type": "session.idle", "data": {}}]
+               {"type": "session.idle", "data": {}},
+               {"type": "user.message", "data": {"content": "<session-resumed>Carry on.</session-resumed>"}}]  # the host's, not the user's
     b = Bridge("copilot", tmp_path, [], RESUME="1", FAKE_HISTORY=json.dumps(history))
     b.until(lambda e: e["type"] == "ready")
     assert [(e["type"], e.get("text")) for e in b.events if e["type"] not in ("hello", "ready")] == [

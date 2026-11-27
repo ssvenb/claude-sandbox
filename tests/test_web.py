@@ -6,6 +6,7 @@ import os
 import queue
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -15,6 +16,7 @@ import urllib.error
 import urllib.request
 
 import pytest
+from pathlib import Path
 
 from conftest import REPO
 
@@ -1046,6 +1048,117 @@ def test_a_resumed_chat_replays_what_was_said_before(chat):
     chat.until(s, lambda s: s.exit is not None)
     again = chat("resume", "0a1b2c")  # it takes the ended one's place, and its name: a run stays one session
     assert list(web.sessions) == [again.id] and again.title == "Fix the board"
+
+
+def sent_prompts(chat):
+    """The prompts the stand-in agents were sent, in order."""
+    commands = chat.tmp / "commands"
+    lines = commands.read_text().splitlines() if commands.exists() else []
+    return [c["text"] for c in map(json.loads, lines) if c["type"] == "prompt"]
+
+
+@pytest.mark.parametrize("task, said", [("long", "while you were working on your turn"),
+                                        ("ask me", "waiting for the user's answer to your question (ask it again)")])
+def test_a_chat_stopped_mid_turn_or_mid_question_carries_on_when_resumed(chat, task, said):
+    s = chat(task=task)
+    chat.until(s, lambda s: s.status() == ("working" if task == "long" else "question"))
+    s.stop()  # even the user's Stop: it carries on when resumed
+    chat.until(s, lambda s: s.exit is not None)
+    again = chat("resume", s.run_id)
+    chat.until(again, lambda s: s.ready and len(sent_prompts(chat)) == 2)
+    assert sent_prompts(chat)[0] == task
+    carry = sent_prompts(chat)[1]
+    assert carry.startswith("<session-resumed>") and said in carry and "Carry on where you left off." in carry
+    assert again.resuming is None and any(e["type"] == "notice" and "carries on" in e["text"] for e in again.events)
+
+
+def test_a_chat_stopped_while_idle_resumes_idle(chat):
+    s = chat(task="change it")
+    chat.until(s, lambda s: s.status() == "idle" and any(e["type"] == "turn" for e in s.events))
+    s.stop()
+    chat.until(s, lambda s: s.exit is not None)
+    assert s.stopped_in == "idle"
+    again = chat("resume", s.run_id)
+    chat.until(again, lambda s: s.ready)
+    time.sleep(0.2)
+    assert sent_prompts(chat) == ["change it"] and again.status() == "idle"
+
+
+def test_a_chat_stopped_with_background_tasks_tells_the_resumed_agent_they_were_stopped(chat):
+    s = chat(task="background")
+    chat.until(s, lambda s: len(s.tasks) == 2)
+    s.stop()
+    chat.until(s, lambda s: s.exit is not None)
+    assert (s.stopped_in, s.killed) == ("working", ["npm run dev", "Check the callers"])
+    again = chat("resume", s.run_id)
+    chat.until(again, lambda s: len(sent_prompts(chat)) == 2)
+    assert "was stopped with it: npm run dev; Check the callers." in sent_prompts(chat)[1]
+
+
+def test_prompts_and_picks_that_never_reached_a_stopped_chat_reach_its_resumed_one(chat):
+    hold = chat.tmp / "hold"
+    hold.touch()
+    s = chat(task="first")
+    s.prompt("second")
+    s.tell({"type": "model", "id": "opus"})
+    s.stop()
+    chat.until(s, lambda s: s.exit is not None)
+    hold.unlink()
+    again = chat("resume", s.run_id)
+    assert [e["text"] for e in again.events if e["type"] == "user"] == ["first", "second"] and again.json()["waiting"] == 2
+    commands = chat.tmp / "commands"
+    chat.until(again, lambda s: len(sent_prompts(chat)) == 2)
+    assert [json.loads(line) for line in commands.read_text().splitlines()] == [
+        {"type": "model", "id": "opus"}, {"type": "prompt", "text": "first"}, {"type": "prompt", "text": "second"}]
+
+
+def test_a_chat_killed_with_the_machine_is_resumed_by_the_next_server_and_carries_on(chat):
+    s = chat(task="long")
+    chat.until(s, lambda s: s.status() == "working")
+    with web.lock:  # a reboot: the server, the holder and the sandbox go at once, without a word
+        s.save()
+        s._data = s._end = s.save = s.close = lambda *_: None
+        s.sock.shutdown(socket.SHUT_RDWR)
+        holder = int(Path(f"/proc/{s.pid}/stat").read_text().rsplit(")", 1)[1].split()[1])  # its child's parent
+        os.kill(holder, signal.SIGKILL)  # first, so it cannot say how its child ended
+        os.killpg(s.pid, signal.SIGKILL)  # the sandbox: a group of its own
+        web.sessions.clear()
+    for _ in range(100):
+        try:
+            os.kill(s.pid, 0)
+            time.sleep(0.02)
+        except ProcessLookupError:
+            break
+    assert not (s.dir / "exit").exists()
+    s.exit = -1  # what the old server knew of it is gone with it
+    web.restore()
+    for _ in range(250):
+        with web.lock:
+            back = next((b for b in web.sessions.values() if b.run_id == s.run_id and b.exit is None), None)
+        if back:
+            break
+        time.sleep(0.02)
+    assert back is not None and back.kind == "resume" and len(web.sessions) == 1  # it took the ended one's place
+    chat.until(back, lambda s: len(sent_prompts(chat)) == 2)
+    assert "while you were working on your turn" in sent_prompts(chat)[1]
+    back.stop()
+    chat.until(back, lambda s: s.exit is not None)
+
+
+def test_a_chat_that_ended_by_itself_while_no_server_listened_stays_ended(chat):
+    s = chat(task="now exit")
+    with web.lock:
+        s.save()
+        s._data = s._end = s.save = s.close = lambda *_: None
+        s.sock.shutdown(socket.SHUT_RDWR)
+        web.sessions.clear()
+    for _ in range(250):
+        if (s.dir / "exit").exists():
+            break
+        time.sleep(0.02)
+    web.restore()
+    time.sleep(0.3)
+    assert [(b.id, b.exit) for b in web.sessions.values()] == [(s.id, 3)]
 
 
 def test_a_session_under_a_system_unit_goes_into_a_system_scope(tmp_path, monkeypatch):

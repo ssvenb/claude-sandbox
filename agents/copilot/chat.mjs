@@ -27,7 +27,8 @@ function on(event) {
   const d = event.data || {}, parent = d.parentToolCallId || undefined;
   switch (event.type) {
     case 'user.message':
-      if (replaying) emit({ type: 'user', text: d.content });
+      // What the host adds in a tag (a resumed run told to carry on) is not the user's.
+      if (replaying && !/^\s*<[a-z-]+>/.test(d.content || '')) emit({ type: 'user', text: d.content });
       break;
     case 'assistant.message_delta':
       emit({ type: 'delta', id: d.messageId, kind: 'text', text: d.deltaContent, parent });

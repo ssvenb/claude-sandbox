@@ -540,6 +540,10 @@ class Chat(Session):
                 waiting, self.waiting = self.waiting, []
                 for event, command in waiting:
                     event.pop("queued", None)
+                    # After what a resumed run's bridge replayed meanwhile, and the page moves it there too.
+                    if any(e is event for e in self.events):
+                        self.events.remove(event)
+                        self.events.append(event)
                     self._send(command)
                     self._tell({"type": "sent", "id": event["id"]})
                 if waiting:

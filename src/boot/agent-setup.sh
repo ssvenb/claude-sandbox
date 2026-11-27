@@ -12,8 +12,10 @@ export HOME=/home/node
 
 # Plugins append briefing lines here; the joined text is handed to the agent's launch.sh. This
 # script's stdout is NOT visible to the agent, so context that must reach it travels this way.
+# It opens with the general briefing, the rules every session works by whatever plugins are on.
 AGENT_PROMPT_FILE=$(mktemp)
 export AGENT_PROMPT_FILE
+cat /usr/local/share/sandbox/briefing.md >"$AGENT_PROMPT_FILE"
 
 # The agent seeds its own config first, then the plugins authenticate, provision /workspace and
 # set up guardrails. With every plugin off, /workspace is simply an empty directory.

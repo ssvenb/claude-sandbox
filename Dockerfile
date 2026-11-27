@@ -89,10 +89,12 @@ COPY src/contract/container/agents.sh /usr/local/lib/sandbox/agents.sh
 COPY src/services/chat/chat-bridge.mjs /usr/local/lib/sandbox/chat-bridge.mjs
 COPY src/services/settings/merge-settings.py /usr/local/bin/merge-settings.py
 COPY src/services/settings/settings-base.json /usr/local/share/sandbox/settings-base.json
+# The general briefing: what every agent is told, whichever plugins are on (agent-setup.sh).
+COPY src/boot/briefing.md /usr/local/share/sandbox/briefing.md
 RUN chmod 555 /usr/local/bin/merge-settings.py \
     && chmod 444 /usr/local/lib/sandbox/plugins.sh /usr/local/lib/sandbox/agents.sh \
                  /usr/local/lib/sandbox/chat-bridge.mjs \
-                 /usr/local/share/sandbox/settings-base.json
+                 /usr/local/share/sandbox/settings-base.json /usr/local/share/sandbox/briefing.md
 
 # entrypoint.sh boots as root; agent-setup.sh is the part it runs as 'node'.
 COPY src/boot/entrypoint.sh /usr/local/bin/entrypoint.sh

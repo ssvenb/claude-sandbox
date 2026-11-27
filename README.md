@@ -241,6 +241,8 @@ Two variables steer the tail of that sequence:
 - **`$AGENT_PROMPT_FILE`** — a temp file plugins append to during the agent stage. Its contents
   are the agent's briefing (Claude: system prompt; Copilot: first message). Stage script stdout is *not* visible to the agent, so
   anything the agent must know has to go through this file.
+  It starts out holding the general briefing, `src/boot/briefing.md` (the rules every session
+  works by, such as how its work must be tested), and the plugins' lines follow it.
 
 ## Agents
 

@@ -242,3 +242,22 @@ def test_copilot_is_given_its_task_instead_of_told_to_wait(sb, prompt):
     flag, message = argv()[2:]
     assert flag == "-i" and message.endswith("The user's task:\nFix issue #7.")
     assert message.startswith(prompt) and "do not take any action" not in message
+
+
+# --- src/boot/briefing.md: the general briefing ----------------------------------------------
+
+def test_general_briefing_states_the_testing_rules():
+    brief = (REPO / "src/boot/briefing.md").read_text()
+    for rule in ("covered by unit tests", "every\nbug you find", "integration tests",
+                 "must be covered by an integration test instead"):
+        assert rule in brief
+
+
+def test_general_briefing_opens_the_prompt_file_ahead_of_the_plugins():
+    """agent-setup.sh only runs in the image (tests/e2e boots it); check it reads the briefing
+    from where the Dockerfile puts it, before any stage can append to the file."""
+    setup = (REPO / "src/boot/agent-setup.sh").read_text()
+    docker = (REPO / "Dockerfile").read_text()
+    assert "COPY src/boot/briefing.md /usr/local/share/sandbox/briefing.md" in docker
+    seed = 'cat /usr/local/share/sandbox/briefing.md >"$AGENT_PROMPT_FILE"'
+    assert seed in setup and setup.index(seed) < setup.index("agent_run_stage agent-init")

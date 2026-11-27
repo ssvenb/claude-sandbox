@@ -17,6 +17,7 @@ BASE = os.environ.get("SANDBOX_E2E_IMAGE")
 AGENT = os.environ.get("SANDBOX_E2E_AGENT", "claude")
 MANAGED = json.loads((REPO / "agents" / AGENT / "agent.json").read_text())["managedSettings"]
 PREFIX = json.loads((REPO / "agents" / AGENT / "agent.json").read_text())["git"]["branchPrefix"]
+GENERAL_BRIEFING = (REPO / "src/boot/briefing.md").read_text()
 pytestmark = pytest.mark.skipif(not BASE, reason="SANDBOX_E2E_IMAGE is not set")
 
 
@@ -66,9 +67,12 @@ def boot(image, plugins="", probe="", before=None, mounts=(), **env) -> Boot:
 def test_bare_boot_drops_to_the_agent_user(image):
     b = boot(image, probe=f'cat {MANAGED}; echo; stat -c "%U %a" {MANAGED}', CLAUDE_EFFORT="high")
     assert (b.uid, b.cwd, b.env["HOME"]) == (1000, "/workspace", "/home/node")
+    # With every plugin off, the briefing is the general one alone.
     assert b.argv == (["--dangerously-skip-permissions", "--session-id",
-                       "5a4db0c0-0000-4000-8000-000000abc123", "--effort", "high"] if AGENT == "claude"
-                      else ["--allow-all", "--name=sandbox-abc123"])
+                       "5a4db0c0-0000-4000-8000-000000abc123", "--effort", "high",
+                       "--append-system-prompt", b.briefing] if AGENT == "claude"
+                      else ["--allow-all", "--name=sandbox-abc123", "-i", b.briefing])
+    assert b.briefing.startswith(GENERAL_BRIEFING.strip())
     settings, mode = b.out.strip().rsplit("\n", 1)
     assert (json.loads(settings), mode) == ({}, "root 444")
 
@@ -211,6 +215,7 @@ def test_github_auth_logs_gh_in_with_the_minted_token(image):
                                   "auth setup-git --hostname github.com",
                                   "", "!GH_TOKEN=$(cat /run/credentials/github-token-all) /usr/bin/gh auth git-credential",
                                   "", "!/usr/bin/gh auth git-credential"]
+    assert b.briefing.startswith(GENERAL_BRIEFING)  # the plugins' briefings follow the general one
     assert "gh pr create" in b.briefing and "until every check is green" in b.briefing and "github-token-all" in b.briefing
 
 

@@ -16,8 +16,9 @@ export const deleteSession = (id: string, tidy: string[]) => post<{ failed?: str
 
 // A chat.
 export const eventsUrl = (id: string) => session(id) + '/events';
-export const sendPrompt = (id: string, text: string, images?: Picture[], files?: Upload[]) =>
-  post(session(id) + '/prompt', { text, images, files });
+/** `nonce` names the message: the server's event for it carries it, and it is taken once however often it is sent. */
+export const sendPrompt = (id: string, text: string, images?: Picture[], files?: Upload[], nonce?: string) =>
+  post(session(id) + '/prompt', { text, images, files, nonce });
 export const sendAnswer = (id: string, ask: string, reply: { answers: Answers } | { cancel: true }) =>
   post(session(id) + '/answer', { id: ask, ...reply });
 /** Stops the agent's turn: the conversation's, or with `side` that side chat's. */
@@ -29,6 +30,8 @@ export const closeSide = (id: string, side: string) => post(session(id) + '/side
 export const chooseModel = (id: string, model: string) => post(session(id) + '/model', { id: model });
 export const chooseEffort = (id: string, level: string) => post(session(id) + '/effort', { level });
 export const stopTask = (id: string, task: string) => post(session(id) + '/task', { id: task });
+/** Sends the task a tool call waits on to the background: the call returns, the task runs on. */
+export const backgroundTask = (id: string, call: string) => post(session(id) + '/background', { id: call });
 /** What a plugin's command (web_command) says about the session's run: null where it has none. */
 export const askPlugin = <T>(id: string, plugin: string, name: string) =>
   api<{ result: T | null }>(`${session(id)}/plugins/${plugin}/${name}`).then(r => r.result);

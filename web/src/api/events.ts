@@ -71,12 +71,14 @@ export type ChatEvent = { side?: string } & (
   | { type: 'boot'; text: string }
   | { type: 'hello'; agent: string }
   | ({ type: 'ready' } & AgentInfo)
-  | { type: 'user'; text: string; id?: string; images?: Picture[]; files?: string[]; queued?: boolean }
+  | { type: 'user'; text: string; id?: string; images?: Picture[]; files?: string[]; queued?: boolean; nonce?: string }
   | { type: 'sent'; id: string }
   | { type: 'text' | 'delta'; id: string; kind?: 'text' | 'thinking'; text: string; parent?: string }
   | { type: 'tool'; id: string; name?: string; title?: string; input?: ToolInput; parent?: string; done?: boolean; output?: unknown; error?: boolean; partial?: boolean }
   | { type: 'result'; id: string; output?: unknown; error?: boolean; done?: boolean; partial?: boolean }
   | { type: 'progress'; id: string; seconds?: number; text?: string }
+  /** The tool call `id` waits on a task (a shell command, a subagent): it can go to the background, or be stopped. */
+  | { type: 'foreground'; id: string; task: string }
   | AskEvent
   | { type: 'asked'; id: string }
   | { type: 'turn'; duration?: number; cost?: number; context?: { used: number; max: number }; error?: string }

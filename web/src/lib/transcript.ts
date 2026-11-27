@@ -11,13 +11,23 @@ interface Base {
   /** What holds it: the subagent call it belongs to, or the box a tool call is in. */
   up: ToolRecord | ToolsRecord | null;
 }
-export interface YouRecord extends Base { kind: 'you'; text: string; images?: Picture[]; files?: string[]; queued: boolean }
+export interface YouRecord extends Base {
+  kind: 'you'; text: string; images?: Picture[]; files?: string[]; queued: boolean;
+  /** The page's own name for a message it sent: the server's event for it says so. */
+  nonce?: string;
+  /** On its way to the server, shown already. */
+  sending?: boolean;
+  /** Why it could not be sent, if it could not. */
+  failed?: string;
+}
 export interface SayRecord extends Base { kind: 'say'; text: string; streaming: boolean }
 export interface ThinkRecord extends Base { kind: 'think'; text: string; streaming: boolean }
 /** A run of tool calls, in one box. */
 export interface ToolsRecord extends Base { kind: 'tools'; list: ToolRecord[] }
 export interface ToolRecord extends Base {
   kind: 'tool';
+  /** The call's id, as the agent gave it. */
+  call: string;
   name?: string;
   title?: string;
   input?: ToolInput;
@@ -28,6 +38,8 @@ export interface ToolRecord extends Base {
   progress: string;
   done: boolean;
   error: boolean;
+  /** The task the call waits on, while it can be sent to the background or stopped. */
+  task?: string;
 }
 export interface AskRecord extends Base { kind: 'ask'; e: AskEvent; settled: boolean; answers?: Answers }
 export interface TurnRecord extends Base { kind: 'turn'; text: string }
@@ -78,6 +90,9 @@ export class Transcript {
   private tools = new Map<string, ToolRecord>();
   private asks = new Map<string, AskRecord>();
   private users = new Map<string, YouRecord>();
+  /** What this page sent, by nonce, until the server has it: shown from the moment it was sent. */
+  private outbox = new Map<string, YouRecord>();
+  private restoring = false;
   private uid = 0;
 
   /** The whole session from nothing: on opening the page, and whenever the stream reconnects. */
@@ -87,6 +102,7 @@ export class Transcript {
     this.tools.clear();
     this.asks.clear();
     this.users.clear();
+    const unsent = [...this.outbox.values()];
     this.boot = null;
     this.over = null;
     this.session = snap.session;
@@ -94,8 +110,12 @@ export class Transcript {
     this.ready = snap.ready;
     this.status = snap.status;
     this.bootLine('');
+    this.restoring = true;
     for (const e of snap.events) this.handle(e);
+    this.restoring = false;
     for (const b of this.blocks.values()) b.streaming = false;
+    // What is still on its way, or could not go, stays at the end: the server knows nothing of it yet.
+    for (const r of unsent) if (this.outbox.get(r.nonce!) === r) { r.up = null; this.log.push(r); touch(r); }
     this.todos = snap.todos;
     this.tasks = snap.tasks ?? [];
     this.wantsFollow = true;
@@ -135,6 +155,7 @@ export class Transcript {
       case 'tool': this.settleBlocks(); this.tool(e); break;
       case 'result': this.result(e); break;
       case 'progress': this.progress(e); break;
+      case 'foreground': { const t = this.tools.get(e.id); if (t && !t.done) { t.task = e.task; touch(t); } break; }
       case 'ask': this.settleBlocks(); this.ask(e); break;
       case 'asked': { const a = this.asks.get(e.id); if (a && !a.settled) this.settled(a, a.e.answers); break; }
       case 'turn': this.settleBlocks(); this.turn(e); break;
@@ -181,12 +202,47 @@ export class Transcript {
     }
   }
 
+  /** A message this page sends: in the column at once, turning until the server has it. */
+  outgoing(nonce: string, text: string, images: Picture[], files: string[]): void {
+    const r = this.place(this.record<YouRecord>('you', {
+      text, images: images.length ? images : undefined, files: files.length ? files : undefined, queued: false, nonce, sending: true }));
+    this.outbox.set(nonce, r);
+    this.wantsFollow = true;
+  }
+
+  /** It could not be sent (`why`), or is on its way again (null). */
+  sendFailed(nonce: string, why: string | null): void {
+    const r = this.outbox.get(nonce);
+    if (!r) return;
+    r.sending = why === null;
+    r.failed = why ?? undefined;
+    touch(r);
+  }
+
+  /** A message that could not be sent, taken out of the column (to be written again). */
+  unsend(nonce: string): void {
+    const r = this.outbox.get(nonce);
+    if (!r || r.sending) return;
+    this.outbox.delete(nonce);
+    const at = this.log.indexOf(r);
+    if (at >= 0) this.log.splice(at, 1);
+  }
+
   private user(e: Extract<ChatEvent, { type: 'user' }>): void {
-    const r = this.place(this.record<YouRecord>('you', { text: e.text, images: e.images, files: e.files, queued: !!e.queued }));
-    if (e.id) this.users.set(e.id, r);
     // It is called what it was first asked.
     this.title ||= e.text.replace(/\s+/g, ' ').slice(0, 140) || (e.files?.length ? 'File' : 'Image');
     if (this.session && !this.session.title) this.session.title = this.title;
+    // A message of this page's, already shown: the server has it now.
+    const mine = e.nonce !== undefined ? this.outbox.get(e.nonce) : undefined;
+    if (mine) this.outbox.delete(e.nonce!);
+    if (mine && !this.restoring) {  // (a restore draws the column anew: the server's event takes its place)
+      Object.assign(mine, { images: e.images ?? mine.images, files: e.files ?? mine.files, queued: !!e.queued, sending: false, failed: undefined });
+      if (e.id) this.users.set(e.id, mine);
+      touch(mine);
+      return;
+    }
+    const r = this.place(this.record<YouRecord>('you', { text: e.text, images: e.images, files: e.files, queued: !!e.queued }));
+    if (e.id) this.users.set(e.id, r);
     this.wantsFollow = true;
   }
 
@@ -214,7 +270,7 @@ export class Transcript {
       const into = (e.parent !== undefined && this.tools.get(e.parent)?.kids) || this.log;
       let box = into[into.length - 1];
       if (box?.kind !== 'tools') box = this.place(this.record<ToolsRecord>('tools', { list: [] }), e.parent);
-      t = this.record<ToolRecord>('tool', { up: box, kids: [], out: '', took: '', progress: '', done: false, error: false });
+      t = this.record<ToolRecord>('tool', { up: box, call: e.id, kids: [], out: '', took: '', progress: '', done: false, error: false });
       box.list.push(t);
       this.tools.set(e.id, t);
     }
@@ -227,6 +283,7 @@ export class Transcript {
     const t = this.tools.get(e.id);
     if (!t) return;
     t.done = e.done ?? !e.partial;
+    if (t.done) t.task = undefined;
     t.error = !!e.error;
     t.out = String(e.output ?? '').replace(/\s+$/, '');
     touch(t);
@@ -242,7 +299,7 @@ export class Transcript {
 
   // Nothing still runs once a turn, or the session, is over.
   private finish(error = false): void {
-    for (const t of this.tools.values()) if (!t.done) { t.done = true; t.error ||= error; touch(t); }
+    for (const t of this.tools.values()) if (!t.done) { t.done = true; t.task = undefined; t.error ||= error; touch(t); }
   }
 
   private ask(e: AskEvent): void {

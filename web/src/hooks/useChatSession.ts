@@ -28,8 +28,13 @@ export interface ChatSession {
   resume: () => Promise<void>;
   interrupt: () => Promise<void>;
   answer: (ask: string, reply: { answers: Answers } | { cancel: true }) => void;
-  /** Sends a message; throws when it could not be sent. */
-  send: (text: string, images: Picture[], files: Upload[]) => Promise<unknown>;
+  /** Sends a message: in the column at once, marked there if it could not be sent. */
+  send: (text: string, images: Picture[], files: Upload[]) => void;
+  /** Sends again a message that could not be sent. */
+  resend: (nonce: string) => void;
+  /** Takes back a message that could not be sent: what it said and carried, to write again. */
+  unsend: (nonce: string) => Outgoing | null;
+  background: (call: string) => Promise<unknown>;
   choose: (what: 'model' | 'effort', value: string) => void;
   stopTask: (task: string) => Promise<unknown>;
   /** Asks in a side chat (a new one for null) and says which it was; throws when it could not be sent. */
@@ -38,6 +43,11 @@ export interface ChatSession {
   interruptSide: (side: string) => void;
 }
 
+/** A message as the page sends it. */
+export interface Outgoing { text: string; images: Picture[]; files: Upload[] }
+
+const nonce = () => crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
 export function useChatSession(id: string): ChatSession {
   const [transcript] = useState(() => new Transcript());
   const [version, update] = useReducer((n: number) => n + 1, 0);
@@ -45,6 +55,7 @@ export function useChatSession(id: string): ChatSession {
   const [gone, setGone] = useState(false);
   const [halting, setHalting] = useState(false);
   const described = useRef(false);
+  const outbox = useRef(new Map<string, Outgoing>());  // what was sent and not yet taken, to send again
 
   const leave = useCallback(() => {
     dispatchEvent(new Event(LEAVE));
@@ -99,6 +110,16 @@ export function useChatSession(id: string): ChatSession {
     setHalting(false);
   }, [id]);
 
+  // A message to the server, under its nonce: taken, or marked as not sent.
+  const deliver = useCallback((n: string) => {
+    const out = outbox.current.get(n);
+    if (!out) return;
+    const { text, images, files } = out;
+    server.sendPrompt(id, text, images.length ? images : undefined, files.length ? files : undefined, n).then(
+      () => { outbox.current.delete(n); },
+      e => { transcript.sendFailed(n, message(e)); update(); });
+  }, [id, transcript]);
+
   const actions = useMemo(() => ({
     stop: async () => {
       if (transcript.session && await stopAfterAsking(transcript.session, 'Stop this session?')) await poll();
@@ -127,8 +148,27 @@ export function useChatSession(id: string): ChatSession {
       update();
       server.sendAnswer(id, ask, reply).catch(e => alert(message(e)));
     },
-    send: (text: string, images: Picture[], files: Upload[]) =>
-      server.sendPrompt(id, text, images.length ? images : undefined, files.length ? files : undefined),
+    send: (text: string, images: Picture[], files: Upload[]) => {
+      const n = nonce();
+      outbox.current.set(n, { text, images, files });
+      transcript.outgoing(n, text, images, files.map(f => f.name));
+      update();
+      deliver(n);
+    },
+    resend: (n: string) => {
+      transcript.sendFailed(n, null);
+      update();
+      deliver(n);
+    },
+    unsend: (n: string) => {
+      const out = outbox.current.get(n);
+      if (!out) return null;
+      outbox.current.delete(n);
+      transcript.unsend(n);
+      update();
+      return out;
+    },
+    background: (call: string) => server.backgroundTask(id, call),
     choose: (what: 'model' | 'effort', value: string) => {
       transcript.chosen[what] = value;
       update();
@@ -142,7 +182,7 @@ export function useChatSession(id: string): ChatSession {
     askSide: (side: string | null, text: string) => server.askSide(id, side, text),
     closeSide: (side: string) => void server.closeSide(id, side).catch(e => alert(message(e))),
     interruptSide: (side: string) => void server.interruptSession(id, side).catch(e => alert(message(e))),
-  }), [id, transcript, poll, leave]);
+  }), [id, transcript, poll, leave, deliver]);
 
   return { transcript, version, items, gone, halting, interrupt, ...actions };
 }

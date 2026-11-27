@@ -368,7 +368,10 @@ const done = commands(async c => {
   } else if (c.type === 'answer') {
     asking.answer(c);
   } else if (c.type === 'task' && typeof c.id === 'string') {
-    await q.stopTask(c.id);  // a background task, stopped: the list says so once it is gone
+    await q.stopTask(c.id);  // a task, stopped: a background one leaves the list, a foreground one's call ends
+  } else if (c.type === 'background' && typeof c.id === 'string') {
+    // The call the turn waits on returns at once; its task runs on, in the background list.
+    try { await q.backgroundTasks(c.id); } catch (e) { emit({ type: 'notice', level: 'warning', text: `Could not run it in the background: ${e.message}` }); }
   } else if (c.type === 'model' && typeof c.id === 'string') {
     await q.setModel(c.id);
     emit({ type: 'model', id: c.id });
@@ -438,6 +441,9 @@ try {
       else if (m.subtype === 'background_tasks_changed') {
         running = (m.tasks || []).filter(t => !t.ambient);  // housekeeping is not work
         background();
+      } else if (m.subtype === 'task_started' && m.is_backgrounded === false && m.tool_use_id && !m.ambient) {
+        // A shell command or subagent its call waits on: the page offers to background or stop it.
+        emit({ type: 'foreground', id: m.tool_use_id, task: m.task_id });
       } else if (m.subtype === 'task_progress' && m.summary) {
         if (m.tool_use_id) emit({ type: 'progress', id: m.tool_use_id, text: m.summary });
         if (running.some(t => t.task_id === m.task_id) && lines.get(m.task_id) !== m.summary) {

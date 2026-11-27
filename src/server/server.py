@@ -618,18 +618,25 @@ class Chat(Session):
     def _send(self, command):
         self._ctl({"in": base64.b64encode(json.dumps(command).encode() + b"\n").decode()})
 
-    def prompt(self, text, images=None, files=None):
+    def prompt(self, text, images=None, files=None, nonce=None):
         """A message of the user's, with the pictures pasted into it and the files attached: to the
-        agent at once, or kept until it is ready. Of a file, the page's events keep only its name."""
+        agent at once, or kept until it is ready. Of a file, the page's events keep only its name.
+        `nonce`, the page's own name for the message, goes on its event: the page knows it as the
+        one it already shows, and a message sent again under it (the page could not tell it
+        arrived) is taken once."""
         images, files = pictures(images), uploads(files)
         if not isinstance(text, str) or not (text.strip() or images or files):
             raise ValueError("a prompt is text")
+        if nonce is not None and not (isinstance(nonce, str) and 0 < len(nonce) <= 64):
+            raise ValueError("a nonce is a short string")
         with lock:
             if self.exit is not None:
                 raise ValueError("this session has ended: resume it to go on")
+            if nonce and any(e.get("nonce") == nonce for e in self.events if e["type"] == "user"):
+                return
             self.sent += 1
             event = {"type": "user", "id": f"u{self.sent}", "text": text, **({"images": images} if images else {}),
-                     **({"files": [f["name"] for f in files]} if files else {})}
+                     **({"files": [f["name"] for f in files]} if files else {}), **({"nonce": nonce} if nonce else {})}
             self.title = self.title or " ".join(text.split())[:140] or ("File" if files and not images else "Image")
             command = {"type": "prompt", "text": text, **({"images": images} if images else {}), **({"files": files} if files else {})}
             self.finished = False
@@ -643,7 +650,7 @@ class Chat(Session):
             self._tell({"type": "status", "state": self.status()})
 
     def tell(self, command):
-        """interrupt, answer, model, effort, task: straight to the bridge, which knows what they mean."""
+        """interrupt, answer, model, effort, task, background: straight to the bridge, which knows what they mean."""
         with lock:
             if command.get("type") == "answer":
                 for ask in self.events:
@@ -1740,7 +1747,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(200, {})
             elif url.path == "/api/sync":
                 self.reply(200, sync(self.server.bind))
-            elif m := re.fullmatch(r"/api/sessions/(\w+)/(prompt|interrupt|answer|model|effort|task|side)", url.path):
+            elif m := re.fullmatch(r"/api/sessions/(\w+)/(prompt|interrupt|answer|model|effort|task|background|side)", url.path):
                 s = self.session(m[1])
                 if s is None:
                     return
@@ -1752,7 +1759,7 @@ class Handler(BaseHTTPRequestHandler):
                 if m[2] == "side":
                     return self.reply(200, {"id": s.side(req.get("id"), req.get("text"), bool(req.get("close")))})
                 if m[2] == "prompt":
-                    s.prompt(req.get("text"), req.get("images"), req.get("files"))
+                    s.prompt(req.get("text"), req.get("images"), req.get("files"), req.get("nonce"))
                 else:  # only the fields a bridge reads, under the name the path gave
                     s.tell({"type": m[2], **{k: req[k] for k in ("id", "answers", "cancel", "level", "side") if k in req}})
                 self.reply(200, {})

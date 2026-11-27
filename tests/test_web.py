@@ -894,6 +894,33 @@ def test_a_chat_lists_what_runs_in_the_background_and_stops_one_on_request(chat)
     assert s.tasks == []  # nothing runs once it has ended
 
 
+def test_a_call_the_agent_waits_on_can_be_sent_to_the_background_or_stopped(chat):
+    s = chat()
+    chat.until(s, lambda s: s.ready)
+    s.prompt("a long one")
+    chat.until(s, lambda s: any(e["type"] == "foreground" for e in s.events))
+    assert [e for e in s.snapshot()["events"] if e["type"] == "foreground"] == [{"type": "foreground", "id": "b1", "task": "fg1"}]
+    s.tell({"type": "background", "id": "b1"})  # the call returns, its task runs on in the background
+    chat.until(s, lambda s: [t["id"] for t in s.tasks] == ["fg1"] and s.status() == "idle")
+    assert next(e for e in s.events if e["type"] == "tool" and e["id"] == "b1")["done"] is True
+    s.prompt("another long one")
+    chat.until(s, lambda s: any(e["type"] == "foreground" and e["id"] == "b2" for e in s.events))
+    s.tell({"type": "task", "id": "fg2"})  # stopped: the call ends as failed, the turn goes on
+    chat.until(s, lambda s: s.status() == "idle" and next(e for e in s.events if e.get("id") == "b2")["done"])
+    assert next(e for e in s.events if e["type"] == "tool" and e["id"] == "b2")["error"] is True
+
+
+def test_a_prompt_sent_again_under_the_same_nonce_is_taken_once(chat):
+    s = chat()
+    chat.until(s, lambda s: s.ready)
+    s.prompt("once", nonce="n-1")
+    s.prompt("once", nonce="n-1")  # the page could not tell it arrived, and tried again
+    users = [e for e in s.events if e["type"] == "user"]
+    assert [(e["text"], e["nonce"]) for e in users] == [("once", "n-1")]
+    with pytest.raises(ValueError):
+        s.prompt("x", nonce=["not", "a", "string"])
+
+
 def test_a_prompt_takes_the_images_pasted_into_it(chat, monkeypatch):
     monkeypatch.setenv("STUB_BOOT", "0.2")
     picture = {"type": "image/png", "data": PNG}

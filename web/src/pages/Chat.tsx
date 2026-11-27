@@ -8,7 +8,7 @@ import { BackgroundTasks } from '../components/chat/BackgroundTasks';
 import { Boot } from '../components/chat/Boot';
 import { ChatContext, type ChatActions } from '../components/chat/ChatContext';
 import { ChatHeader } from '../components/chat/ChatHeader';
-import { Composer } from '../components/chat/Composer';
+import { Composer, type ComposerHandle } from '../components/chat/Composer';
 import { Entries } from '../components/chat/Entries';
 import { Pane, PaneToggle } from '../components/chat/Pane';
 import { Plan } from '../components/chat/Plan';
@@ -70,8 +70,15 @@ export default function Chat() {
   });
   const slot = (part: 'bar' | 'actions' | 'aside') => parts.map(p => <Fragment key={p.name}>{p[part]}</Fragment>);
 
-  const { answer, resume, stopTask } = chat;
-  const actions = useMemo<ChatActions>(() => ({ answer, resume, stopTask }), [answer, resume, stopTask]);
+  const composer = useRef<ComposerHandle>(null);
+  const { answer, resume, stopTask, background, resend, unsend } = chat;
+  const actions = useMemo<ChatActions>(() => ({
+    answer, resume, stopTask, background, resend,
+    edit: (nonce: string) => {
+      const out = unsend(nonce);
+      if (out) composer.current?.put(out.text, out.images, out.files);
+    },
+  }), [answer, resume, stopTask, background, resend, unsend]);
   const chips = [...chat.items, ...(session?.items ?? []).map(here)];
 
   const left = usePane('left', 300, 200, 560), right = usePane('right', 380, 280, 720);
@@ -107,7 +114,7 @@ export default function Chat() {
           <Plan items={t.todos} />
           <Composer session={id} info={info} model={t.chosen.model ?? info.model} effort={t.chosen.effort ?? info.effort}
             ready={ready} ended={over !== null} working={working} halting={halting}
-            onSend={chat.send} onInterrupt={interrupt} onModel={m => chat.choose('model', m)} onEffort={l => chat.choose('effort', l)} />
+            onSend={chat.send} handle={composer} onInterrupt={interrupt} onModel={m => chat.choose('model', m)} onEffort={l => chat.choose('effort', l)} />
         </div>
       </footer>
       <Pane side="left" what="changed files" pane={left}>{slot('aside')}</Pane>

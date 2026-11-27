@@ -25,6 +25,11 @@ const ICONS = {
   sync: { body: stroke('M16 10a6 6 0 0 1-10.6 3.9M4 10a6 6 0 0 1 10.6-3.9M15 2.5v3.8h-3.8M5 17.5v-3.8h3.8', 1.8) },
   clip: { body: stroke('M15.5 9.5 9.6 15.4a3.5 3.5 0 0 1-5-5l6.4-6.4a2.3 2.3 0 0 1 3.3 3.3L7.9 13.7a1.2 1.2 0 0 1-1.7-1.7L12 6.2', 1.8) },
   send: { body: stroke('M10 16V4M4.5 9.5 10 4l5.5 5.5', 2.2) },
+  // Down into a tray: what goes on below, out of the way.
+  tray: { body: stroke('M10 3.5v7.5M6.5 7.5 10 11l3.5-3.5M3.5 12.5v2a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-2', 1.8) },
+  retry: { body: stroke('M4 10a6 6 0 1 0 1.8-4.3M4 3.5v3.2h3.2', 1.9) },
+  edit: { body: stroke('M12.5 4.5l3 3L8 15H5v-3l7.5-7.5z', 1.8) },
+  alert: { body: <><circle cx="10" cy="10" r="7.5" fill="currentColor" /><path d="M10 6v4.6M10 13.6v.01" stroke="var(--panel, #fff)" strokeWidth="2" strokeLinecap="round" /></> },
   key: { body: <>{stroke('M9.6 10.4 16 4M13.6 6.4l2 2M11.6 8.4l1.6 1.6', 1.8)}<circle cx="6.8" cy="13.2" r="3.3" fill="none" stroke="currentColor" strokeWidth="1.8" /></> },
   hosts: { body: stroke('M4.5 3.5h11a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1zM4.5 11.5h11a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1zM6.5 6h.01M6.5 14h.01', 1.8) },
   upload: { body: stroke('M10 12.5V3.5M6.5 7 10 3.5 13.5 7M3.5 12v2.5a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V12', 1.8) },

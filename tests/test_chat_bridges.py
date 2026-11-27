@@ -178,6 +178,26 @@ def test_claudes_background_tasks_are_listed_whole_each_time_and_one_can_be_stop
     b.close()
 
 
+def test_claudes_foreground_tasks_say_which_call_they_hold_and_one_can_be_sent_to_the_background(tmp_path):
+    b = Bridge("claude", tmp_path, [
+        {"type": "assistant", "parent_tool_use_id": None, "message": {"id": "m1", "content": [
+            {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "npm test"}}]}},
+        {"type": "system", "subtype": "task_started", "task_id": "s1", "tool_use_id": "t1", "description": "npm test",
+         "task_type": "local_bash", "is_backgrounded": False},
+        {"type": "system", "subtype": "task_started", "task_id": "s2", "tool_use_id": "t2", "description": "npm run dev",
+         "task_type": "local_bash", "is_backgrounded": True},  # in the background from the start: nothing to hold
+        {"type": "result", "subtype": "success", "is_error": False, "total_cost_usd": 0, "duration_ms": 1, "result": ""}])
+    b.until(lambda e: e["type"] == "ready")
+    b.say(type="prompt", text="test it")
+    b.until(lambda e: e["type"] == "turn")
+    assert of(b.events, "foreground") == [{"type": "foreground", "id": "t1", "task": "s1"}]
+    b.say(type="background", id="t1")
+    b.say(type="effort", level="low")
+    b.until(lambda e: e["type"] == "effort")
+    assert b.calls()[-2:] == [{"backgroundTasks": "t1"}, {"settings": {"effortLevel": "low"}}]
+    b.close()
+
+
 def test_images_pasted_into_a_prompt_reach_each_agent_as_its_sdk_takes_them(tmp_path):
     picture = {"type": "image/png", "data": PNG}
     turn = [{"type": "result", "subtype": "success", "is_error": False, "total_cost_usd": 0, "duration_ms": 1, "result": ""}]

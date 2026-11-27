@@ -1,5 +1,4 @@
-import { useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { message } from '../../api/client';
+import { useImperativeHandle, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from 'react';
 import type { AgentInfo, Command } from '../../api/events';
 import type { Picture, Upload } from '../../api/types';
 import { useAutoGrow } from '../../hooks/useAutoGrow';
@@ -24,12 +23,18 @@ interface Props {
   working: boolean;
   /** An interrupt is on its way. */
   halting: boolean;
-  /** Sends a message; throws when it could not be sent. */
-  /** Pictures go to the model as such; any other file is saved in the sandbox and named in the message. */
-  onSend: (text: string, images: Picture[], files: Upload[]) => Promise<unknown>;
+  /** Sends a message: the column shows it at once, and whether it went. Pictures go to the model
+   *  as such; any other file is saved in the sandbox and named in the message. */
+  onSend: (text: string, images: Picture[], files: Upload[]) => void;
+  /** Puts a message back into the field (one taken back to be changed). */
+  handle?: Ref<ComposerHandle>;
   onInterrupt: () => void;
   onModel: (id: string) => void;
   onEffort: (level: string) => void;
+}
+
+export interface ComposerHandle {
+  put: (text: string, images: Picture[], files: Upload[]) => void;
 }
 
 const touchScreen = matchMedia('(pointer: coarse)').matches;  // a soft keyboard's Enter is a new line; the button sends
@@ -54,7 +59,7 @@ function matching(commands: Command[], typed: string): Command[] {
 
 /** Where the next message is written: the field, pasted pictures over it, the agent's commands
  *  as a slash is typed, its model and effort, and the buttons that send and interrupt. */
-export function Composer({ session, info, model, effort, ready, ended, working, halting, onSend, onInterrupt, onModel, onEffort }: Props) {
+export function Composer({ session, info, model, effort, ready, ended, working, halting, onSend, handle, onInterrupt, onModel, onEffort }: Props) {
   const input = useRef<HTMLTextAreaElement>(null), form = useRef<HTMLFormElement>(null), picker = useRef<HTMLInputElement>(null);
   const pictures = usePastedImages();
   const [typed, setTyped] = useState<string | null>(null);  // the name after a lone slash, while that is all there is
@@ -69,6 +74,17 @@ export function Composer({ session, info, model, effort, ready, ended, working, 
     grow();
     el.focus();
   }, [session, grow]);
+
+  useImperativeHandle(handle, () => ({
+    put: (text, images, files) => {
+      const el = input.current!;
+      el.value = text;
+      draft(session).set(text);
+      pictures.put([...images, ...files.map(f => ({ type: 'application/octet-stream', name: f.name, data: f.data }))]);
+      grow();
+      el.focus();
+    },
+  }), [session, pictures, grow]);
 
   const offered = typed === null || closed ? [] : matching(info.commands ?? [], typed);
   const waiting = typed !== null && !closed && !ready && !offered.length;
@@ -109,7 +125,7 @@ export function Composer({ session, info, model, effort, ready, ended, working, 
       form.current!.requestSubmit();
     }
   };
-  const submit = async (e: FormEvent) => {
+  const submit = (e: FormEvent) => {
     e.preventDefault();
     const el = input.current!, text = el.value;
     if (!(text.trim() || pictures.count()) || ended) return;
@@ -118,15 +134,8 @@ export function Composer({ session, info, model, effort, ready, ended, working, 
     kept.set('');
     setClosed(true);
     grow();
-    try {
-      await onSend(text, held.filter(p => PICTURE.test(p.type)).map(({ type, data }) => ({ type, data })),
-        held.filter(p => !PICTURE.test(p.type)).map(p => ({ name: p.name ?? 'file', data: p.data })));
-    } catch (err) {  // not sent: back in the field, to try again
-      el.value = text;
-      pictures.put(held);
-      grow();
-      alert(message(err));
-    }
+    onSend(text, held.filter(p => PICTURE.test(p.type)).map(({ type, data }) => ({ type, data })),
+      held.filter(p => !PICTURE.test(p.type)).map(p => ({ name: p.name ?? 'file', data: p.data })));
   };
 
   return (

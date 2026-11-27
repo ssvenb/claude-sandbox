@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import type { Entry as Record, OverRecord, YouRecord } from '../../lib/transcript';
 import { BusyButton } from '../common/BusyButton';
+import { Icon } from '../common/Icon';
 import { SentImages } from '../common/Pictures';
 import { Spin } from '../common/Spinner';
 import { useChatActions } from './ChatContext';
@@ -8,13 +9,28 @@ import { Markdown } from './Markdown';
 import { Question } from './Question';
 import { ToolCall } from './ToolCall';
 
-/** What you said, with the pictures that went along. Still waiting for the sandbox: dashed. */
-function UserMessage({ message }: { message: YouRecord }) {
+/** What you said, with the pictures that went along. On its way to the server: faint, a ring
+ *  turning under it. Could not be sent: marked, and why, with a way to send it again or change it.
+ *  Still waiting for the sandbox: dashed. */
+function UserMessage({ message: m }: { message: YouRecord }) {
+  const { resend, edit } = useChatActions();
+  const state = m.failed !== undefined ? 'failed' : m.sending ? 'sending' : m.queued ? 'queued' : '';
   return (
-    <div className={'you' + (message.queued ? ' queued' : '')}>
-      {!!(message.images?.length || message.files?.length) && <SentImages images={message.images} files={message.files} />}
-      {message.text}
-    </div>
+    <>
+      <div className={'you' + (state && ' ' + state)}>
+        {state === 'failed' && <span className="alert"><Icon name="alert" /></span>}
+        {!!(m.images?.length || m.files?.length) && <SentImages images={m.images} files={m.files} />}
+        {m.text}
+      </div>
+      {state === 'sending' && <div className="sent-state sending" role="status"><Spin />Sending…</div>}
+      {state === 'failed' && (
+        <div className="sent-state failed" role="alert">
+          <span className="why"><b>Not sent</b>{m.failed && <> · {m.failed}</>}</span>
+          <button type="button" className="pill" onClick={() => resend(m.nonce!)}><Icon name="retry" />Retry</button>
+          <button type="button" className="pill quiet" onClick={() => edit(m.nonce!)}><Icon name="edit" />Edit</button>
+        </div>
+      )}
+    </>
   );
 }
 

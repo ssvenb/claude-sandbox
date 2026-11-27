@@ -10,7 +10,7 @@ that thinks, runs tools and answers. What the prompt says picks the turn:
 
     "ask"   it asks a question with two choices and says which was picked
     "fail"  a tool fails and the turn ends in an error
-    "long"  it keeps working until interrupted
+    "long"  it waits on a command until interrupted, the command is stopped or sent to the background
     "background"  it leaves two tasks running in the background, until each is stopped
     "exit"  the sandbox goes away with status 3
 
@@ -89,6 +89,7 @@ emit(type="ready", agent="claude", sides=True, version="9.9.9", model="fable", e
 emit(type="status", state="idle")
 
 stop = threading.Event()
+held = {"call": None}  # the call a "long" turn waits on, and why it stopped waiting
 answers = {}
 tasks = []  # what runs in the background
 turns = 0
@@ -108,10 +109,22 @@ def turn(text):
         os._exit(3)
     if "long" in text:
         emit(type="tool", id=f"b{n}", name="Bash", input={"command": "sleep 600", "description": "Wait a long time"})
+        held.update(call=f"b{n}", task=f"fg{n}", why=None)
+        emit(type="foreground", id=f"b{n}", task=f"fg{n}")
         stop.wait()
         stop.clear()
-        emit(type="result", id=f"b{n}", output="Interrupted", error=True)
-        emit(type="notice", level="info", text="Interrupted.")
+        why, held["call"] = held["why"], None
+        if why == "background":
+            emit(type="result", id=f"b{n}", output="Command running in background with ID: " + f"fg{n}", error=False)
+            tasks.append({"id": f"fg{n}", "kind": "shell", "text": "Wait a long time"})
+            emit(type="tasks", items=tasks)
+            say(f"a{n}", "It runs on in the background.")
+        elif why == "stopped":
+            emit(type="result", id=f"b{n}", output="Stopped", error=True)
+            say(f"a{n}", "The command was stopped.")
+        else:
+            emit(type="result", id=f"b{n}", output="Interrupted", error=True)
+            emit(type="notice", level="info", text="Interrupted.")
     elif "background" in text:
         emit(type="tool", id=f"b{n}", name="Bash", input={"command": "npm run dev", "run_in_background": True})
         emit(type="result", id=f"b{n}", output="Command running in background", error=False)
@@ -198,6 +211,12 @@ for line in sys.stdin:
         answers[command["id"]] = None if command.get("cancel") else command.get("answers")
     elif command["type"] in ("model", "effort"):
         emit(**command)
+    elif command["type"] == "background" and command.get("id") == held["call"]:
+        held["why"] = "background"
+        stop.set()
+    elif command["type"] == "task" and command.get("id") == held.get("task") and held["call"]:
+        held["why"] = "stopped"
+        stop.set()
     elif command["type"] == "task":
         tasks[:] = [t for t in tasks if t["id"] != command["id"]]
         emit(type="tasks", items=tasks)

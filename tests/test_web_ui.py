@@ -562,6 +562,57 @@ def test_a_chat_offers_the_agents_commands_and_models_and_can_interrupt_it(board
                     {"type": "prompt", "text": "a long task\nover two lines"}, {"type": "interrupt"}]
 
 
+def test_a_call_the_agent_waits_on_can_be_sent_to_the_background_or_stopped_where_it_runs(board):
+    tab = opens_tab(board, lambda: board.click("button[aria-label='New session']"))
+    tab.fill("#input", "a long one")
+    tab.keyboard.press("Enter")
+    running = ".tool.running:has-text('sleep 600')"
+    tab.wait_for_selector(f"{running} button[aria-label='Run in the background']")
+    assert tab.is_visible(f"{running} button[aria-label='Stop it']")
+    tab.click(f"{running} button[aria-label='Run in the background']")  # not the line's own click: it stays folded
+    tab.wait_for_selector(".tool.done:has-text('sleep 600')")
+    assert tab.locator(".tool details[open], .tool[open]").count() == 0
+    tab.wait_for_selector("#tasks summary:has-text('1 running')")  # it runs on, down there
+    assert tab.locator(".tool button[aria-label='Run in the background']").count() == 0  # nothing left to hold
+    tab.wait_for_selector("header .state.idle")
+
+    tab.fill("#input", "another long one")
+    tab.keyboard.press("Enter")
+    tab.wait_for_selector(f"{running} button[aria-label='Stop it']")
+    tab.click(f"{running} button[aria-label='Stop it']")
+    tab.wait_for_selector(".tool.failed:has-text('sleep 600')")
+    tab.wait_for_selector(".say:has-text('The command was stopped.')")
+    sent = [json.loads(line) for line in board.commands.read_text().splitlines()]
+    assert sent == [{"type": "prompt", "text": "a long one"}, {"type": "background", "id": "b1"},
+                    {"type": "prompt", "text": "another long one"}, {"type": "task", "id": "fg2"}]
+
+
+def test_a_message_shows_at_once_turns_while_it_goes_and_can_be_sent_again_when_it_could_not(board):
+    tab = opens_tab(board, lambda: board.click("button[aria-label='New session']"))
+    tab.wait_for_selector(".boot.ok")
+    held = []
+    tab.route("**/prompt", lambda r: held.append(r))  # the server does not answer, for now
+    tab.fill("#input", "hello there")
+    tab.keyboard.press("Enter")
+    tab.wait_for_selector(".you.sending:has-text('hello there') + .sent-state.sending .spin")  # in the column at once, turning
+    assert tab.input_value("#input") == ""
+    held[0].fulfill(status=503, content_type="application/json", body='{"error": "the server is away"}')
+    tab.wait_for_selector(".you.failed:has-text('hello there')")
+    assert "Not sent" in tab.inner_text(".sent-state.failed") and "the server is away" in tab.inner_text(".sent-state.failed")
+    assert tab.locator(".you.sending").count() == 0 and not (board.commands.exists() and board.commands.read_text())
+    tab.unroute("**/prompt")
+    tab.click(".sent-state.failed button:has-text('Retry')")
+    tab.wait_for_selector(".turn")
+    assert tab.locator(".you").count() == 1 and tab.locator(".you.failed, .you.sending, .sent-state").count() == 0
+    assert [json.loads(line) for line in board.commands.read_text().splitlines()] == [{"type": "prompt", "text": "hello there"}]
+
+    tab.route("**/prompt", lambda r: r.fulfill(status=503, content_type="application/json", body='{"error": "away"}'))
+    tab.fill("#input", "take it back")
+    tab.keyboard.press("Enter")
+    tab.click(".sent-state.failed button:has-text('Edit')")  # back in the field, to change it
+    assert tab.input_value("#input") == "take it back" and tab.locator(".you").count() == 1
+
+
 def test_a_question_is_answered_with_a_click_or_in_your_own_words(board):
     tab = opens_tab(board, lambda: board.click("button[aria-label='New session']"))
     tab.fill("#input", "ask me")

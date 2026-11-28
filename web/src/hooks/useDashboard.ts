@@ -43,7 +43,7 @@ export interface Dashboard extends Board {
 }
 
 export function useDashboard(): Dashboard {
-  const board = useRef<Board>({ state: { projects: [], sessions: [] }, plugins: {}, loaded: false }).current;
+  const board = useRef<Board>({ state: { projects: [], projects_file: '', sessions: [] }, plugins: {}, loaded: false }).current;
   const [, draw] = useReducer((n: number) => n + 1, 0);
   // A session's tabs opened from it here (a port it published while it ran, no longer listed once it is stopped).
   const owned = useRef(new Map<string, Set<string>>()).current;

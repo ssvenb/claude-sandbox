@@ -8,7 +8,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 const send = (method: string) => <T = unknown>(path: string, body?: unknown): Promise<T> =>
-  api<T>(path, { method, body: body === undefined ? undefined : JSON.stringify(body) });
+  api<T>(path, body === undefined ? { method } : { method, body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
 
 export const post = send('POST');
 export const put = send('PUT');

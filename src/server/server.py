@@ -18,11 +18,11 @@ runs under src/server/holder.py, which keeps its output while no server listens,
 takes back the sessions the last one left (STATE), running or ended — a restart cuts nothing off.
 """
 import argparse
+import asyncio
 import base64
 import glob
 import json
 import os
-import queue
 import re
 import secrets
 import signal
@@ -34,12 +34,25 @@ import shutil
 import tempfile
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from typing import Any, Dict, Optional
+
+import httpx
+import uvicorn
+from fastapi import Depends, FastAPI, Request
+from fastapi.routing import APIRoute
+from pydantic import TypeAdapter, ValidationError
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
+from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import Headers
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from websockets.asyncio.client import connect as ws_connect
+from websockets.exceptions import WebSocketException
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # src: the orchestrator's auth.py
 from orchestrator import Die, auth, config as project_config  # noqa: E402
+import models as m  # noqa: E402  (the API's shapes)
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent  # the checkout
@@ -561,7 +574,7 @@ class Session:
         return {**{k: getattr(self, k) for k in ("id", "project", "kind", "run_id", "started", "exit")},
                 "status": self.shown(), "workspace": checkout(self.project, self.run_id),
                 "plugins": described.get(self.project, {}).get("plugins", []),
-                "items": [answering(i) for i in live_items(self.project, self.run_id)] if self.exit is None else [],
+                "items": [answering(i) for i in live_items(self.project, self.run_id) if fits(i)] if self.exit is None else [],
                 "title": self.title, "activity": self.activity, "said": self.said,
                 "agent": self.info.get("agent"), "model": self.info.get("model"), "cost": self.cost,
                 "context": self.context, "waiting": len(self.waiting), "todos": self.todos}
@@ -665,6 +678,9 @@ def describe(project, keep=False):
         if done.returncode:  # run.sh's own complaint, e.g. about the project's file
             raise ValueError(done.stderr.strip().splitlines()[-1] if done.stderr.strip() else "run.sh --web failed")
         found = json.loads(done.stdout)
+        if not isinstance(found, dict):
+            raise ValueError("run.sh --web said no JSON object")
+        found = drawable(found)
     except (OSError, ValueError, subprocess.TimeoutExpired) as e:
         if keep and project in described:
             return described[project]
@@ -672,6 +688,36 @@ def describe(project, keep=False):
     described[project] = found
     autostart(project, found)
     return found
+
+
+ITEM = TypeAdapter(m.Item)
+
+
+def fits(item):
+    """Whether the page can draw an item (models.Item): plugins make theirs in shell, with jq."""
+    try:
+        ITEM.validate_python(item)
+        return True
+    except ValidationError:
+        return False
+
+
+def drawable(found):
+    """What `run.sh --web` said, its items fit for the page: one it could not draw (no url, say) is
+    left out with a note, rather than failing every answer it would be part of."""
+    notes = [n for n in found.get("notes") or [] if isinstance(n, str)] if isinstance(found.get("notes"), list) else []
+
+    def keep(items, where):
+        kept = [i for i in items if fits(i)] if isinstance(items, list) else []
+        if left := (len(items) if isinstance(items, list) else 1 if items else 0) - len(kept):
+            notes.append(f"{left} item{'s' * (left > 1)} of {where} left out: not an item the page can draw (a url and a title)")
+        return kept
+    lists = [{**l, "items": keep(l.get("items"), repr(l["title"]))} for l in found.get("lists") or []
+             if isinstance(l, dict) and isinstance(l.get("title"), str)]
+    if isinstance(found.get("lists"), list) and (left := len(found["lists"]) - len(lists)):
+        notes.append(f"{left} list{'s' * (left > 1)} of the project left out: not a list the page can draw (a title and items)")
+    return {**found, "lists": lists, "run_items": keep(found.get("run_items"), "the run items"),
+            "session_items": keep(found.get("session_items"), "the session items"), "notes": notes}
 
 
 def on_status(last):
@@ -1295,11 +1341,9 @@ def connect(path):
     """A connection to the unix socket at path, never to what a symlink there points at: a plugin's
     server may run in a container (VS Code's does), and a link it swaps in (to this machine's
     docker.sock, say) must not be reached as you. Through an O_PATH descriptor of the file itself."""
-    fd = os.open(path, os.O_PATH | os.O_NOFOLLOW)
+    fd = _socket_fd(path)
     up = socket.socket(socket.AF_UNIX)
     try:
-        if not stat.S_ISSOCK(os.fstat(fd).st_mode):
-            raise OSError(f"{path}: not a socket")
         up.connect(f"/proc/self/fd/{fd}")
     except OSError:
         up.close()
@@ -1307,6 +1351,19 @@ def connect(path):
     finally:
         os.close(fd)
     return up
+
+
+def _socket_fd(path):
+    """An O_PATH descriptor of the unix socket at `path` itself, a link there not followed; the
+    caller closes it. Connecting to /proc/self/fd/<it> reaches that socket and no other."""
+    fd = os.open(path, os.O_PATH | os.O_NOFOLLOW)
+    try:
+        if not stat.S_ISSOCK(os.fstat(fd).st_mode):
+            raise OSError(f"{path}: not a socket")
+    except OSError:
+        os.close(fd)
+        raise
+    return fd
 
 
 scoped = []
@@ -1510,408 +1567,495 @@ def start(project, kind, run_id, task=None, images=None, sets=None, once=False):
         return s
 
 
-ROUTES = []  # (method, path, Handler method): the API, as @api registers it
+# ---- HTTP: the pages and the API (FastAPI), and what is relayed in front of them ---------------
+
+class Conf:
+    """What one server is: the names it answers to, whether it relays demo subdomains, where its
+    projects are, where it listens. Several can run in one process (the tests run a demo beside one)."""
+
+    def __init__(self, hosts, subdomains, projects_file, bind):
+        self.hosts, self.subdomains, self.projects_file, self.bind = hosts, subdomains, projects_file, bind
 
 
-def api(method, path):
-    """Makes a Handler method the answer to `method` on `path`, a regex the whole path must match,
-    whose groups (URL-decoded) are the method's arguments."""
-    def register(handle):
-        ROUTES.append((method, re.compile(path), handle))
-        return handle
-    return register
+def conf(request: Request) -> Conf:
+    return request.scope["sandbox"]
 
 
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, *args):
-        pass
+def guard(c, headers):
+    """This server drives agents on your machine. Any web page you visit can aim requests at
+    localhost, so only our own page gets through: the Host check stops DNS rebinding, the Origin
+    check stops cross-site requests. Any port: a proxy (a sandbox's published port) may put this
+    server on another, and the name is what rebinding forges."""
+    host = headers.get("host", "")
+    origin = headers.get("origin")
+    # https too: behind a TLS proxy (serve-oauth.sh) the page is https://<Host>, the same site.
+    if allowed(c.hosts, host.rsplit(":", 1)[0]) and origin in (None, f"http://{host}", f"https://{host}"):
+        global page_origin
+        page_origin = origin or f"{headers.get('x-forwarded-proto', 'http')}://{host}"
+        return True
+    return False
 
-    def reply(self, code, body, ctype="application/json", allow=None):
-        if not isinstance(body, bytes):
-            body = json.dumps(body).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        if allow:
-            self.send_header("Allow", allow)
-        self.end_headers()
-        self.wfile.write(body)
 
-    def guard(self):
-        # This server drives agents on your machine. Any web page you visit can aim
-        # requests at localhost, so only our own page gets through: the Host check stops DNS
-        # rebinding, the Origin check stops cross-site requests. Any port: a proxy (a sandbox's
-        # published port) may put this server on another, and the name is what rebinding forges.
-        host = self.headers.get("Host", "")
-        origin = self.headers.get("Origin")
-        # https too: behind a TLS proxy (serve-oauth.sh) the page is https://<Host>, the same site.
-        if allowed(self.server.hosts, host.rsplit(":", 1)[0]) and origin in (None, f"http://{host}", f"https://{host}"):
-            global page_origin
-            page_origin = origin or f"{self.headers.get('X-Forwarded-Proto', 'http')}://{host}"
-            return True
-        print(f"forbidden: Host={host!r} Origin={self.headers.get('Origin')!r} {self.command} {self.path}", file=sys.stderr, flush=True)
-        self.reply(403, {"error": "forbidden"})
-        return False
+HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade"}
 
-    def session(self, sid):
-        with lock:
-            s = sessions.get(sid)
-        if s is None:
-            raise NotFound("no such session")
-        return s
 
-    def tunnel(self, plugin):
-        """Pass one request under /plugins/<plugin>/ to that plugin's server, and its answer back, as
-        raw bytes: that carries its WebSockets too, and puts it on our origin and behind our guard."""
-        if self.guard():
-            self.relay(lambda: connect(plugin_server(plugin)))
+def _target(scope):
+    path = scope.get("raw_path") or scope["path"].encode()
+    return (path + (b"?" + scope["query_string"] if scope.get("query_string") else b"")).decode("latin-1")
 
-    def port(self, run_id, port):
-        """A request to <RUN_ID>-<port>.<our name>: to that run's published port (its demo server), behind whatever
-        sign-in is in front of us (serve-oauth.sh). Not our guard's: the page is the sandbox's, on an
-        origin of its own. Our sign-in's cookies stay here: the demo would sign in as you with them."""
-        cookies = [c for c in self.headers.get("Cookie", "").split(";") if c.strip() and
-                   not c.strip().startswith(AUTH_COOKIE)]
-        del self.headers["Cookie"]
-        if cookies:
-            self.headers["Cookie"] = ";".join(cookies).strip()
-        self.relay(lambda: socket.create_connection(published(run_id, port), timeout=10))
 
-    def relay(self, upstream):
-        try:
-            up = upstream()
-            up.settimeout(None)
-        except (ValueError, OSError) as e:
-            return self.reply(502, {"error": str(e)})
-        upgrade = "upgrade" in self.headers.get("Connection", "").lower()
-        # One request per connection, or a later one would ride through unguarded.
-        self.close_connection = True
-        if not upgrade:
-            del self.headers["Connection"]
-            self.headers["Connection"] = "close"
-        head = f"{self.command} {self.path} HTTP/1.1\r\n" + "".join(
-            f"{k}: {v}\r\n" for k, v in self.headers.items()) + "\r\n"
-
-        def upload():
+async def relay(scope, receive, send, open_socket, uds=None, drop_cookies=False):
+    """One request (or a WebSocket) to another server, and its answer back: a plugin's on its unix
+    socket (`uds`, reached as connect() reaches it, never through a link planted there), or a run's
+    published port. Its headers go as they came, Host too, but for those of this hop alone."""
+    headers = [(k.decode("latin-1"), v.decode("latin-1")) for k, v in scope["headers"]
+               if k.decode("latin-1").lower() not in HOP]
+    if drop_cookies:  # our sign-in's: the demo would sign in as you with them
+        kept = "; ".join(c.strip() for k, v in headers if k.lower() == "cookie" for c in v.split(";")
+                         if c.strip() and not c.strip().startswith(AUTH_COOKIE))
+        headers = [(k, v) for k, v in headers if k.lower() != "cookie"] + ([("Cookie", kept)] if kept else [])
+    host = next((v for k, v in headers if k.lower() == "host"), "upstream")
+    if scope["type"] == "websocket":
+        return await _relay_ws(scope, receive, send, open_socket, host, headers)
+    async def upload():  # passed on as it comes, never held whole
+        while True:
+            m = await receive()
+            if m["type"] == "http.disconnect":
+                return
+            if m.get("body"):
+                yield m["body"]
+            if not m.get("more_body"):
+                return
+    # A request without a body (a GET) goes without one, not as an empty chunked stream; one sent
+    # chunked goes on chunked (httpx's), one with a Content-Length with that.
+    sent = {k.decode("latin-1").lower() for k, _ in scope["headers"]}
+    body = upload() if sent & {"content-length", "transfer-encoding"} else b""
+    try:
+        if uds:  # a descriptor of the socket file itself, so the path is never followed again
+            fd = await run_in_threadpool(_socket_fd, uds)
+            transport = httpx.AsyncHTTPTransport(uds=f"/proc/self/fd/{fd}")
+            base = "http://plugin"
+        else:
+            fd, (h, p) = None, await run_in_threadpool(open_socket)
+            transport, base = httpx.AsyncHTTPTransport(), f"http://{h}:{p}"
+    except (ValueError, OSError) as e:
+        return await JSONResponse({"error": str(e)}, 502)(scope, receive, send)
+    try:
+        async with httpx.AsyncClient(transport=transport, timeout=None) as client:
             try:
-                if upgrade:
-                    while data := self.rfile.read1(65536):
-                        up.sendall(data)
-                    up.shutdown(socket.SHUT_RDWR)  # the browser hung up: so does the server's side
-                else:
-                    up.sendall(self.rfile.read(int(self.headers.get("Content-Length") or 0)))
-            except (OSError, ValueError):
-                pass
-
-        try:
-            with up:
-                up.sendall(head.encode("latin-1"))
-                threading.Thread(target=upload, daemon=True).start()
-                while data := up.recv(65536):
-                    self.connection.sendall(data)
-        except OSError:
-            pass
-        if upgrade:  # unblocks upload(), which is still reading from the browser
+                resp = await client.send(client.build_request(scope["method"], base + _target(scope), headers=headers,
+                                                              content=body), stream=True)
+            except httpx.HTTPError as e:
+                return await JSONResponse({"error": str(e) or type(e).__name__}, 502)(scope, receive, send)
             try:
-                self.connection.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
+                await send({"type": "http.response.start", "status": resp.status_code,
+                            "headers": [(k, v) for k, v in resp.headers.raw if k.decode("latin-1").lower() not in HOP]})
+                async for chunk in resp.aiter_raw():
+                    await send({"type": "http.response.body", "body": chunk, "more_body": True})
+                await send({"type": "http.response.body", "body": b""})
+            finally:
+                await resp.aclose()
+    finally:
+        if fd is not None:
+            os.close(fd)
 
-    def route(self, mine):
+
+async def _relay_ws(scope, receive, send, open_socket, host, headers):
+    await receive()  # websocket.connect
+    # The browser's Host in the URI, its other headers added: the server sees what the browser sent.
+    extra = [(k, v) for k, v in headers if k.lower() != "host" and not k.lower().startswith("sec-websocket")]
+    try:
+        sock = await run_in_threadpool(open_socket, True)
+        up = await ws_connect(f"ws://{host}{_target(scope)}", sock=sock, additional_headers=extra,
+                              subprotocols=scope.get("subprotocols") or None, max_size=None, ping_interval=None,
+                              user_agent_header=None, compression=None)
+    except (ValueError, OSError, WebSocketException):
+        return await send({"type": "websocket.close", "code": 1011})  # refused: the browser is told 403
+    async with up:
+        await send({"type": "websocket.accept", "subprotocol": up.subprotocol})
+
+        async def down():
+            try:
+                async for m in up:
+                    await send({"type": "websocket.send", **({"bytes": m} if isinstance(m, bytes) else {"text": m})})
+            except WebSocketException:
+                pass
+            await send({"type": "websocket.close", "code": up.close_code or 1000})
+
+        async def upward():
+            while (m := await receive())["type"] != "websocket.disconnect":
+                await up.send(m["bytes"] if m.get("bytes") is not None else m["text"])
+            await up.close()
+
+        tasks = [asyncio.ensure_future(down()), asyncio.ensure_future(upward())]
+        _, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for t in pending:
+            t.cancel()
+
+
+class Front:
+    """What comes before the API, as ASGI: a demo subdomain relayed (behind whatever sign-in is in
+    front of us, serve-oauth.sh, not our guard: the page is the sandbox's, on an origin of its own),
+    then our guard, a plugin's server under /plugins/<name>/, and what a page loads."""
+
+    def __init__(self, app, c):
+        self.app, self.c = app, c
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket"):
+            return await self.app(scope, receive, send)
+        scope["sandbox"] = self.c
+        h = Headers(scope=scope)
         # Only the server serve-oauth.sh starts relays subdomains: any other (this server as a run's
         # demo, behind that one's relay, which passes the Host header through) serves them itself.
-        sub = self.server.subdomains and PORT_HOST.fullmatch(self.headers.get("Host", "").rsplit(":", 1)[0])
-        if sub and sub[3] in self.server.hosts:
-            return self.port(sub[1], int(sub[2]))
-        m = re.match(r"/plugins/([\w-]+)(?:[/?]|$)", self.path)
-        self.tunnel(m[1]) if m else mine()
-
-    def do_GET(self):
-        self.route(self.answer)
-
-    do_POST = do_PUT = do_DELETE = do_HEAD = do_OPTIONS = do_PATCH = do_GET  # a plugin's server may use any method
-
-    def answer(self):
-        """Ours: a page, what it loads, or the API (ROUTES), behind the guard. An error a route
-        raises is its answer: NotFound 404, Conflict 409, any other ValueError (or a KeyError, a
-        field missing) 400, an OSError 500."""
-        if not self.guard():
-            return
-        url = urlparse(self.path)
-        self.body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
-        if self.command == "GET" and url.path in PAGES:
+        if self.c.subdomains and (sub := PORT_HOST.fullmatch(h.get("host", "").rsplit(":", 1)[0])) and sub[3] in self.c.hosts:
+            def open_port(ws=False, run_id=sub[1], port=int(sub[2])):
+                where = published(run_id, port)
+                return socket.create_connection(where, timeout=10) if ws else where
+            return await relay(scope, receive, send, open_port, drop_cookies=True)
+        if not guard(self.c, h):
+            print(f"forbidden: Host={h.get('host')!r} Origin={h.get('origin')!r} {scope.get('method', 'WS')} {scope['path']}",
+                  file=sys.stderr, flush=True)
+            if scope["type"] == "websocket":
+                return await send({"type": "websocket.close", "code": 1008})
+            return await JSONResponse({"error": "forbidden"}, 403)(scope, receive, send)
+        if m := re.match(r"/plugins/([\w-]+)(?:/|$)", scope["path"]):  # started on first use
             try:
-                return self.reply(200, (DIST / "index.html").read_bytes(), "text/html; charset=utf-8")
-            except OSError:
-                return self.reply(503, UNBUILT.encode(), "text/plain; charset=utf-8")
-        if self.command == "GET" and (asset := static(url.path)) is not None:
-            return self.reply(200, asset.read_bytes(), STATIC[asset.suffix])
-        methods = []
-        for method, pattern, handle in ROUTES:
-            if not (m := pattern.fullmatch(url.path)):
-                continue
-            if method != self.command:
-                methods.append(method)
-                continue
-            try:
-                return handle(self, *map(unquote, m.groups()))
-            except NotFound as e:
-                return self.reply(404, {"error": str(e)})
-            except Conflict as e:
-                return self.reply(409, {"error": str(e)})
-            except (ValueError, KeyError) as e:
-                return self.reply(400, {"error": str(e)})
-            except OSError as e:
-                return self.reply(500, {"error": str(e)})
-        if methods:
-            return self.reply(405, {"error": f"{self.command} is not one of {', '.join(methods)}"}, allow=", ".join(methods))
-        self.reply(404, {"error": "not found"})
+                path = await run_in_threadpool(plugin_server, m[1])
+            except (ValueError, OSError) as e:
+                if scope["type"] == "websocket":
+                    return await send({"type": "websocket.close", "code": 1011})
+                return await JSONResponse({"error": str(e)}, 502)(scope, receive, send)
+            return await relay(scope, receive, send, lambda ws=False: connect(path), uds=path)
+        if scope["type"] == "http" and scope["method"] in ("GET", "HEAD") and (asset := static(scope["path"])):
+            return await FileResponse(asset, media_type=STATIC[asset.suffix])(scope, receive, send)
+        await self.app(scope, receive, send)
 
-    def req(self):
-        """The request's JSON body, an object ({} for none)."""
-        if not self.body.strip():
-            return {}
+
+class Route(APIRoute):
+    """A route of ours: it answers with the fields of its shape the server set, never a null for
+    one it did not (models.py)."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **{**kwargs, "response_model_exclude_unset": True})
+
+
+# One schema per shape, not an input and an output one: an optional field is optional both ways.
+app = FastAPI(title="claude-sandbox", description=__doc__.split("\n\n")[0], docs_url="/api/docs",
+              openapi_url="/api/openapi.json", redoc_url=None, separate_input_output_schemas=False)
+app.router.route_class = Route
+
+
+def _error(status):
+    return lambda request, e: JSONResponse({"error": str(e)}, status)
+
+
+# An error a route raises is its answer: NotFound 404, Conflict 409, any other ValueError (or a
+# KeyError, a field missing) 400, an OSError 500; and FastAPI's own (405, a body that is not what
+# the route takes) as {"error": …} too.
+for kind, status in ((NotFound, 404), (Conflict, 409), (ValueError, 400), (KeyError, 400), (OSError, 500)):
+    app.add_exception_handler(kind, _error(status))
+
+
+@app.exception_handler(StarletteHTTPException)
+def _http_error(request, e):
+    return JSONResponse({"error": str(e.detail)}, e.status_code, headers=getattr(e, "headers", None))
+
+
+@app.exception_handler(RequestValidationError)
+def _invalid(request, e):
+    return JSONResponse({"error": "; ".join(f"{'.'.join(map(str, x['loc'][1:])) or 'body'}: {x['msg']}" for x in e.errors())}, 400)
+
+
+def known(c, name):
+    if name not in projects(c.projects_file):
+        raise NotFound(f"no project {name!r}")
+    return name
+
+
+def session(sid):
+    with lock:
+        s = sessions.get(sid)
+    if s is None:
+        raise NotFound("no such session")
+    return s
+
+
+def tell(sid, command):
+    """A command for a chat's bridge, which knows what it means."""
+    session(sid).tell(command)
+    return {}
+
+
+def dumps(items):
+    return None if items is None else [i.model_dump() for i in items]
+
+
+PAGE = {"response_class": HTMLResponse, "include_in_schema": False}
+
+
+@app.get("/", **PAGE)
+@app.get("/chat", **PAGE)
+def page():
+    """The pages are one React app: its index.html for each (it picks the page by its path)."""
+    try:
+        return HTMLResponse((DIST / "index.html").read_bytes())
+    except OSError:
+        return PlainTextResponse(UNBUILT, 503)
+
+
+@app.get("/api/state", response_model=m.AppState)
+def get_state(c: Conf = Depends(conf)):
+    """Everything the dashboard draws, in one call."""
+    with lock:
+        live = [s.json() for s in sessions.values()]
+    return {"projects": projects(c.projects_file), "projects_file": str(c.projects_file), "sessions": live}
+
+
+@app.get("/api/projects", response_model=m.Projects)
+def list_projects(c: Conf = Depends(conf)):
+    return {"projects": projects(c.projects_file)}
+
+
+@app.post("/api/projects", response_model=m.Created, status_code=201)
+def create_project(req: m.NewProject):
+    add_project(req.name, req.repo)
+    return {"name": req.name}
+
+
+@app.get("/api/projects/{name}", response_model=m.ProjectInfo)
+def get_project(name: str, c: Conf = Depends(conf)):
+    """What its plugins describe: lists, items, its agent."""
+    return describe(known(c, name))
+
+
+@app.delete("/api/projects/{name}", response_model=m.Ok)
+def remove_project(name: str, c: Conf = Depends(conf)):
+    delete_project(known(c, name))
+    return {}
+
+
+@app.get("/api/projects/{name}/config", response_model=m.ProjectConfig)
+def get_config(name: str, c: Conf = Depends(conf)):
+    return read_config(known(c, name))
+
+
+@app.put("/api/projects/{name}/config", response_model=m.ProjectConfig)
+def put_config(name: str, config: Dict[str, Any], c: Conf = Depends(conf)):
+    write_config(known(c, name), config)
+    return read_config(name)
+
+
+@app.get("/api/sessions", response_model=m.Sessions)
+def list_sessions():
+    with lock:
+        return {"sessions": [s.json() for s in sessions.values()]}
+
+
+@app.post("/api/sessions", response_model=m.Session, status_code=201)
+def create_session(req: m.NewSession, c: Conf = Depends(conf)):
+    if req.project not in projects(c.projects_file):
+        raise ValueError("not a configured project")
+    s = start(req.project, req.kind, req.run_id, req.task, dumps(req.images))
+    with lock:
+        return s.json()
+
+
+@app.get("/api/sessions/{sid}", response_model=m.Session)
+def get_session(sid: str):
+    s = session(sid)
+    with lock:
+        return s.json()
+
+
+@app.delete("/api/sessions/{sid}", response_model=m.Failed)
+def delete_session(sid: str, req: Optional[m.Tidy] = None):
+    """Gone from the list, stopped first if it still runs; with `tidy`, the urls of its run's items
+    the page's user said yes to tidying up too (cleanup-offers). Says which failed."""
+    s = session(sid)
+    s.stop()
+    with lock:
+        offered = offers(s)
+        drop(s)
+    return {"failed": tidy(s, req.tidy if req else [], offered)}
+
+
+@app.post("/api/sessions/{sid}/stop", response_model=m.Ok)
+def stop_session(sid: str):
+    """Its container goes, its entry stays: to read, to resume."""
+    session(sid).stop()
+    return {}
+
+
+@app.get("/api/sessions/{sid}/cleanup-offers", response_model=m.Offers)
+def cleanup_offers(sid: str):
+    """What its page asks about before deleting it, one yes/no each. Described afresh first: the
+    pull request a run opened a moment ago is offered too, and one closed or merged since is not."""
+    s = session(sid)
+    describe(s.project, keep=True)
+    with lock:
+        found = offers(s)
+    return {"offers": [{k: i.get(k) for k in ("url", "ref", "title")}
+                       | {"ask": str(i["on_delete"].get("ask") or f"Tidy up {i.get('ref') or i.get('title')} too?")}
+                       for i in found]}
+
+
+@app.get("/api/sessions/{sid}/plugins/{plugin}/commands/{name}", response_model=m.PluginResult)
+def run_plugin_command(sid: str, plugin: str, name: str):
+    s = session(sid)
+    return {"result": plugin_command(s.project, s.run_id, plugin, name)}
+
+
+class Listener:
+    """A page's event stream: fed by the session's threads, read in the server's event loop."""
+
+    def __init__(self):
+        self.loop, self.q = asyncio.get_running_loop(), asyncio.Queue()
+
+    def put(self, event):
         try:
-            req = json.loads(self.body)
-        except ValueError:
-            raise ValueError("the body must be JSON") from None
-        if not isinstance(req, dict):
-            raise ValueError("the body must be a JSON object")
-        return req
+            self.loop.call_soon_threadsafe(self.q.put_nowait, event)
+        except RuntimeError:  # the server has gone
+            pass
 
-    def project(self, name):
-        if name not in projects(self.server.projects_file):
-            raise NotFound(f"no project {name!r}")
-        return name
 
-    # ---- the API: what each route answers ----------------------------------------------------
+@app.get("/api/sessions/{sid}/events", response_class=StreamingResponse)
+async def get_events(sid: str):
+    """A chat's events, as server-sent events: the conversation so far in one snapshot, then each
+    event as it comes."""
+    s = session(sid)
+    listener = Listener()
+    with lock:  # snapshot and subscription in one step, so no event is lost or doubled
+        first = json.dumps(s.snapshot())
+        if s.exit is None:
+            s.listeners.append(listener)
+        else:
+            listener.q.put_nowait(None)
 
-    @api("GET", r"/api/state")
-    def get_state(self):
-        """Everything the dashboard draws, in one call."""
-        with lock:
-            live = [s.json() for s in sessions.values()]
-        self.reply(200, {"projects": projects(self.server.projects_file), "projects_file": str(self.server.projects_file),
-                         "sessions": live})
-
-    @api("GET", r"/api/projects")
-    def list_projects(self):
-        self.reply(200, {"projects": projects(self.server.projects_file)})
-
-    @api("POST", r"/api/projects")
-    def create_project(self):
-        req = self.req()
-        add_project(req.get("name"), req.get("repo"))
-        self.reply(201, {"name": req["name"]})
-
-    @api("GET", r"/api/projects/([^/]+)")
-    def get_project(self, name):
-        """What its plugins describe: lists, items, its agent."""
-        self.reply(200, describe(self.project(name)))
-
-    @api("DELETE", r"/api/projects/([^/]+)")
-    def remove_project(self, name):
-        delete_project(self.project(name))
-        self.reply(200, {})
-
-    @api("GET", r"/api/projects/([^/]+)/config")
-    def get_config(self, name):
-        self.reply(200, read_config(self.project(name)))
-
-    @api("PUT", r"/api/projects/([^/]+)/config")
-    def put_config(self, name):
-        write_config(self.project(name), self.req())
-        self.reply(200, read_config(name))
-
-    @api("GET", r"/api/sessions")
-    def list_sessions(self):
-        with lock:
-            self.reply(200, {"sessions": [s.json() for s in sessions.values()]})
-
-    @api("POST", r"/api/sessions")
-    def create_session(self):
-        req = self.req()
-        if req.get("project") not in projects(self.server.projects_file):
-            raise ValueError("not a configured project")
-        if req.get("ui", "chat") != "chat":
-            raise ValueError("every session is a chat: there are no terminals")
-        self.reply(201, start(req["project"], req.get("kind"), req.get("run_id"), req.get("task"), req.get("images")).json())
-
-    @api("GET", r"/api/sessions/(\w+)")
-    def get_session(self, sid):
-        s = self.session(sid)
-        with lock:
-            self.reply(200, s.json())
-
-    @api("DELETE", r"/api/sessions/(\w+)")
-    def delete_session(self, sid):
-        """Gone from the list, stopped first if it still runs; with `tidy`, the urls of its run's
-        items the page's user said yes to tidying up too (cleanup-offers). Says which failed."""
-        s = self.session(sid)
-        urls = self.req().get("tidy")
-        s.stop()
-        with lock:
-            offered = offers(s)
-            drop(s)
-        self.reply(200, {"failed": tidy(s, urls if isinstance(urls, list) else [], offered)})
-
-    @api("POST", r"/api/sessions/(\w+)/stop")
-    def stop_session(self, sid):
-        """Its container goes, its entry stays: to read, to resume."""
-        self.session(sid).stop()
-        self.reply(200, {})
-
-    @api("GET", r"/api/sessions/(\w+)/cleanup-offers")
-    def cleanup_offers(self, sid):
-        """What its page asks about before deleting it, one yes/no each. Described afresh first: the
-        pull request a run opened a moment ago is offered too, and one closed or merged since is not."""
-        s = self.session(sid)
-        describe(s.project, keep=True)
-        with lock:
-            found = offers(s)
-        self.reply(200, {"offers": [{k: i.get(k) for k in ("url", "ref", "title")}
-                                    | {"ask": str(i["on_delete"].get("ask") or f"Tidy up {i.get('ref') or i.get('title')} too?")}
-                                    for i in found]})
-
-    @api("GET", r"/api/sessions/(\w+)/plugins/([\w-]+)/commands/([\w-]+)")
-    def run_plugin_command(self, sid, plugin, name):
-        s = self.session(sid)
-        self.reply(200, {"result": plugin_command(s.project, s.run_id, plugin, name)})
-
-    @api("GET", r"/api/sessions/(\w+)/events")
-    def get_events(self, sid):
-        self.events(self.session(sid))
-
-    @api("POST", r"/api/sessions/(\w+)/messages")
-    def post_message(self, sid):
-        s, req = self.session(sid), self.req()
-        s.prompt(req.get("text"), req.get("images"), req.get("files"), req.get("nonce"))
-        self.reply(200, {})
-
-    @api("POST", r"/api/sessions/(\w+)/interrupt")
-    def interrupt(self, sid):
-        self.tell(sid, {"type": "interrupt"})
-
-    @api("POST", r"/api/sessions/(\w+)/questions/([^/]+)/answer")
-    def answer_question(self, sid, ask):
-        """{answers} or {cancel: true}."""
-        req = self.req()
-        self.tell(sid, {"type": "answer", "id": ask, **{k: req[k] for k in ("answers", "cancel") if k in req}})
-
-    @api("PUT", r"/api/sessions/(\w+)/model")
-    def put_model(self, sid):
-        self.tell(sid, {"type": "model", "id": self.req().get("id")})
-
-    @api("PUT", r"/api/sessions/(\w+)/effort")
-    def put_effort(self, sid):
-        self.tell(sid, {"type": "effort", "level": self.req().get("level")})
-
-    @api("DELETE", r"/api/sessions/(\w+)/tasks/([^/]+)")
-    def stop_task(self, sid, task):
-        """Stops a task its agent runs in the background."""
-        self.tell(sid, {"type": "task", "id": task})
-
-    @api("POST", r"/api/sessions/(\w+)/calls/([^/]+)/background")
-    def background_call(self, sid, call):
-        """Sends the task a tool call waits on to the background: the call returns, the task runs on."""
-        self.tell(sid, {"type": "background", "id": call})
-
-    @api("POST", r"/api/sessions/(\w+)/sides")
-    def create_side(self, sid):
-        """A side chat, its first question asked; answers with its id."""
-        self.reply(201, {"id": self.session(sid).side(None, self.req().get("text"))})
-
-    @api("POST", r"/api/sessions/(\w+)/sides/([^/]+)/messages")
-    def post_side_message(self, sid, side):
-        self.reply(200, {"id": self.session(sid).side(side, self.req().get("text"))})
-
-    @api("POST", r"/api/sessions/(\w+)/sides/([^/]+)/interrupt")
-    def interrupt_side(self, sid, side):
-        self.tell(sid, {"type": "interrupt", "side": side})
-
-    @api("DELETE", r"/api/sessions/(\w+)/sides/([^/]+)")
-    def close_side(self, sid, side):
-        self.session(sid).side(side, None, close=True)
-        self.reply(200, {})
-
-    @api("GET", r"/api/auth")
-    def get_auth(self):
-        self.reply(200, read_auth())
-
-    @api("PUT", r"/api/auth")
-    def put_auth(self):
-        write_auth(self.req())
-        self.reply(200, read_auth())
-
-    @api("PUT", r"/api/auth/([^/]+)/files/([^/]+)")
-    def upload_auth_file(self, name, field):
-        """The body: the file itself."""
-        self.reply(200, put_auth_file(name, field, self.body))
-
-    @api("DELETE", r"/api/auth/([^/]+)/files/([^/]+)")
-    def delete_auth_file(self, name, field):
-        self.reply(200, put_auth_file(name, field, None))
-
-    @api("GET", r"/api/agents/([\w-]+)/sign-in")
-    def start_sign_in(self, agent):
-        """A link the page follows (a fetch's window.open would be a blocked popup), so a GET that
-        starts the sign-in: on to the page it prints."""
-        self.send_response(302)
-        self.send_header("Location", sign_in(agent))
-        self.send_header("Content-Length", "0")
-        self.end_headers()
-
-    @api("POST", r"/api/agents/([\w-]+)/sign-in")
-    def finish_sign_in(self, agent):
-        sign_in_code(agent, self.req().get("code"))
-        self.reply(200, {})
-
-    @api("GET", r"/api/agents/([\w-]+)/sign-in-status")
-    def sign_in_status(self, agent):
-        self.reply(200, {"signedIn": signed_in(agent)})
-
-    @api("POST", r"/api/server/sync")
-    def post_sync(self):
-        self.reply(200, sync(self.server.bind))
-
-    def tell(self, sid, command):
-        """A command for a chat's bridge, which knows what it means."""
-        self.session(sid).tell(command)
-        self.reply(200, {})
-
-    def events(self, s):
-        """A chat's events: the conversation so far in one snapshot, then each event as it comes."""
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Cache-Control", "no-cache")
-        self.end_headers()
-        q = queue.Queue()
-        with lock:  # snapshot and subscription in one step, so no event is lost or doubled
-            first = json.dumps(s.snapshot()).encode()
-            if s.exit is None:
-                s.listeners.append(q)
-            else:
-                q.put(None)
+    async def stream():
         try:
-            self.wfile.write(b"data: " + first + b"\n\n")
-            self.wfile.flush()
+            yield f"data: {first}\n\n"
             while True:
                 try:
-                    event = q.get(timeout=KEEPALIVE)
-                except queue.Empty:
-                    self.wfile.write(b": keepalive\n\n")  # also how a closed tab is noticed
-                    self.wfile.flush()
+                    event = await asyncio.wait_for(listener.q.get(), KEEPALIVE)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"  # what keeps a proxy from timing it out
                     continue
                 if event is None:
                     break
-                self.wfile.write(b"data: " + json.dumps(event).encode() + b"\n\n")
-                self.wfile.flush()
-        except OSError:
-            pass
-        finally:
+                yield f"data: {json.dumps(event)}\n\n"
+        finally:  # the stream ended, or its tab was closed
             with lock:
-                if q in s.listeners:
-                    s.listeners.remove(q)
+                if listener in s.listeners:
+                    s.listeners.remove(listener)
+    return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/api/sessions/{sid}/messages", response_model=m.Ok)
+def post_message(sid: str, req: m.Message):
+    session(sid).prompt(req.text, dumps(req.images), dumps(req.files), req.nonce)
+    return {}
+
+
+@app.post("/api/sessions/{sid}/interrupt", response_model=m.Ok)
+def interrupt(sid: str):
+    return tell(sid, {"type": "interrupt"})
+
+
+@app.post("/api/sessions/{sid}/questions/{ask}/answer", response_model=m.Ok)
+def answer_question(sid: str, ask: str, req: m.Answer):
+    """{answers} or {cancel: true}."""
+    return tell(sid, {"type": "answer", "id": ask, **req.model_dump(exclude_unset=True)})
+
+
+@app.put("/api/sessions/{sid}/model", response_model=m.Ok)
+def put_model(sid: str, req: m.ModelPick):
+    return tell(sid, {"type": "model", "id": req.id})
+
+
+@app.put("/api/sessions/{sid}/effort", response_model=m.Ok)
+def put_effort(sid: str, req: m.EffortPick):
+    return tell(sid, {"type": "effort", "level": req.level})
+
+
+@app.delete("/api/sessions/{sid}/tasks/{task}", response_model=m.Ok)
+def stop_task(sid: str, task: str):
+    """Stops a task its agent runs in the background."""
+    return tell(sid, {"type": "task", "id": task})
+
+
+@app.post("/api/sessions/{sid}/calls/{call}/background", response_model=m.Ok)
+def background_call(sid: str, call: str):
+    """Sends the task a tool call waits on to the background: the call returns, the task runs on."""
+    return tell(sid, {"type": "background", "id": call})
+
+
+@app.post("/api/sessions/{sid}/sides", response_model=m.SideId, status_code=201)
+def create_side(sid: str, req: m.Text):
+    """A side chat, its first question asked; answers with its id."""
+    return {"id": session(sid).side(None, req.text)}
+
+
+@app.post("/api/sessions/{sid}/sides/{side}/messages", response_model=m.SideId)
+def post_side_message(sid: str, side: str, req: m.Text):
+    return {"id": session(sid).side(side, req.text)}
+
+
+@app.post("/api/sessions/{sid}/sides/{side}/interrupt", response_model=m.Ok)
+def interrupt_side(sid: str, side: str):
+    return tell(sid, {"type": "interrupt", "side": side})
+
+
+@app.delete("/api/sessions/{sid}/sides/{side}", response_model=m.Ok)
+def close_side(sid: str, side: str):
+    session(sid).side(side, None, close=True)
+    return {}
+
+
+@app.get("/api/auth", response_model=m.AuthConfig)
+def get_auth():
+    return read_auth()
+
+
+@app.put("/api/auth", response_model=m.AuthConfig)
+def put_auth(entries: Dict[str, Any]):
+    write_auth(entries)
+    return read_auth()
+
+
+@app.put("/api/auth/{name}/files/{field}", response_model=m.AuthFileState)
+async def upload_auth_file(name: str, field: str, request: Request):
+    """The body: the file itself."""
+    return await run_in_threadpool(put_auth_file, name, field, await request.body())
+
+
+@app.delete("/api/auth/{name}/files/{field}", response_model=m.AuthFileState)
+def delete_auth_file(name: str, field: str):
+    return put_auth_file(name, field, None)
+
+
+@app.get("/api/agents/{agent}/sign-in", response_class=RedirectResponse, status_code=302)
+def start_sign_in(agent: str):
+    """A link the page follows (a fetch's window.open would be a blocked popup), so a GET that
+    starts the sign-in: on to the page it prints."""
+    return RedirectResponse(sign_in(agent), 302)
+
+
+@app.post("/api/agents/{agent}/sign-in", response_model=m.Ok)
+def finish_sign_in(agent: str, req: m.Code):
+    sign_in_code(agent, req.code)
+    return {}
+
+
+@app.get("/api/agents/{agent}/sign-in-status", response_model=m.SignInStatus)
+def sign_in_status(agent: str):
+    return {"signedIn": signed_in(agent)}
+
+
+@app.post("/api/server/sync", response_model=m.Synced)
+def post_sync(c: Conf = Depends(conf)):
+    return sync(c.bind)
+
 
 
 def local_names(bind):
@@ -1945,19 +2089,39 @@ def allowed(hosts, name):
     return name in hosts or any(h.startswith(".") and name.endswith(h) for h in hosts)
 
 
-def serve(port, projects_file, bind="127.0.0.1", allow_hosts=()):
-    # Loopback by default: there is no login, so anyone who can reach the port can start
-    # sandboxes as you. --bind 0.0.0.0 opens it to your network; the Host allowlist still
-    # names only this machine's own addresses (plus any --allow-host), so DNS rebinding stays blocked.
-    server = ThreadingHTTPServer((bind, port), Handler)
-    server.daemon_threads = True
-    port = server.server_address[1]
-    server.hosts = local_names(bind) | set(allow_hosts)
-    server.subdomains = bool(os.environ.get("SANDBOX_WEB_SUBDOMAINS"))  # serve-oauth.sh's: it relays demos
-    server.projects_file = projects_file
-    os.environ["SANDBOX_PROJECTS_DIR"] = str(projects_file)  # for read_config, and every run.sh it starts
-    server.bind = bind
-    return server
+class Server:
+    """This server on its port: serve_forever() runs it (uvicorn) until shutdown(), from another
+    thread. Loopback by default: there is no login, so anyone who can reach the port can start
+    sandboxes as you. --bind 0.0.0.0 opens it to your network; the Host allowlist still names only
+    this machine's own addresses (plus any --allow-host), so DNS rebinding stays blocked."""
+
+    def __init__(self, port, projects_file, bind="127.0.0.1", allow_hosts=()):
+        self.sock = socket.create_server((bind or "0.0.0.0", port))
+        self.server_address = self.sock.getsockname()[:2]
+        self.hosts = local_names(bind) | set(allow_hosts)
+        self.projects_file, self.bind = projects_file, bind
+        os.environ["SANDBOX_PROJECTS_DIR"] = str(projects_file)  # for read_config, and every run.sh it starts
+        c = Conf(self.hosts, bool(os.environ.get("SANDBOX_WEB_SUBDOMAINS")), projects_file, bind)  # serve-oauth.sh's: it relays demos
+        # A page's open event stream holds a shutdown up no longer than this.
+        self.uvicorn = uvicorn.Server(uvicorn.Config(Front(app, c), log_level="warning", lifespan="off",
+                                                     timeout_graceful_shutdown=1, ws="websockets-sansio"))
+        self.done = threading.Event()
+
+    def serve_forever(self):
+        try:
+            self.uvicorn.run(sockets=[self.sock])
+        finally:
+            self.done.set()
+
+    def shutdown(self):
+        self.uvicorn.should_exit = True
+        self.done.wait(10)
+
+    def server_close(self):
+        self.sock.close()
+
+
+serve = Server
 
 
 if __name__ == "__main__":
@@ -1970,7 +2134,12 @@ if __name__ == "__main__":
     parser.add_argument("--projects", type=Path,
                         default=Path.home() / ".config/claude-sandbox/projects",
                         help="directory with a <name>.json per project (default: %(default)s)")
+    parser.add_argument("--openapi", action="store_true",
+                        help="print the API's OpenAPI description and exit (web: npm run api-types)")
     args = parser.parse_args()
+    if args.openapi:
+        print(json.dumps(app.openapi(), indent=2, ensure_ascii=False))
+        sys.exit(0)
     # For every run.sh this starts, sessions and --web alike.
     os.environ["SANDBOX_WEB_BIND"] = web_bind(args.bind)
     if args.bind and os.environ["SANDBOX_WEB_BIND"] != args.bind:
@@ -1979,7 +2148,6 @@ if __name__ == "__main__":
     threading.Thread(target=poller, args=(args.projects,), daemon=True).start()
     threading.Thread(target=status_watcher, daemon=True).start()
     server = serve(args.port, args.projects, args.bind, args.allow_host)
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # so `finally` cleans up on a plain kill too
     print(f"Sandboxes: http://127.0.0.1:{server.server_address[1]}  (projects: {args.projects})",
           flush=True)
     if args.bind not in ("127.0.0.1", "localhost"):

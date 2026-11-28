@@ -525,7 +525,7 @@ def test_a_chat_draws_what_the_agent_says_and_does(board):
 
     tab.reload()  # a page opened later starts from the whole conversation
     tab.wait_for_selector(".note.error")
-    assert tab.locator(".you").all_inner_texts() == ["change main", "now fail"]
+    assert tab.locator("#log .you").all_inner_texts() == ["change main", "now fail"]
     assert tab.locator("#log > .tools > .tool").count() == 6 and tab.locator(".turn").count() == 2
 
 
@@ -1179,3 +1179,16 @@ def test_side_chats_are_asked_beside_the_chat_and_the_panels_are_dragged_and_put
     tab.wait_for_selector("#sidechat .say:has-text('About “why main?”')")
     tab.keyboard.press("Escape")
     tab.wait_for_selector("#sidechat", state="hidden")
+
+
+def test_a_message_written_while_a_resumed_session_boots_is_shown(board):
+    board.hold.write_text("")
+    s = board.resume()
+    tab = opens_tab(board, lambda: board.evaluate(f"window.open('/chat#{s['id']}')"))
+    tab.wait_for_selector(".boot.starting .spin")
+    tab.fill("#input", "go on please")
+    tab.keyboard.press("Enter")
+    tab.wait_for_selector(".you.queued:has-text('go on please')")
+    board.hold.unlink()
+    tab.wait_for_selector(".say:has-text('Done with “go on please”.')")
+    assert tab.locator("#log .you").all_inner_texts() == ["What was said before the resume", "go on please"]

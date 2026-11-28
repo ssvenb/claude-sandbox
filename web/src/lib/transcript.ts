@@ -149,7 +149,7 @@ export class Transcript {
       case 'hello': this.info.agent = e.agent; break;
       case 'ready': { const { type: _, ...info } = e; Object.assign(this.info, info); this.ready = true; break; }
       case 'user': this.user(e); break;
-      case 'sent': { const r = this.users.get(e.id); if (r) { r.queued = false; touch(r); } break; }
+      case 'sent': this.sent(e.id); break;
       case 'text': this.block(e, false); break;
       case 'delta': this.block(e, true); break;
       case 'tool': this.settleBlocks(); this.tool(e); break;
@@ -226,6 +226,20 @@ export class Transcript {
     this.outbox.delete(nonce);
     const at = this.log.indexOf(r);
     if (at >= 0) this.log.splice(at, 1);
+  }
+
+  /** A message that waited for the agent has reached it: it goes after whatever came meanwhile
+   *  (what a resumed run replayed while it booted), as the server keeps it. */
+  private sent(id: string): void {
+    const r = this.users.get(id);
+    if (!r) return;
+    r.queued = false;
+    const at = this.log.indexOf(r);
+    if (at >= 0) {
+      this.log.splice(at, 1);
+      this.log.push(r);
+    }
+    touch(r);
   }
 
   private user(e: Extract<ChatEvent, { type: 'user' }>): void {

@@ -1050,6 +1050,16 @@ def test_a_resumed_chat_replays_what_was_said_before(chat):
     assert list(web.sessions) == [again.id] and again.title == "Fix the board"
 
 
+def test_a_prompt_written_while_a_resumed_chat_boots_comes_after_the_replayed_conversation(chat):
+    hold = chat.tmp / "hold"
+    hold.touch()
+    s = chat("resume", "0a1b2c")
+    s.prompt("go on please")
+    hold.unlink()
+    chat.until(s, lambda s: s.ready and any(e["type"] == "turn" for e in s.events))
+    assert [e["text"] for e in s.events if e["type"] == "user"] == ["What was said before the resume", "go on please"]
+
+
 def sent_prompts(chat):
     """The prompts the stand-in agents were sent, in order."""
     commands = chat.tmp / "commands"

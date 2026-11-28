@@ -377,6 +377,47 @@ def test_a_plugins_websocket_and_requests_pass_the_tunnel_as_they_came_and_never
         plugin.shutdown()
 
 
+def test_an_upload_through_the_tunnel_streams_to_the_plugins_server_as_it_comes(tmp_path, monkeypatch):
+    """A big body (a file dropped into VS Code) is not held in memory until it is all there: the
+    plugin's server has its first half while the browser still sends the second."""
+    path, got, first = str(tmp_path / "socket"), bytearray(), threading.Event()
+    plugin = socket.socket(socket.AF_UNIX)
+    plugin.bind(path)
+    plugin.listen()
+
+    def serve():
+        c, _ = plugin.accept()
+        with c:
+            head = b""
+            while b"\r\n\r\n" not in head:
+                head += c.recv(65536)
+            head, _, body = head.partition(b"\r\n\r\n")
+            got.extend(body)
+            size = int(re.search(rb"(?i)content-length: *(\d+)", head)[1])
+            while len(got) < size:
+                if len(got) >= size // 2:
+                    first.set()
+                got.extend(c.recv(65536))
+            c.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+    threading.Thread(target=serve, daemon=True).start()
+    monkeypatch.setattr(web, "plugin_server", lambda name: path)
+    call = api_server(tmp_path, monkeypatch)
+    half = b"x" * (1 << 20)
+    try:
+        with socket.create_connection(("127.0.0.1", call.server.server_address[1]), timeout=10) as c:
+            c.sendall(b"PUT /plugins/agent-workspace/upload HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+                      b"Content-Length: %d\r\nConnection: close\r\n\r\n" % (2 * len(half)) + half)
+            assert first.wait(10), "the plugin's server saw nothing of it before it was all sent"
+            c.sendall(half)
+            answer = b""
+            while chunk := c.recv(65536):
+                answer += chunk
+        assert answer.startswith(b"HTTP/1.1 200") and answer.endswith(b"ok") and bytes(got) == half * 2
+    finally:
+        call.server.shutdown()
+        plugin.close()
+
+
 def test_the_page_gets_what_the_projects_plugins_describe(ui):
     # No plugin of this bare directory has anything to list, but the answer is run.sh's own.
     said = json.load(ui("/api/projects/" + ui.project))
@@ -1514,6 +1555,61 @@ def test_the_api_describes_itself_as_openapi(tmp_path, monkeypatch):
         assert message["required"] == ["text"] and "nonce" in message["properties"]
     finally:
         call.server.shutdown()
+
+
+def test_an_item_a_plugin_lists_that_the_page_cannot_draw_is_left_out_with_a_note(tmp_path, monkeypatch):
+    """What plugins describe comes from their shell scripts: an item without a url (or a live one
+    without a title) is not the page's shape, and leaving it out keeps every answer it is in whole."""
+    good = {"url": "https://x/pr/1", "title": "PR 1", "run_id": "0a1b2c"}
+    live = tmp_path / "live.json"
+    live.write_text(json.dumps([{**good, "url": "http://{host}:3000/"}, {"run_id": "0a1b2c", "url": "http://x"}]))
+    said = {"lists": [{"title": "Pull requests", "items": [good, {"title": "no url"}]}, {"items": "junk"}],
+            "notes": ["fine", 7], "run_items": [good, "junk"], "session_items": [{"url": 1, "title": "t"}],
+            "agent": "claude", "plugins": ["git-workspace"], "live": [str(live)], "commands": {"x": {"y": ["rm", "-rf"]}}}
+    stub = tmp_path / "run.sh"
+    stub.write_text(f"#!/bin/sh\ncat <<'EOF'\n{json.dumps(said)}\nEOF\n")
+    stub.chmod(0o755)
+    monkeypatch.setattr(web, "RUN_SH", stub)
+    call = api_server(tmp_path, monkeypatch)
+    try:
+        status, info, _ = call("GET", "/api/projects/proj")
+        assert status == 200
+        assert info["lists"] == [{"title": "Pull requests", "items": [good]}] and info["run_items"] == [good]
+        assert info["session_items"] == [] and info["agent"] == "claude" and info["plugins"] == ["git-workspace"]
+        assert info["notes"][0] == "fine" and len(info["notes"]) == 5 and all("left out" in n for n in info["notes"][1:])
+        assert "1 list of the project left out" in " ".join(info["notes"])
+        assert "commands" not in info and "live" not in info  # what the server runs is not the page's
+        from types import SimpleNamespace as NS
+        s = NS(project="proj", run_id="0a1b2c", exit=None, kind="run", id="a", started=0, shown=lambda: None,
+               title="", activity="", said="", info={}, cost=None, context=None, waiting=[], todos=[])
+        assert len(web.live_items("proj", "0a1b2c")) == 2  # the server's own, the relay's: as they are
+        assert web.Session.json(s)["items"] == [{**good, "url": "http://{host}:3000/"}]  # the page's
+    finally:
+        call.server.shutdown()
+
+
+def test_the_pages_types_are_generated_from_the_apis_description_and_current():
+    """web/src/api/schema.ts is what api_types.py makes of models.py: a shape changed on one side and
+    not the other fails here, in CI, rather than in the page."""
+    import api_types
+    assert (UI / "src/api/schema.ts").read_text() == api_types.generated(), \
+        "web/src/api/schema.ts out of date: run `npm run api-types` in web"
+
+
+def test_the_type_generator_writes_each_kind_of_schema():
+    import api_types
+    ts = api_types.ts
+    assert ts({"anyOf": [{"type": "string"}, {"type": "null"}]}) == "string | null"
+    assert ts({"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "number"}]}}) == "(string | number)[]"
+    assert ts({"type": "array", "items": {"$ref": "#/components/schemas/Item"}}) == "Item[]"
+    assert ts({"type": "object", "additionalProperties": {"type": "integer"}}) == "Record<string, number>"
+    assert ts({"type": "object"}) == "Record<string, unknown>"
+    assert ts({}) == "unknown" and ts({"const": "chat", "type": "string"}) == '"chat"'
+    assert ts({"enum": ["a", "b"], "type": "string"}) == '"a" | "b"' and ts({"tsType": "Json", "type": "object"}) == "Json"
+    out = api_types.interface("Thing", {"description": "A thing.", "required": ["id"], "additionalProperties": True,
+                                        "properties": {"id": {"type": "string"}, "odd-name": {"type": "boolean", "description": "Odd."}}})
+    assert out == ('/** A thing. */\nexport interface Thing {\n  id: string;\n  /** Odd. */\n  "odd-name"?: boolean;\n'
+                   '  [key: string]: unknown;\n}\n')
 
 
 def test_an_agents_sign_in_over_http_redirects_to_its_link_and_takes_its_code_once(signing_agent, tmp_path, monkeypatch):

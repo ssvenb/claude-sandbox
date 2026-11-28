@@ -35,14 +35,15 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, Optional
 
 import httpx
 import uvicorn
 from fastapi import Depends, FastAPI, Request
+from fastapi.routing import APIRoute
+from pydantic import TypeAdapter, ValidationError
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -51,6 +52,7 @@ from websockets.exceptions import WebSocketException
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # src: the orchestrator's auth.py
 from orchestrator import Die, auth, config as project_config  # noqa: E402
+import models as m  # noqa: E402  (the API's shapes)
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent  # the checkout
@@ -572,7 +574,7 @@ class Session:
         return {**{k: getattr(self, k) for k in ("id", "project", "kind", "run_id", "started", "exit")},
                 "status": self.shown(), "workspace": checkout(self.project, self.run_id),
                 "plugins": described.get(self.project, {}).get("plugins", []),
-                "items": [answering(i) for i in live_items(self.project, self.run_id)] if self.exit is None else [],
+                "items": [answering(i) for i in live_items(self.project, self.run_id) if fits(i)] if self.exit is None else [],
                 "title": self.title, "activity": self.activity, "said": self.said,
                 "agent": self.info.get("agent"), "model": self.info.get("model"), "cost": self.cost,
                 "context": self.context, "waiting": len(self.waiting), "todos": self.todos}
@@ -676,6 +678,9 @@ def describe(project, keep=False):
         if done.returncode:  # run.sh's own complaint, e.g. about the project's file
             raise ValueError(done.stderr.strip().splitlines()[-1] if done.stderr.strip() else "run.sh --web failed")
         found = json.loads(done.stdout)
+        if not isinstance(found, dict):
+            raise ValueError("run.sh --web said no JSON object")
+        found = drawable(found)
     except (OSError, ValueError, subprocess.TimeoutExpired) as e:
         if keep and project in described:
             return described[project]
@@ -683,6 +688,36 @@ def describe(project, keep=False):
     described[project] = found
     autostart(project, found)
     return found
+
+
+ITEM = TypeAdapter(m.Item)
+
+
+def fits(item):
+    """Whether the page can draw an item (models.Item): plugins make theirs in shell, with jq."""
+    try:
+        ITEM.validate_python(item)
+        return True
+    except ValidationError:
+        return False
+
+
+def drawable(found):
+    """What `run.sh --web` said, its items fit for the page: one it could not draw (no url, say) is
+    left out with a note, rather than failing every answer it would be part of."""
+    notes = [n for n in found.get("notes") or [] if isinstance(n, str)] if isinstance(found.get("notes"), list) else []
+
+    def keep(items, where):
+        kept = [i for i in items if fits(i)] if isinstance(items, list) else []
+        if left := (len(items) if isinstance(items, list) else 1 if items else 0) - len(kept):
+            notes.append(f"{left} item{'s' * (left > 1)} of {where} left out: not an item the page can draw (a url and a title)")
+        return kept
+    lists = [{**l, "items": keep(l.get("items"), repr(l["title"]))} for l in found.get("lists") or []
+             if isinstance(l, dict) and isinstance(l.get("title"), str)]
+    if isinstance(found.get("lists"), list) and (left := len(found["lists"]) - len(lists)):
+        notes.append(f"{left} list{'s' * (left > 1)} of the project left out: not a list the page can draw (a title and items)")
+    return {**found, "lists": lists, "run_items": keep(found.get("run_items"), "the run items"),
+            "session_items": keep(found.get("session_items"), "the session items"), "notes": notes}
 
 
 def on_status(last):
@@ -1582,12 +1617,19 @@ async def relay(scope, receive, send, open_socket, uds=None, drop_cookies=False)
     host = next((v for k, v in headers if k.lower() == "host"), "upstream")
     if scope["type"] == "websocket":
         return await _relay_ws(scope, receive, send, open_socket, host, headers)
-    body = b""
-    while True:
-        m = await receive()
-        body += m.get("body", b"")
-        if not m.get("more_body"):
-            break
+    async def upload():  # passed on as it comes, never held whole
+        while True:
+            m = await receive()
+            if m["type"] == "http.disconnect":
+                return
+            if m.get("body"):
+                yield m["body"]
+            if not m.get("more_body"):
+                return
+    # A request without a body (a GET) goes without one, not as an empty chunked stream; one sent
+    # chunked goes on chunked (httpx's), one with a Content-Length with that.
+    sent = {k.decode("latin-1").lower() for k, _ in scope["headers"]}
+    body = upload() if sent & {"content-length", "transfer-encoding"} else b""
     try:
         if uds:  # a descriptor of the socket file itself, so the path is never followed again
             fd = await run_in_threadpool(_socket_fd, uds)
@@ -1690,8 +1732,18 @@ class Front:
         await self.app(scope, receive, send)
 
 
+class Route(APIRoute):
+    """A route of ours: it answers with the fields of its shape the server set, never a null for
+    one it did not (models.py)."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **{**kwargs, "response_model_exclude_unset": True})
+
+
+# One schema per shape, not an input and an output one: an optional field is optional both ways.
 app = FastAPI(title="claude-sandbox", description=__doc__.split("\n\n")[0], docs_url="/api/docs",
-              openapi_url="/api/openapi.json", redoc_url=None)
+              openapi_url="/api/openapi.json", redoc_url=None, separate_input_output_schemas=False)
+app.router.route_class = Route
 
 
 def _error(status):
@@ -1735,67 +1787,6 @@ def tell(sid, command):
     return {}
 
 
-# What the routes take: the shapes of their bodies, which /api/openapi.json publishes.
-class Body(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-
-class NewProject(Body):
-    name: str
-    repo: Optional[str] = None
-
-
-class Picture(Body):
-    type: str
-    data: str  # base64
-
-
-class Upload(Body):
-    name: str
-    data: str  # base64
-
-
-class NewSession(Body):
-    project: str
-    kind: Literal["run", "resume"]
-    run_id: Optional[str] = None
-    task: Optional[str] = None
-    images: Optional[List[Picture]] = None
-    ui: Literal["chat"] = "chat"  # every session is a chat
-
-
-class Message(Body):
-    text: str
-    images: Optional[List[Picture]] = None
-    files: Optional[List[Upload]] = None
-    nonce: Optional[str] = None
-
-
-class Answer(Body):
-    answers: Optional[Dict[str, Any]] = None
-    cancel: Optional[bool] = None
-
-
-class Text(Body):
-    text: str
-
-
-class Model(Body):
-    id: str
-
-
-class Effort(Body):
-    level: str
-
-
-class Code(Body):
-    code: str
-
-
-class Tidy(Body):
-    tidy: List[str] = []
-
-
 def dumps(items):
     return None if items is None else [i.model_dump() for i in items]
 
@@ -1813,7 +1804,7 @@ def page():
         return PlainTextResponse(UNBUILT, 503)
 
 
-@app.get("/api/state")
+@app.get("/api/state", response_model=m.AppState)
 def get_state(c: Conf = Depends(conf)):
     """Everything the dashboard draws, in one call."""
     with lock:
@@ -1821,48 +1812,48 @@ def get_state(c: Conf = Depends(conf)):
     return {"projects": projects(c.projects_file), "projects_file": str(c.projects_file), "sessions": live}
 
 
-@app.get("/api/projects")
+@app.get("/api/projects", response_model=m.Projects)
 def list_projects(c: Conf = Depends(conf)):
     return {"projects": projects(c.projects_file)}
 
 
-@app.post("/api/projects", status_code=201)
-def create_project(req: NewProject):
+@app.post("/api/projects", response_model=m.Created, status_code=201)
+def create_project(req: m.NewProject):
     add_project(req.name, req.repo)
     return {"name": req.name}
 
 
-@app.get("/api/projects/{name}")
+@app.get("/api/projects/{name}", response_model=m.ProjectInfo)
 def get_project(name: str, c: Conf = Depends(conf)):
     """What its plugins describe: lists, items, its agent."""
     return describe(known(c, name))
 
 
-@app.delete("/api/projects/{name}")
+@app.delete("/api/projects/{name}", response_model=m.Ok)
 def remove_project(name: str, c: Conf = Depends(conf)):
     delete_project(known(c, name))
     return {}
 
 
-@app.get("/api/projects/{name}/config")
+@app.get("/api/projects/{name}/config", response_model=m.ProjectConfig)
 def get_config(name: str, c: Conf = Depends(conf)):
     return read_config(known(c, name))
 
 
-@app.put("/api/projects/{name}/config")
+@app.put("/api/projects/{name}/config", response_model=m.ProjectConfig)
 def put_config(name: str, config: Dict[str, Any], c: Conf = Depends(conf)):
     write_config(known(c, name), config)
     return read_config(name)
 
 
-@app.get("/api/sessions")
+@app.get("/api/sessions", response_model=m.Sessions)
 def list_sessions():
     with lock:
         return {"sessions": [s.json() for s in sessions.values()]}
 
 
-@app.post("/api/sessions", status_code=201)
-def create_session(req: NewSession, c: Conf = Depends(conf)):
+@app.post("/api/sessions", response_model=m.Session, status_code=201)
+def create_session(req: m.NewSession, c: Conf = Depends(conf)):
     if req.project not in projects(c.projects_file):
         raise ValueError("not a configured project")
     s = start(req.project, req.kind, req.run_id, req.task, dumps(req.images))
@@ -1870,15 +1861,15 @@ def create_session(req: NewSession, c: Conf = Depends(conf)):
         return s.json()
 
 
-@app.get("/api/sessions/{sid}")
+@app.get("/api/sessions/{sid}", response_model=m.Session)
 def get_session(sid: str):
     s = session(sid)
     with lock:
         return s.json()
 
 
-@app.delete("/api/sessions/{sid}")
-def delete_session(sid: str, req: Optional[Tidy] = None):
+@app.delete("/api/sessions/{sid}", response_model=m.Failed)
+def delete_session(sid: str, req: Optional[m.Tidy] = None):
     """Gone from the list, stopped first if it still runs; with `tidy`, the urls of its run's items
     the page's user said yes to tidying up too (cleanup-offers). Says which failed."""
     s = session(sid)
@@ -1889,14 +1880,14 @@ def delete_session(sid: str, req: Optional[Tidy] = None):
     return {"failed": tidy(s, req.tidy if req else [], offered)}
 
 
-@app.post("/api/sessions/{sid}/stop")
+@app.post("/api/sessions/{sid}/stop", response_model=m.Ok)
 def stop_session(sid: str):
     """Its container goes, its entry stays: to read, to resume."""
     session(sid).stop()
     return {}
 
 
-@app.get("/api/sessions/{sid}/cleanup-offers")
+@app.get("/api/sessions/{sid}/cleanup-offers", response_model=m.Offers)
 def cleanup_offers(sid: str):
     """What its page asks about before deleting it, one yes/no each. Described afresh first: the
     pull request a run opened a moment ago is offered too, and one closed or merged since is not."""
@@ -1909,7 +1900,7 @@ def cleanup_offers(sid: str):
                        for i in found]}
 
 
-@app.get("/api/sessions/{sid}/plugins/{plugin}/commands/{name}")
+@app.get("/api/sessions/{sid}/plugins/{plugin}/commands/{name}", response_model=m.PluginResult)
 def run_plugin_command(sid: str, plugin: str, name: str):
     s = session(sid)
     return {"result": plugin_command(s.project, s.run_id, plugin, name)}
@@ -1960,85 +1951,85 @@ async def get_events(sid: str):
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
-@app.post("/api/sessions/{sid}/messages")
-def post_message(sid: str, req: Message):
+@app.post("/api/sessions/{sid}/messages", response_model=m.Ok)
+def post_message(sid: str, req: m.Message):
     session(sid).prompt(req.text, dumps(req.images), dumps(req.files), req.nonce)
     return {}
 
 
-@app.post("/api/sessions/{sid}/interrupt")
+@app.post("/api/sessions/{sid}/interrupt", response_model=m.Ok)
 def interrupt(sid: str):
     return tell(sid, {"type": "interrupt"})
 
 
-@app.post("/api/sessions/{sid}/questions/{ask}/answer")
-def answer_question(sid: str, ask: str, req: Answer):
+@app.post("/api/sessions/{sid}/questions/{ask}/answer", response_model=m.Ok)
+def answer_question(sid: str, ask: str, req: m.Answer):
     """{answers} or {cancel: true}."""
     return tell(sid, {"type": "answer", "id": ask, **req.model_dump(exclude_unset=True)})
 
 
-@app.put("/api/sessions/{sid}/model")
-def put_model(sid: str, req: Model):
+@app.put("/api/sessions/{sid}/model", response_model=m.Ok)
+def put_model(sid: str, req: m.ModelPick):
     return tell(sid, {"type": "model", "id": req.id})
 
 
-@app.put("/api/sessions/{sid}/effort")
-def put_effort(sid: str, req: Effort):
+@app.put("/api/sessions/{sid}/effort", response_model=m.Ok)
+def put_effort(sid: str, req: m.EffortPick):
     return tell(sid, {"type": "effort", "level": req.level})
 
 
-@app.delete("/api/sessions/{sid}/tasks/{task}")
+@app.delete("/api/sessions/{sid}/tasks/{task}", response_model=m.Ok)
 def stop_task(sid: str, task: str):
     """Stops a task its agent runs in the background."""
     return tell(sid, {"type": "task", "id": task})
 
 
-@app.post("/api/sessions/{sid}/calls/{call}/background")
+@app.post("/api/sessions/{sid}/calls/{call}/background", response_model=m.Ok)
 def background_call(sid: str, call: str):
     """Sends the task a tool call waits on to the background: the call returns, the task runs on."""
     return tell(sid, {"type": "background", "id": call})
 
 
-@app.post("/api/sessions/{sid}/sides", status_code=201)
-def create_side(sid: str, req: Text):
+@app.post("/api/sessions/{sid}/sides", response_model=m.SideId, status_code=201)
+def create_side(sid: str, req: m.Text):
     """A side chat, its first question asked; answers with its id."""
     return {"id": session(sid).side(None, req.text)}
 
 
-@app.post("/api/sessions/{sid}/sides/{side}/messages")
-def post_side_message(sid: str, side: str, req: Text):
+@app.post("/api/sessions/{sid}/sides/{side}/messages", response_model=m.SideId)
+def post_side_message(sid: str, side: str, req: m.Text):
     return {"id": session(sid).side(side, req.text)}
 
 
-@app.post("/api/sessions/{sid}/sides/{side}/interrupt")
+@app.post("/api/sessions/{sid}/sides/{side}/interrupt", response_model=m.Ok)
 def interrupt_side(sid: str, side: str):
     return tell(sid, {"type": "interrupt", "side": side})
 
 
-@app.delete("/api/sessions/{sid}/sides/{side}")
+@app.delete("/api/sessions/{sid}/sides/{side}", response_model=m.Ok)
 def close_side(sid: str, side: str):
     session(sid).side(side, None, close=True)
     return {}
 
 
-@app.get("/api/auth")
+@app.get("/api/auth", response_model=m.AuthConfig)
 def get_auth():
     return read_auth()
 
 
-@app.put("/api/auth")
+@app.put("/api/auth", response_model=m.AuthConfig)
 def put_auth(entries: Dict[str, Any]):
     write_auth(entries)
     return read_auth()
 
 
-@app.put("/api/auth/{name}/files/{field}")
+@app.put("/api/auth/{name}/files/{field}", response_model=m.AuthFileState)
 async def upload_auth_file(name: str, field: str, request: Request):
     """The body: the file itself."""
     return await run_in_threadpool(put_auth_file, name, field, await request.body())
 
 
-@app.delete("/api/auth/{name}/files/{field}")
+@app.delete("/api/auth/{name}/files/{field}", response_model=m.AuthFileState)
 def delete_auth_file(name: str, field: str):
     return put_auth_file(name, field, None)
 
@@ -2050,18 +2041,18 @@ def start_sign_in(agent: str):
     return RedirectResponse(sign_in(agent), 302)
 
 
-@app.post("/api/agents/{agent}/sign-in")
-def finish_sign_in(agent: str, req: Code):
+@app.post("/api/agents/{agent}/sign-in", response_model=m.Ok)
+def finish_sign_in(agent: str, req: m.Code):
     sign_in_code(agent, req.code)
     return {}
 
 
-@app.get("/api/agents/{agent}/sign-in-status")
+@app.get("/api/agents/{agent}/sign-in-status", response_model=m.SignInStatus)
 def sign_in_status(agent: str):
     return {"signedIn": signed_in(agent)}
 
 
-@app.post("/api/server/sync")
+@app.post("/api/server/sync", response_model=m.Synced)
 def post_sync(c: Conf = Depends(conf)):
     return sync(c.bind)
 
@@ -2143,7 +2134,12 @@ if __name__ == "__main__":
     parser.add_argument("--projects", type=Path,
                         default=Path.home() / ".config/claude-sandbox/projects",
                         help="directory with a <name>.json per project (default: %(default)s)")
+    parser.add_argument("--openapi", action="store_true",
+                        help="print the API's OpenAPI description and exit (web: npm run api-types)")
     args = parser.parse_args()
+    if args.openapi:
+        print(json.dumps(app.openapi(), indent=2, ensure_ascii=False))
+        sys.exit(0)
     # For every run.sh this starts, sessions and --web alike.
     os.environ["SANDBOX_WEB_BIND"] = web_bind(args.bind)
     if args.bind and os.environ["SANDBOX_WEB_BIND"] != args.bind:

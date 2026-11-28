@@ -195,8 +195,8 @@ it, as does `npm ci && npm run build` in `web`; until it is built the pages answ
 so. The app picks its page by the address — `/` the dashboard, `/chat#<id>` a session's
 conversation — and is grouped into `src/pages` (the two), `src/components`
 (by feature: `dashboard`, `chat`, `settings`, and `common` for what they share),
-`src/hooks` (the event stream, polling, the theme, …), `src/api` (typed calls to `/api/*` and the
-shapes of what comes back), `src/lib` (what is not React: a conversation built from its events,
+`src/hooks` (the event stream, polling, the theme, …), `src/api` (typed calls to `/api/*`, and the
+shapes of what goes and comes back, generated from the server's: see The API below), `src/lib` (what is not React: a conversation built from its events,
 tabs, diffs) and `src/styles`. A session's page loads its own part only where there is one: the
 chat its markdown ([react-markdown](https://github.com/remarkjs/react-markdown), never as HTML) and
 diffs ([jsdiff](https://github.com/kpdecker/jsdiff)), all bundled; only the fonts come from a CDN. To work on it, run the server and `npm run dev` in
@@ -215,6 +215,10 @@ only: the `Host` and `Origin` checks in `guard`). JSON in and out (a body as
 (a body not of the route's shape too), 404 nothing there, 405 another method (its `Allow` says
 which), 409 not now (an ended session, a name taken, no sign-in under way), 500 the server failed.
 The server describes it itself: `/api/openapi.json`, and `/api/docs` to try it in the browser.
+What each route takes and answers is a shape in [src/server/models.py](src/server/models.py); the
+page's types are generated from them (`web/src/api/schema.ts`, by `npm run api-types` in `web`),
+and the tests fail while it is stale. An item a
+plugin lists that is not of the page's shape (no `url`, say) is left out, with a note on the project.
 
 | Method and path | What it does |
 |---|---|

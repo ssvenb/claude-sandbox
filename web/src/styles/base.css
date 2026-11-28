@@ -1,4 +1,4 @@
-/* What the dashboard, the chat and the terminal share: the palette for day and night, type,
+/* What the dashboard and the chat share: the palette for day and night, type,
    buttons, the status lamp and the spinner.
 
    The picture is a building seen from the street: each session a window, lit amber while its
@@ -157,6 +157,6 @@ a.chip.live .lamp.up { border-color: var(--ok); background: var(--ok); animation
 .shot button:hover { color: var(--fail); }
 
 /* The app's root is not a box of its own: a page's parts lie in <body>, which each page lays out
-   (styles/dashboard.css, chat.css, terminal.css; index.html says which page it is, as
+   (styles/dashboard.css, chat.css; index.html says which page it is, as
    `data-page` on <html>, and each of those sheets holds for its page only). */
 #root { display: contents; }

@@ -18,8 +18,8 @@ export const SAYS: Record<SessionStatus, string> = {
 };
 export const SHORT: Record<SessionStatus, string> = { starting: 'Starting', working: 'Working', idle: 'Idle', question: 'Needs you' };
 
-/** A session's page: its chat, or the terminal of one that runs in a pty. */
-export const sessionPage = (s: Pick<Session, 'id' | 'ui'>): string => (s.ui === 'chat' ? '/chat#' : '/session#') + s.id;
+/** A session's page: its chat. */
+export const sessionPage = (s: Pick<Session, 'id'>): string => '/chat#' + s.id;
 
 /** The session this page is for: named after the `#` of its address. */
 export const sessionIdFromLocation = (): string => location.hash.slice(1);

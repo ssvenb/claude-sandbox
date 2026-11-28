@@ -43,7 +43,6 @@ export interface Session {
   run_id: string | null;
   started: number;
   exit: number | null;
-  ui?: 'chat' | 'terminal';
   status: SessionStatus | null;
   workspace?: string | null;
   /** Its project's enabled plugins. */

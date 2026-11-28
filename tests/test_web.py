@@ -74,13 +74,13 @@ def ui(tmp_path, ui_dist):
     listing = tmp_path / "projects"
     listing.mkdir()
     (listing / "proj.json").write_text(json.dumps({"repo": str(project)}))
-    proc = subprocess.Popen([REPO / "src/server/server.py", "--port", "0", "--projects", listing,
+    proc = subprocess.Popen([sys.executable, REPO / "src/server/server.py", "--port", "0", "--projects", listing,
                              ], stdout=subprocess.PIPE, text=True,
                             env={"PATH": f"{tmp_path}/bin:/usr/bin:/bin", "SHELL": "/bin/sh", "HOME": str(tmp_path)})
     base = proc.stdout.readline().split()[1]
 
     def call(path, body=None, method=None, **headers):
-        req = urllib.request.Request(base + path, data=body, headers=headers, method=method)
+        req = urllib.request.Request(base + path, data=body, headers={"Content-Type": "application/json", **headers}, method=method)
         try:
             return urllib.request.urlopen(req, timeout=10)
         except urllib.error.HTTPError as e:
@@ -209,18 +209,18 @@ def test_a_runs_published_port_is_a_subdomain_relayed_without_the_sign_ins_cooki
 
     def ask(host, cookie="a=1", to=server):
         with socket.create_connection(("127.0.0.1", to.server_address[1]), timeout=5) as c:
-            c.sendall(f"GET /x?y=1 HTTP/1.1\r\nHost: {host}\r\nCookie: {cookie}\r\n\r\n".encode())
+            c.sendall(f"GET /x?y=1 HTTP/1.1\r\nHost: {host}\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n".encode())
             got = b""
             while chunk := c.recv(4096):
                 got += chunk
             return got.decode()
     try:
         got = ask("0a1b2c-3000.box.example.com", "_oauth2_proxy=me; a=1; _oauth2_proxy_csrf=x; b=2")
-        assert got.startswith("HTTP/1.0 200") and "GET /x?y=1 HTTP/1.1" in got
-        assert "Host: 0a1b2c-3000.box.example.com" in got and "Cookie: a=1; b=2" in got and "me" not in got
+        assert got.startswith("HTTP/1.1 200") and "GET /x?y=1 HTTP/1.1" in got
+        assert "host: 0a1b2c-3000.box.example.com" in got.lower() and "Cookie: a=1; b=2" in got and "me" not in got
         assert "Cookie" not in ask("0a1b2c-3000.box.example.com:4180", "_oauth2_proxy=me")  # nothing else
-        assert ask("0a1b2c-3001.box.example.com").startswith("HTTP/1.0 502")  # not published
-        assert ask("0a1b2c-3000.evil.example").startswith("HTTP/1.0 403")  # not our name: our own guard's
+        assert ask("0a1b2c-3001.box.example.com").startswith("HTTP/1.1 502")  # not published
+        assert ask("0a1b2c-3000.evil.example").startswith("HTTP/1.1 403")  # not our name: our own guard's
         # Behind the relay, the demo answers the subdomain itself, rather than relaying it once more.
         got = ask("0a1b2c-3000.box.example.com", to=demo)
         assert "not published" not in got and "GET /x?y=1" not in got
@@ -262,7 +262,7 @@ def test_only_what_the_build_made_for_the_pages_is_served(ui, path):
 def test_without_a_build_the_pages_say_how_to_make_one(tmp_path):
     for part in ("src/server", "src/orchestrator"):  # the server, with the auth.py it reads authentications with
         shutil.copytree(REPO / part, tmp_path / part, ignore=shutil.ignore_patterns("__pycache__"))
-    proc = subprocess.Popen([tmp_path / "src/server/server.py", "--port", "0", "--projects", tmp_path / "projects"],
+    proc = subprocess.Popen([sys.executable, tmp_path / "src/server/server.py", "--port", "0", "--projects", tmp_path / "projects"],
                             stdout=subprocess.PIPE, text=True, env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)})
     try:
         base = proc.stdout.readline().split()[1]
@@ -329,7 +329,7 @@ def test_a_plugins_server_starts_on_first_use_behind_the_guarded_tunnel(ui):
     docker.write_text(FAKE_DOCKER)
 
     seen = ui(vscode + "?folder=/x").read()  # started afresh, the failed one gone
-    assert seen.startswith(b"GET /plugins/agent-workspace/?folder=/x HTTP/1.1\r\n") and b"Connection: close" in seen
+    assert seen.startswith(b"GET /plugins/agent-workspace/?folder=/x HTTP/1.1\r\n")  # its path as it came
     assert ui(vscode, b"body").read().startswith(b"POST /plugins/agent-workspace/ ")  # the same server again
     assert ui("/plugins/agent-workspace").read().startswith(b"GET /plugins/agent-workspace ")
     # What a plugin serves may be a shell on this machine: our own page only.
@@ -337,6 +337,44 @@ def test_a_plugins_server_starts_on_first_use_behind_the_guarded_tunnel(ui):
     assert ui(vscode, Host="evil.example").status == 403
     assert ui("/plugins/github-auth/").status == 502  # serves nothing
     assert ui("/pluginsx").status == 404
+
+
+def test_a_plugins_websocket_and_requests_pass_the_tunnel_as_they_came_and_never_a_planted_link(tmp_path, monkeypatch):
+    """VS Code in the browser lives on its WebSocket: through the tunnel it reaches the plugin's server
+    with the browser's Host, path and subprotocol, both ways; a link planted where its socket was is
+    never followed, and another site's page is refused before anything is relayed."""
+    from websockets.sync.client import connect as ws
+    from websockets.sync.server import unix_serve
+    from websockets.exceptions import InvalidStatus
+
+    def echo(conn):
+        conn.send(json.dumps({"host": conn.request.headers["Host"], "path": conn.request.path}))
+        for message in conn:
+            conn.send(message)
+    path = str(tmp_path / "socket")
+    plugin = unix_serve(echo, path, subprotocols=["vscode"])
+    threading.Thread(target=plugin.serve_forever, daemon=True).start()
+    monkeypatch.setattr(web, "plugin_server", lambda name: path)
+    call = api_server(tmp_path, monkeypatch)
+    port = call.server.server_address[1]
+    try:
+        with ws(f"ws://127.0.0.1:{port}/plugins/agent-workspace/ws?t=1", subprotocols=["vscode"],
+                origin=f"http://127.0.0.1:{port}") as c:
+            assert json.loads(c.recv(timeout=5)) == {"host": f"127.0.0.1:{port}", "path": "/plugins/agent-workspace/ws?t=1"}
+            assert c.subprotocol == "vscode"
+            c.send("text")
+            c.send(b"\x00bytes")
+            assert (c.recv(timeout=5), c.recv(timeout=5)) == ("text", b"\x00bytes")
+        with pytest.raises(InvalidStatus):  # another site's page
+            ws(f"ws://127.0.0.1:{port}/plugins/agent-workspace/ws", origin="http://evil.example")
+        os.rename(path, path + ".real")
+        os.symlink(path + ".real", path)  # this machine's docker.sock, say
+        with pytest.raises(InvalidStatus):
+            ws(f"ws://127.0.0.1:{port}/plugins/agent-workspace/ws", origin=f"http://127.0.0.1:{port}")
+        assert call("GET", "/plugins/agent-workspace/")[0] == 502  # nor a request
+    finally:
+        call.server.shutdown()
+        plugin.shutdown()
 
 
 def test_the_page_gets_what_the_projects_plugins_describe(ui):
@@ -444,9 +482,10 @@ def test_projects_are_added_and_deleted_and_authentications_saved_readable_by_yo
         key.write_bytes(data)
         assert web.describe_file(key, "credentialFile")["kind"] == kind
     key.write_bytes(b"-----BEGIN KEY-----\n")
-    for where, data in (("coder/files/appId", b"x"), ("..%2Fx/files/privateKeyFile", b"x"),
+    for where, data in (("coder/files/appId", b"x"), ("%2E%2E/files/privateKeyFile", b"x"),
                         ("coder/files/privateKeyFile", b""), ("coder/files/privateKeyFile", b"x" * (web.MAX_AUTH_FILE + 1))):
         assert upload(where, data).status == 400
+    assert upload("..%2Fx/files/privateKeyFile", b"x").status == 404  # a name has no "/": no such path
     assert not (file.parent / "x").exists() and key.read_bytes() == b"-----BEGIN KEY-----\n"
     assert json.load(ui("/api/auth/coder/files/privateKeyFile", method="DELETE"))["exists"] is False
     assert not key.exists() and json.load(ui("/api/auth"))["files"] == {}
@@ -926,14 +965,15 @@ def test_a_chat_streams_its_events_and_takes_answers_and_interrupts(chat, tmp_pa
     base = f"http://127.0.0.1:{server.server_address[1]}"
 
     def post(path, body=None, origin=base, method="POST"):
-        req = urllib.request.Request(base + path, json.dumps(body or {}).encode(), headers={"Origin": origin}, method=method)
+        req = urllib.request.Request(base + path, json.dumps(body or {}).encode(), method=method,
+                                     headers={"Origin": origin, "Content-Type": "application/json"})
         try:
             return urllib.request.urlopen(req, timeout=5).status
         except urllib.error.HTTPError as e:
             return e.code
     try:
         s = json.load(urllib.request.urlopen(urllib.request.Request(base + "/api/sessions", json.dumps(
-            {"project": "proj", "kind": "run"}).encode())))
+            {"project": "proj", "kind": "run"}).encode(), {"Content-Type": "application/json"})))
         assert s["status"] == "starting" and "ui" not in s  # every session is a chat
         assert json.load(urllib.request.urlopen(f"{base}/api/sessions/{s['id']}"))["id"] == s["id"]
         assert [x["id"] for x in json.load(urllib.request.urlopen(f"{base}/api/sessions"))["sessions"]] == [s["id"]]
@@ -1342,8 +1382,14 @@ def test_serve_oauth_runs_the_server_behind_the_proxy_and_ends_with_it(tmp_path)
         assert args.rstrip().endswith("--extra --cookie-name=_oauth2_proxy")
         os.kill(int((tmp_path / "pid").read_text()), 15)  # the proxy ending ends the server too
         p.wait(timeout=10)
-        with pytest.raises(OSError):
-            urllib.request.urlopen(f"http://127.0.0.1:{upstream}/api/state", timeout=1)
+        for _ in range(50):  # the server, told to go, goes (once what it was answering is answered)
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{upstream}/api/state", timeout=1)
+                time.sleep(0.1)
+            except OSError:
+                break
+        else:
+            pytest.fail("the server outlived the proxy")
     finally:
         p.kill()
 
@@ -1394,7 +1440,7 @@ def api_server(tmp_path, monkeypatch):
     def call(method, path, body=None):
         data = None if body is None else body if isinstance(body, bytes) else json.dumps(body).encode()
         try:
-            got = opener.open(urllib.request.Request(base + path, data, method=method), timeout=10)
+            got = opener.open(urllib.request.Request(base + path, data, {"Content-Type": "application/json"}, method=method), timeout=10)
         except urllib.error.HTTPError as e:
             got = e
         raw = got.read()
@@ -1455,6 +1501,19 @@ def test_each_of_a_chats_commands_is_a_resource_of_its_own(tmp_path, monkeypatch
     finally:
         call.server.shutdown()
         web.sessions.clear()
+
+
+def test_the_api_describes_itself_as_openapi(tmp_path, monkeypatch):
+    call = api_server(tmp_path, monkeypatch)
+    try:
+        status, spec, _ = call("GET", "/api/openapi.json")
+        assert status == 200 and spec["openapi"].startswith("3.")
+        assert {"/api/sessions", "/api/sessions/{sid}/messages", "/api/projects/{name}/config", "/api/auth"} <= set(spec["paths"])
+        assert "/" not in spec["paths"] and "/chat" not in spec["paths"]  # the pages are not API
+        message = spec["components"]["schemas"]["Message"]
+        assert message["required"] == ["text"] and "nonce" in message["properties"]
+    finally:
+        call.server.shutdown()
 
 
 def test_an_agents_sign_in_over_http_redirects_to_its_link_and_takes_its_code_once(signing_agent, tmp_path, monkeypatch):

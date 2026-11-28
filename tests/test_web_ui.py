@@ -15,6 +15,7 @@ import base64
 import json
 import shutil
 import subprocess
+import sys
 import time
 import urllib.request
 
@@ -76,7 +77,7 @@ def board(tmp_path, browser, ui_dist):
     checkout.mkdir(parents=True)
     (tmp_path / "projects").mkdir()
     (tmp_path / "projects/proj.json").write_text(json.dumps({"repo": str(project)}))
-    proc = subprocess.Popen([sandbox / "src/server/server.py", "--port", "0", "--projects", tmp_path / "projects"],
+    proc = subprocess.Popen([sys.executable, sandbox / "src/server/server.py", "--port", "0", "--projects", tmp_path / "projects"],
                             stdout=subprocess.PIPE, text=True,
                             env={"PATH": f"{tmp_path}/bin:/usr/bin:/bin", "HOME": str(tmp_path),
                                  "SHELL": "/bin/sh", "XDG_DATA_HOME": str(tmp_path / "data"), "STUB_BOOT": "0.02"})
@@ -121,7 +122,7 @@ def board(tmp_path, browser, ui_dist):
     def resume():
         """A session of RUN, the way the PR's Resume button starts one."""
         req = urllib.request.Request(base + "/api/sessions", json.dumps(
-            {"project": "proj", "kind": "resume", "run_id": RUN}).encode())
+            {"project": "proj", "kind": "resume", "run_id": RUN}).encode(), {"Content-Type": "application/json"})
         s = json.load(urllib.request.urlopen(req))
         page.wait_for_selector(".window")
         return s

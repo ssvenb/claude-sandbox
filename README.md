@@ -188,7 +188,7 @@ agent's home directory, so it only outlives the container while Claude's `CLAUDE
 mounts it from the host (both on by default); without them a resumed run starts a new conversation
 on the old branch.
 
-The server needs only `python3` and [uv](https://docs.astral.sh/uv/) on the host; `gh` is not needed. The pages are one
+The server needs only `python3` and [uv](https://docs.astral.sh/uv/) on the host (`serve.sh` keeps its environment in sync, [FastAPI](https://fastapi.tiangolo.com) on [uvicorn](https://www.uvicorn.org) among it); `gh` is not needed. The pages are one
 [React](https://react.dev) app in TypeScript, [web](web), built with [Vite](https://vite.dev)
 (Node 20 or later, with npm) into `web/dist`, which the server hands out: `./install.sh` builds
 it, as does `npm ci && npm run build` in `web`; until it is built the pages answer 503 and say
@@ -210,10 +210,11 @@ runs in a scope of its own (`systemd-run --user --scope`), outside the server un
 ### The API
 
 What the pages call, under `/api`, all of it behind the same guard as the pages (our own page
-only: the `Host` and `Origin` checks in `Handler.guard`). JSON in and out; an error is
-`{"error": …}` with its status: 400 a bad request, 404 nothing there, 405 another method (its
-`Allow` says which), 409 not now (an ended session, a name taken, no sign-in under way), 500 the
-server failed.
+only: the `Host` and `Origin` checks in `guard`). JSON in and out (a body as
+`Content-Type: application/json`); an error is `{"error": …}` with its status: 400 a bad request
+(a body not of the route's shape too), 404 nothing there, 405 another method (its `Allow` says
+which), 409 not now (an ended session, a name taken, no sign-in under way), 500 the server failed.
+The server describes it itself: `/api/openapi.json`, and `/api/docs` to try it in the browser.
 
 | Method and path | What it does |
 |---|---|

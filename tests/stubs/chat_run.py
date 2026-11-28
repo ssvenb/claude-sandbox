@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Stands in for run.sh under the web UI's tests (and for looking at the pages without Docker).
 
-`--web` prints web.json from next to it, `--web-action` is logged to `actions`. A session without
-`--chat` is the agent's own TUI: it says it has a question, then is a shell (to type into). With
-`--chat` it is a sandbox that boots (a few lines of output, STUB_BOOT seconds apart), then an
+`--web` prints web.json from next to it, `--web-action` is logged to `actions`. A session
+(`--chat`) is a sandbox that boots (a few lines of output, STUB_BOOT seconds apart), then an
 agent behind a chat bridge, speaking src/services/chat/chat-bridge.mjs on stdio (the boot waits for as long
 as a file `hold` lies next to this one): each prompt gets a turn
 that thinks, runs tools and answers. What the prompt says picks the turn:
@@ -17,7 +16,6 @@ that thinks, runs tools and answers. What the prompt says picks the turn:
 It takes side chats: a question there is answered in a line ("long": once interrupted), and a
 resumed run has one from before.
 """
-import base64
 import json
 import os
 import queue
@@ -53,12 +51,6 @@ if args[:1] == ["--web-action"]:
         f.write(" ".join(args[1:4]) + "\n")
     print("{}")
     sys.exit(0)
-if "--chat" not in args:
-    task = args[args.index("--task") + 1] if "--task" in args else ""
-    print(f"agent {args[1]} at work" + (f" on: {task}" if task else ""), flush=True)
-    sys.stdout.write("\033]1337;SetUserVar=agent_status=%s\007" % base64.b64encode(b"question").decode())
-    sys.stdout.flush()
-    os.execv("/bin/sh", ["sh"])  # a TUI to type into: the terminal page's keys are tested on it
 
 BOOT = float(os.environ.get("STUB_BOOT", "0.05"))
 PACE = float(os.environ.get("STUB_PACE", "0"))

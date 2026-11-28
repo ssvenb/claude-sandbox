@@ -1,5 +1,4 @@
-"""src/server/server.py: chats on pipes and terminals in ptys, streamed to the page; only our own page
-may drive it."""
+"""src/server/server.py: chats on pipes, streamed to the page; only our own page may drive it."""
 import base64
 import json
 import os
@@ -118,6 +117,7 @@ def test_a_tls_proxy_puts_the_page_on_https(ui):
     ({"project": "/etc", "kind": "run"}, {}, 400),                         # not a configured project
     ({"kind": "resume", "run_id": "x; rm -rf"}, {}, 400),                  # not a run id
     ({"kind": "shell"}, {}, 400),                                          # no shell on this machine
+    ({"kind": "run", "ui": "terminal"}, {}, 400),                          # no terminals: every session is a chat
     ({"kind": "run"}, {"Origin": "http://evil.example"}, 403),             # another site's page
     ({"kind": "run"}, {"Host": "evil.example"}, 403),                      # DNS rebinding
     ({"kind": "run"}, {"Host": "127.0.0.1:1", "Origin": "http://127.0.0.1:2"}, 403),  # another port's page
@@ -130,13 +130,9 @@ def test_requests_that_must_not_start_anything(ui, body, headers, status):
 
 def test_sandbox_sessions_run_run_sh_under_an_id_the_ui_knows():
     run = [str(REPO / "run.sh"), "--project", "app"]
-    assert web.command("app", "run", "0a1b2c") == [*run, "--run-id", "0a1b2c"]
-    assert web.command("app", "resume", "0a1b2c") == [*run, "--resume", "0a1b2c"]
-    assert web.command("app", "run", "0a1b2c", "Fix #7") == [*run, "--run-id", "0a1b2c", "--task", "Fix #7"]
-    assert web.command("app", "resume", "0a1b2c", None, True) == [*run, "--resume", "0a1b2c", "--chat"]
-    assert web.command("app", "run", "0a1b2c", None, True, {"GH_AUTH": "reviewer"})[-3:] == ["--chat", "--set", "GH_AUTH=reviewer"]
-    with pytest.raises(ValueError, match="ui must be chat or terminal"):
-        web.start("/p", "run", None, None, "tui")
+    assert web.command("app", "run", "0a1b2c") == [*run, "--run-id", "0a1b2c", "--chat"]  # a chat, its task its first prompt
+    assert web.command("app", "resume", "0a1b2c") == [*run, "--resume", "0a1b2c", "--chat"]
+    assert web.command("app", "run", "0a1b2c", {"GH_AUTH": "reviewer"})[-3:] == ["--chat", "--set", "GH_AUTH=reviewer"]
     for kind, run_id, task in (("resume", "0a1b2c", "x"), ("run", None, 7),
                                ("run", None, "  ")):
         with pytest.raises(ValueError, match="a task starts a new run"):
@@ -238,7 +234,8 @@ def test_a_runs_published_port_is_a_subdomain_relayed_without_the_sign_ins_cooki
 def test_the_pages_are_one_built_app_and_what_it_loads_is_served_under_its_own_path(ui):
     page = ui("/").read()
     assert b'<div id="root">' in page and ui("/").headers["Content-Type"].startswith("text/html")
-    assert ui("/chat").read() == page and ui("/session").read() == page  # the app picks the page by its path
+    assert ui("/chat").read() == page  # the app picks the page by its path
+    assert ui("/session").status == 404  # a terminal's page, gone with the terminals
     assert b"localStorage.getItem('theme')" in page  # the pinned day or night, set before the first paint
     scripts, styles = re.findall(rb'src="(/assets/[^"]+\.js)"', page), re.findall(rb'href="(/assets/[^"]+\.css)"', page)
     assert len(scripts) == 1 and styles
@@ -246,11 +243,11 @@ def test_the_pages_are_one_built_app_and_what_it_loads_is_served_under_its_own_p
     assert script.status == 200 and script.headers["Content-Type"].startswith("text/javascript")
     code = script.read()
     assert b"/api/project" in code  # the dashboard; a session's page loads its own part, only where there is one
-    for part in (b"Message to the agent", b"xterm"):  # the chat's composer, the terminal's xterm.js
-        assert part not in code
-        [chunk] = [f.name for f in (UI / "dist/assets").glob("*.js") if part in f.read_bytes()]
-        got = ui(f"/assets/{chunk}")
-        assert got.status == 200 and got.headers["Content-Type"].startswith("text/javascript") and chunk.encode() in code
+    assert b"Message to the agent" not in code  # the chat's composer
+    [chunk] = [f.name for f in (UI / "dist/assets").glob("*.js") if b"Message to the agent" in f.read_bytes()]
+    got = ui(f"/assets/{chunk}")
+    assert got.status == 200 and got.headers["Content-Type"].startswith("text/javascript") and chunk.encode() in code
+    assert not [f for f in (UI / "dist/assets").glob("*.js") if b"xterm" in f.read_bytes()]  # no terminal's xterm.js
     for style in styles:
         got = ui(style.decode())
         assert got.status == 200 and got.headers["Content-Type"].startswith("text/css")
@@ -269,7 +266,7 @@ def test_without_a_build_the_pages_say_how_to_make_one(tmp_path):
                             stdout=subprocess.PIPE, text=True, env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)})
     try:
         base = proc.stdout.readline().split()[1]
-        for page in ("/", "/chat", "/session"):
+        for page in ("/", "/chat"):
             with pytest.raises(urllib.error.HTTPError) as e:
                 urllib.request.urlopen(base + page, timeout=10)
             assert e.value.code == 503 and e.value.headers["Content-Type"].startswith("text/plain")
@@ -511,10 +508,10 @@ def test_a_session_outlives_its_tabs_until_stopped_or_deleted(tmp_path, monkeypa
     base = f"http://127.0.0.1:{server.server_address[1]}"
     post = lambda path: urllib.request.urlopen(urllib.request.Request(  # noqa: E731
         base + path, b"", headers={"Origin": base}), timeout=5)
-    stopped = web.start(str(tmp_path), "resume", "0a1b2c", ui="terminal")
-    deleted = web.start(str(tmp_path), "resume", "3d4e5f", ui="terminal")
+    stopped = web.start(str(tmp_path), "resume", "0a1b2c")
+    deleted = web.start(str(tmp_path), "resume", "3d4e5f")
     try:
-        urllib.request.urlopen(f"{base}/api/sessions/{stopped.id}/stream", timeout=5).close()
+        urllib.request.urlopen(f"{base}/api/sessions/{stopped.id}/events", timeout=5).close()
         for _ in range(10):  # a few keepalives: the closed tab is long noticed
             time.sleep(0.1)
         assert (stopped.exit, stopped.listeners) == (None, [])  # the tab is let go, the session runs on
@@ -537,52 +534,6 @@ def test_a_session_outlives_its_tabs_until_stopped_or_deleted(tmp_path, monkeypa
         web.sessions.clear()
 
 
-def marker(state):
-    return b"\x1b]1337;SetUserVar=agent_status=" + base64.b64encode(state.encode()) + b"\x07"
-
-
-def test_a_sessions_status_is_what_its_agent_last_said_else_whether_output_flows(tmp_path, monkeypatch):
-    out = tmp_path / "out"
-    script = tmp_path / "agent"
-    # Says each line of `out` it is given, raw: the agent-status hook's marker among other output,
-    # the second one split over two writes.
-    script.write_text("#!/bin/sh\nstty -echo\nwhile read f; do cat \"$f\"; done\n")
-    script.chmod(0o755)
-    monkeypatch.setattr(web, "command", lambda *_: [str(script)])
-    s = web.start(str(tmp_path), "resume", "0a1b2c", ui="terminal")
-
-    def says(*chunks, then):
-        for chunk in chunks:
-            seen = len(s.buf)
-            out.write_bytes(chunk)
-            s.write(f"{out}\n".encode())
-            for _ in range(100):  # until the agent has said all of it
-                if len(s.buf) >= seen + len(chunk):
-                    break
-                time.sleep(0.05)
-        assert s.status() == then, bytes(s.buf)
-
-    try:
-        assert s.status() == "working"  # nothing said yet, and its output just started
-        s.output -= web.QUIET
-        assert s.status() == "idle"  # quiet: nothing to do
-        says(b"text " + marker("question") + b" more", then="question")
-        m = marker("idle")
-        says(m[:9], m[9:], then="idle")
-        says(marker("bogus"), marker("working"), then="working")
-        s.output -= web.STALE + 1  # working, yet silent this long: it was interrupted
-        assert s.status() == "idle"
-        assert s.json()["status"] == "idle"
-    finally:
-        s.stop()
-        for _ in range(50):
-            if s.exit is not None:
-                break
-            time.sleep(0.1)
-        web.sessions.clear()
-    assert s.status() is None  # ended
-
-
 @pytest.mark.parametrize("event, said", [
     ({"hook_event_name": "UserPromptSubmit"}, b"working"),
     ({"hook_event_name": "PreToolUse", "tool_name": "Bash"}, b"working"),
@@ -595,7 +546,8 @@ def test_a_sessions_status_is_what_its_agent_last_said_else_whether_output_flows
 ])
 def test_the_agent_status_hook_writes_its_state_to_the_agents_terminal(event, said):
     """The hook finds the terminal through its parent (here, the shell holding the pty) and writes
-    the marker the server reads; it never prints anything or fails the agent's tool call."""
+    its marker (an iTerm2-style user var, for the terminal run.sh runs in); it never prints anything
+    or fails the agent's tool call."""
     import pty
     hook = REPO / "plugins/agent-status/bin/agent-status.py"
     pid, fd = pty.fork()
@@ -612,7 +564,7 @@ def test_the_agent_status_hook_writes_its_state_to_the_agents_terminal(event, sa
             break
         got += chunk
     os.waitpid(pid, 0)
-    found = web.STATUS.findall(got)
+    found = re.findall(rb"\x1b\]1337;SetUserVar=agent_status=([A-Za-z0-9+/=]*)(?:\x07|\x1b\\)", got)
     assert [base64.b64decode(f) for f in found] == ([said] if said else [])
     assert got.endswith(b"rc=0\r\n")
 
@@ -761,7 +713,7 @@ def test_a_demo_is_up_once_its_server_answers_not_once_its_port_is_published(mon
 
 def test_a_running_sessions_live_items_are_read_afresh_on_every_poll(tmp_path, monkeypatch):
     """web_live_items: a file a plugin keeps current (the central port proxy's published ports),
-    re-read for each running session; an ended session, or a terminal, shows none."""
+    re-read for each running session; an ended session shows none."""
     from types import SimpleNamespace as NS
     live = tmp_path / "items.json"
     monkeypatch.setitem(web.described, str(tmp_path), {"lists": [], "live": [str(live), str(tmp_path / "none")]})
@@ -770,8 +722,8 @@ def test_a_running_sessions_live_items_are_read_afresh_on_every_poll(tmp_path, m
     live.write_text(json.dumps([port, {"run_id": "ffffff", "ref": ":3000", "url": "x"}, "junk"]))
     assert web.live_items(str(tmp_path), "0a1b2c") == [port]
     assert web.live_items(str(tmp_path), None) == []
-    s = NS(project=str(tmp_path), run_id="0a1b2c", exit=None, kind="resume", id="a", started=0,
-           ui="terminal", status=lambda: None, shown=lambda: None)
+    s = NS(project=str(tmp_path), run_id="0a1b2c", exit=None, kind="resume", id="a", started=0, shown=lambda: None,
+           title="", activity="", said="", info={}, cost=None, context=None, waiting=[], todos=[])
     assert web.Session.json(s)["items"] == [port]
     s.exit = 0
     assert web.Session.json(s)["items"] == []
@@ -822,7 +774,7 @@ def chat(tmp_path, monkeypatch):
 def test_prompts_typed_while_the_sandbox_starts_wait_and_reach_the_agent_in_order(chat, monkeypatch):
     monkeypatch.setenv("STUB_BOOT", "0.2")
     s = chat(task="first, please")  # a task is simply the first message
-    assert (s.ui, s.status(), s.json()["title"]) == ("chat", "starting", "first, please")
+    assert (s.status(), s.json()["title"]) == ("starting", "first, please")
     s.prompt("then ask me")
     assert [(e["text"], e.get("queued")) for e in s.events if e["type"] == "user"] == [
         ("first, please", True), ("then ask me", True)]
@@ -926,7 +878,7 @@ def test_a_prompt_sent_again_under_the_same_nonce_is_taken_once(chat):
 def test_a_prompt_takes_the_images_pasted_into_it(chat, monkeypatch):
     monkeypatch.setenv("STUB_BOOT", "0.2")
     picture = {"type": "image/png", "data": PNG}
-    s = web.start(str(chat.tmp), "run", None, None, None, [picture])  # a first message of only a picture
+    s = web.start(str(chat.tmp), "run", None, images=[picture])  # a first message of only a picture
     try:
         assert s.json()["title"] == "Image" and s.events[0] == {"type": "user", "id": "u1", "text": "", "images": [picture], "queued": True}
         chat.until(s, lambda s: s.ready)
@@ -940,8 +892,6 @@ def test_a_prompt_takes_the_images_pasted_into_it(chat, monkeypatch):
                     [{"type": "image/png", "data": "A" * (7 << 20)}]):
             with pytest.raises(ValueError):
                 s.prompt("look", bad)
-        with pytest.raises(ValueError):
-            web.start(str(chat.tmp), "run", None, "look", "terminal", [picture])
     finally:
         s.stop()
         chat.until(s, lambda s: s.exit is not None)
@@ -981,7 +931,7 @@ def test_a_chat_streams_its_events_and_takes_answers_and_interrupts(chat, tmp_pa
     try:
         s = json.load(urllib.request.urlopen(urllib.request.Request(base + "/api/sessions", json.dumps(
             {"project": "proj", "kind": "run"}).encode())))
-        assert s["ui"] == "chat" and s["status"] == "starting"
+        assert s["status"] == "starting" and "ui" not in s  # every session is a chat
         live = web.sessions[s["id"]]
         events = urllib.request.urlopen(f"{base}/api/sessions/{s['id']}/events", timeout=10)
 
@@ -1012,10 +962,11 @@ def test_a_chat_streams_its_events_and_takes_answers_and_interrupts(chat, tmp_pa
         assert read(lambda e: e["type"] == "model")["id"] == "opus"
 
         assert post(f"/api/sessions/{s['id']}/prompt", {"text": "  "}) == 400          # not a message
-        assert post(f"/api/sessions/{s['id']}/input") == 400                           # a chat has no keys
-        assert urllib.request.urlopen(f"{base}/api/sessions/{s['id']}/stream", timeout=5).status == 0
-    except urllib.error.HTTPError as e:
-        assert e.code == 400  # nor a terminal's stream
+        for gone in ("input", "resize?cols=80&rows=24"):                               # no terminals: no keys, no size
+            assert post(f"/api/sessions/{s['id']}/{gone}") == 404
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(f"{base}/api/sessions/{s['id']}/stream", timeout=5)  # nor a terminal's stream
+        assert e.value.code == 404
         assert post(f"/api/sessions/{s['id']}/prompt", {"text": "x"}, "http://evil.example") == 403  # nor another site's page
     finally:
         live.stop()
@@ -1179,7 +1130,7 @@ def test_a_session_under_a_system_unit_goes_into_a_system_scope(tmp_path, monkey
     monkeypatch.setattr(web.shutil, "which", lambda _: "/usr/bin/systemd-run")
     monkeypatch.setattr(web.subprocess, "run", lambda cmd, **_: subprocess.CompletedProcess(cmd, int("--user" in cmd)))
     monkeypatch.setattr(web.subprocess, "Popen", lambda cmd, **_: spawned.append(cmd))
-    web.hold(tmp_path, "pty", ["true"], tmp_path)
+    web.hold(tmp_path, ["true"], tmp_path)
     assert spawned[0][:2] == ["systemd-run", "--scope"]
 
 
@@ -1274,51 +1225,19 @@ def test_a_chat_runs_on_through_a_restart_of_the_server(chat):
     assert again.exit is not None and again.title == "Keep me" and again.events[-1]["type"] == "exit"
 
 
-def test_a_terminal_runs_on_through_a_restart_and_says_how_it_ended_while_no_server_listened(tmp_path, monkeypatch):
-    monkeypatch.setattr(web, "command", lambda *_: ["/bin/sh"])
-    configured(tmp_path, monkeypatch)
-    s = web.start("proj", "resume", "0a1b2c", ui="terminal")
-    try:
-        s.write(b"echo be$((40+2))\n")
-        for _ in range(100):
-            if b"be42" in s.buf:
-                break
-            time.sleep(0.05)
-        back = restart()[s.id]
-        for _ in range(100):  # its screen comes back from its holder
-            if b"be42" in back.buf:
-                break
-            time.sleep(0.05)
-        assert b"be42" in back.buf and back.exit is None
-        back.write(b"sleep 0.5; exit 3\n")
-        time.sleep(0.2)
-        with web.lock:
-            back.save()
-            back._data = back._end = back.save = back.close = lambda *_: None
-            back.sock.shutdown(socket.SHUT_RDWR)
-            web.sessions.clear()
-        time.sleep(1)
-        web.restore()
-        last = web.sessions[s.id]
-        for _ in range(100):
-            if last.exit is not None:
-                break
-            time.sleep(0.05)
-        assert last.exit == 3
-    finally:
-        web.sessions.clear()
-
-
-def test_a_shell_left_from_before_is_ended_not_taken_back(tmp_path, monkeypatch):
+@pytest.mark.parametrize("was", [{"kind": "shell", "run_id": None}, {"ui": "terminal"}])
+def test_a_shell_or_terminal_left_from_before_is_ended_not_taken_back(tmp_path, monkeypatch, was):
+    """An older server's host shell (never again drivable from the page), or an agent's TUI in a
+    terminal (there are none any more): ended, running or not, rather than taken back."""
     monkeypatch.setattr(web, "command", lambda *_: ["/bin/sh"])
     monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
     (tmp_path / "docker").write_text("#!/bin/sh\n")
     (tmp_path / "docker").chmod(0o755)
-    s = web.start("", "resume", "0a1b2c", ui="terminal")
+    s = web.start("", "resume", "0a1b2c")
     meta = s.dir / "meta.json"
-    meta.write_text(json.dumps({**json.loads(meta.read_text()), "kind": "shell", "run_id": None}))
+    meta.write_text(json.dumps({**json.loads(meta.read_text()), **was}))
     try:
-        assert s.id not in restart()  # an older server's host shell: never again drivable from the page
+        assert s.id not in restart()
         for _ in range(100):
             if not s.dir.exists():
                 break
@@ -1370,7 +1289,7 @@ def test_a_plugin_starts_a_session_once_per_key_and_it_goes_when_its_agent_has_f
     web.autostart(project, want("#3@c3", "review it"))
     [s] = web.sessions.values()
     assert s.once and s.title == "review it"
-    assert s.argv(None)[-5:] == ["--chat", "--set", "GH_AUTH=reviewer", "--set", "SANDBOX_STARTED_BY=pr-review"]
+    assert web.command(s.project, s.kind, s.run_id, s.sets)[-5:] == ["--chat", "--set", "GH_AUTH=reviewer", "--set", "SANDBOX_STARTED_BY=pr-review"]
     chat.until(s, lambda s: s.id not in web.sessions and s.exit is not None)  # reviewed: gone, container and all
     web.autostart(project, want("#3@c3", "review it"))
     assert not web.sessions  # once per key, however often the project is described

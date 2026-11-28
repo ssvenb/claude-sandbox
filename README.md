@@ -150,9 +150,8 @@ MCP servers, skills, slash commands and the run's conversation are the ones the 
 a run started in one can be resumed in the other. What differs per agent ends at the bridge: each
 translates its SDK's messages into one set of chat events ([src/services/chat/chat-bridge.mjs](src/services/chat/chat-bridge.mjs)
 lists them) on the container's stdout, and takes prompts, answers, interrupts and model changes on
-its stdin, so the page knows no agent. An agent without a `chat.mjs` cannot be started with
-`--chat`; `{"ui": "terminal"}` in the request that starts a session (`POST /api/sessions`) runs
-its TUI in a terminal tab instead, as before.
+its stdin, so the page knows no agent. Every session is a chat: an agent without a `chat.mjs` cannot be
+started with `--chat`, so it has no place in the web UI (run it with `run.sh` in your terminal).
 
 The pages follow your browser's light or dark setting; the switch in their header pins one. They
 are laid out for a phone as well as a desk: on a touch keyboard Enter starts a new line and the
@@ -166,10 +165,6 @@ and keeps it listed among its project's ended sessions, its tab showing how it e
 (the trash can, in its tab and on an ended session) stops it if it still runs, removes it from the list and closes its tabs: its
 chat, VS Code and its pull request (the last two only while the page that opened them has
 not been reloaded).
-
-In a terminal tab (an agent's TUI, `"ui": "terminal"`), **Ctrl+C** copies the selection (and interrupts as usual when nothing is
-selected), **Ctrl+Shift+C** always copies, **Ctrl+V** and **Ctrl+Shift+V** paste; where the program has taken the mouse, as the agent's
-interface does, select with **Shift+drag**.
 
 The VS Code icon in a session's tab opens VS Code in the browser on that run's checkout (the `agent-workspace`
 mirror of `/workspace`), again one tab per run. It runs in a Docker container of its own, not on
@@ -198,14 +193,13 @@ The server needs only `python3` and [uv](https://docs.astral.sh/uv/) on the host
 (Node 20 or later, with npm) into `web/dist`, which the server hands out: `./install.sh` builds
 it, as does `npm ci && npm run build` in `web`; until it is built the pages answer 503 and say
 so. The app picks its page by the address — `/` the dashboard, `/chat#<id>` a session's
-conversation, `/session#<id>` a terminal — and is grouped into `src/pages` (the three), `src/components`
-(by feature: `dashboard`, `chat`, `settings`, `terminal`, and `common` for what they share),
+conversation — and is grouped into `src/pages` (the two), `src/components`
+(by feature: `dashboard`, `chat`, `settings`, and `common` for what they share),
 `src/hooks` (the event stream, polling, the theme, …), `src/api` (typed calls to `/api/*` and the
 shapes of what comes back), `src/lib` (what is not React: a conversation built from its events,
 tabs, diffs) and `src/styles`. A session's page loads its own part only where there is one: the
 chat its markdown ([react-markdown](https://github.com/remarkjs/react-markdown), never as HTML) and
-diffs ([jsdiff](https://github.com/kpdecker/jsdiff)), the terminal [xterm.js](https://xtermjs.org),
-all bundled; only the fonts come from a CDN. To work on it, run the server and `npm run dev` in
+diffs ([jsdiff](https://github.com/kpdecker/jsdiff)), all bundled; only the fonts come from a CDN. To work on it, run the server and `npm run dev` in
 `web`, which serves the pages with hot reload and passes `/api` on to the server on port 8787.
 It listens on loopback only and has no login — use an SSH tunnel to reach it from elsewhere.
 Sessions outlive the server: each runs under `src/server/holder.py`, which keeps its output while no server
@@ -1019,7 +1013,7 @@ The core is grouped by role under `src/`; each folder has one reason to change.
 | [src/services/settings/](src/services/settings) | the agent's managed policy: `merge-settings.py` deep-merges plugin fragments into `settings-base.json` |
 | [src/services/chat/](src/services/chat) | `chat-bridge.mjs`: the chat events the agents' `chat.mjs` speak and the web UI draws |
 | [src/server/](src/server) | **the web UI's server** over `run.sh`: `server.py` (sessions, PRs and issues, a tunnel to `code serve-web`, the pages), `holder.py` (what keeps a session running through a restart of the server), `serve.sh` (starts it in the uv environment), `serve-oauth.sh` (the same behind Google sign-in) |
-| [web/](web) | the web UI's pages — a React app (Vite, TypeScript): the dashboard, a session's chat, a terminal (`src/pages`), their components by feature (`src/components`), `src/hooks`, `src/api`, `src/lib`, `src/styles` |
+| [web/](web) | the web UI's pages — a React app (Vite, TypeScript): the dashboard and a session's chat (`src/pages`), their components by feature (`src/components`), `src/hooks`, `src/api`, `src/lib`, `src/styles` |
 | [agents/](agents) | the agents themselves |
 | [plugins/](plugins) | the plugins themselves |
 | [tests/](tests) | pytest suite (`uv run pytest`); `tests/e2e` boots the built image |

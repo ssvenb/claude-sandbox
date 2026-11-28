@@ -1,4 +1,4 @@
-"""The web UI (web: the dashboard, a session's chat, an agent's terminal) in a real browser: the
+"""The web UI (web: the dashboard and a session's chat) in a real browser: the
 dashboard, a session's chat from its first moment, tabs, closing, favicons, CI marks, day and night.
 
 The server runs from a copy of src/server with the built pages (web/dist, built first when
@@ -13,7 +13,6 @@ test_web.py. Skipped without Playwright (pip install playwright, then
 """
 import base64
 import json
-import os
 import shutil
 import subprocess
 import time
@@ -139,13 +138,6 @@ def board(tmp_path, browser, ui_dist):
         time.sleep(0.05)
     proc.terminate()
     proc.wait(10)
-
-
-def terminal(board):
-    """The terminal tab of a session with its agent's own TUI (the stub's is a shell)."""
-    s = json.load(urllib.request.urlopen(urllib.request.Request(board.base + "/api/sessions", json.dumps(
-        {"project": "proj", "kind": "run", "ui": "terminal"}).encode())))
-    return opens_tab(board, lambda: board.evaluate(f"window.open('/session#{s['id']}')"))
 
 
 def opens_tab(page, click):
@@ -653,12 +645,6 @@ def test_the_pages_follow_the_browsers_day_or_night_unless_one_is_pinned(board):
     tab.click(".theme button[aria-label='Follow the browser']")
     assert tab.evaluate("document.documentElement.dataset.theme") is None
     assert paper(tab) == "rgb(15, 17, 35)"
-    term = terminal(board)
-    term.emulate_media(color_scheme="light")
-    # and so does the terminal (which comes with xterm.js, loaded after the page itself)
-    term.wait_for_function("window.term && term.options.theme.background === '#fbfbfe'")
-    term.emulate_media(color_scheme="dark")
-    term.wait_for_function("term.options.theme.background === '#0f1123'")
 
 
 def test_one_tab_per_item(board):
@@ -792,41 +778,6 @@ def test_stopping_keeps_the_session_and_its_tab_and_deleting_closes_them(board):
     board.wait_for_selector(NOBODY)
 
 
-def test_ctrl_c_copies_a_selection_and_interrupts_without_one(board):
-    board.context.grant_permissions(["clipboard-read", "clipboard-write"])
-    term = terminal(board)
-    term.click(".xterm")
-    term.keyboard.type("echo copy-me-$((40+2))\n")
-    term.wait_for_selector("text=copy-me-42")
-    term.evaluate("term.selectAll()")
-    term.keyboard.press("Control+c")
-    assert "copy-me-42" in term.evaluate("navigator.clipboard.readText()")
-    term.evaluate("navigator.clipboard.writeText('')")
-    term.keyboard.press("Control+Shift+c")  # nothing selected any more: copies nothing
-    term.keyboard.type("sleep 30\n")
-    term.wait_for_timeout(1000)  # the sleep is running, not the shell reading its line
-    term.keyboard.press("Control+c")  # nothing selected: an interrupt, as ever
-    term.keyboard.type("echo back-$((1+1))\n")
-    term.wait_for_selector("text=back-2", timeout=5000)  # the sleep was interrupted
-    assert term.evaluate("navigator.clipboard.readText()") == ""
-
-
-def test_shift_drag_selects_while_the_program_has_the_mouse(board):
-    term = terminal(board)
-    term.click(".xterm")
-    term.keyboard.type("printf '\\033[?1000h'; echo mouse-taken\n")  # what a TUI does
-    term.wait_for_selector("text=mouse-taken")
-    box = term.locator(".xterm-screen").bounding_box()
-    drag = lambda: (term.mouse.move(box["x"] + 5, box["y"] + 5), term.mouse.down(),  # noqa: E731
-                    term.mouse.move(box["x"] + 200, box["y"] + 40), term.mouse.up())
-    drag()
-    assert not term.evaluate("term.hasSelection()")  # the drag went to the program
-    term.keyboard.down("Shift")
-    drag()
-    term.keyboard.up("Shift")
-    assert term.evaluate("term.hasSelection()")
-
-
 def test_resolve_starts_a_session_on_the_items_task(board):
     session = opens_tab(board, lambda: board.click("button:has-text('Resolve')"))
     session.wait_for_selector(".you:has-text('Fix issue #7 now')")  # the task is the session's first message
@@ -834,18 +785,6 @@ def test_resolve_starts_a_session_on_the_items_task(board):
     [s] = state(board)
     assert (s["kind"], s["title"]) == ("run", "Fix issue #7 now") and session.url.endswith("/chat#" + s["id"])
     board.wait_for_selector(".window .open:has-text('Fix issue #7 now')")
-
-
-@pytest.mark.parametrize("keys", ["Control+v", "Control+Shift+v"])
-def test_ctrl_v_pastes(board, keys):
-    board.context.grant_permissions(["clipboard-read", "clipboard-write"])
-    term = terminal(board)
-    term.click(".xterm")
-    term.evaluate("navigator.clipboard.writeText('pasted-$((2+3))')")
-    term.keyboard.type("echo ")
-    term.keyboard.press(keys)
-    term.keyboard.type("\n")
-    term.wait_for_selector("text=pasted-5", timeout=5000)
 
 
 def test_the_gear_configures_the_projects_plugins_in_its_file(board):

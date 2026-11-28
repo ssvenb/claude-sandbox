@@ -9,14 +9,14 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&family=JetBrains+Mono:wght@400;600&display=swap">
 <script>
 // Before anything is painted (the app itself runs only once the page is parsed): the day or
-// night the reader pinned (the switch is ThemeSwitch), and which of the three pages this is,
-// for the styles: "/" the dashboard, "/chat" a session's chat, "/session" a terminal.
+// night the reader pinned (the switch is ThemeSwitch), and which of the two pages this is,
+// for the styles: "/" the dashboard, "/chat" a session's chat.
 (() => {
   const root = document.documentElement;
   let pinned = null;
   try { pinned = localStorage.getItem('theme'); } catch {}
   if (pinned === 'light' || pinned === 'dark') root.dataset.theme = pinned;
-  const page = {'/chat': 'chat', '/session': 'terminal'}[location.pathname] || 'dashboard';
+  const page = location.pathname === '/chat' ? 'chat' : 'dashboard';
   root.dataset.page = page;
   if (page !== 'dashboard') {  // a session's tab: its name and its lamp come with the session
     document.title = 'Session';

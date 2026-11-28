@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Web UI to orchestrate sandboxes: a dashboard of the configured projects with their sessions and
 whatever their enabled plugins have to show (`run.sh --web`: open pull requests and issues, say);
-a chat page per session, each in its own tab (a terminal page for one run with its agent's TUI); and what a
+a chat page per session, each in its own tab; and what a
 plugin serves itself (web_server: VS Code in the browser, say), on our origin under /plugins/<name>/.
 
 Runs on the HOST, as you, next to run.sh — a session is `run.sh --project <name> --chat`: the agent behind its chat bridge (agents/<name>/chat.mjs), whose events (src/services/chat/chat-bridge.mjs)
 come out of run.sh's stdout and go to the page as server-sent events, while prompts come back as
 POSTs. The page is there from the first moment: what is typed while the sandbox still builds and
 boots waits here and is handed to the agent the moment it is ready. There is no shell on this
-machine: every session is a sandbox. The terminal page loads xterm.js from a CDN.
+machine: every session is a sandbox, and every session is a chat.
 
     src/server/server.py [--port 8787] [--bind 127.0.0.1] [--allow-host NAME]... [--projects DIR]
 
@@ -28,7 +28,6 @@ import secrets
 import signal
 import socket
 import stat
-import struct
 import subprocess
 import sys
 import shutil
@@ -47,7 +46,7 @@ ROOT = HERE.parent.parent  # the checkout
 HOLDER = HERE / "holder.py"
 # A session's holder's socket and output, and what this server knew of it when it stopped.
 STATE = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "claude-sandbox/sessions"
-META = ("id", "project", "kind", "run_id", "started", "ui")
+META = ("id", "project", "kind", "run_id", "started")
 SAVED = ("exit", "events", "info", "todos", "tasks", "ready", "state", "waiting", "pending", "title", "activity",
          "said", "cost", "context", "sent", "offset", "sides", "sided", "stopped_in", "killed", "resuming")  # of a chat
 # Where the page was last opened (http://<Host>), from the last request guard() let in: the address
@@ -60,27 +59,19 @@ AGENTS = ROOT / "agents"
 KERNEL = ROOT / "src/orchestrator/kernel.json"  # the settings of the sandbox itself, as plugins declare theirs
 EXAMPLE = ROOT / ".claude-sandbox.example.json"  # what each plugin's section may hold
 RUN_ID = re.compile(r"[0-9a-f]{6}")
-SCROLLBACK = 256 * 1024  # bytes replayed to a browser that (re)opens a terminal
-KEEPALIVE = 15  # seconds between keepalives on a terminal's stream: how soon a closed tab is let go
-# What the agent says it is doing, from the agent-status plugin's hook: an iTerm2-style user var in
-# its output, `ESC ] 1337 ; SetUserVar=agent_status=<base64> BEL` (or ST in place of BEL).
-STATUS = re.compile(rb"\x1b\]1337;SetUserVar=agent_status=([A-Za-z0-9+/=]*)(?:\x07|\x1b\\)")
-STATES = {"working", "idle", "question"}
+KEEPALIVE = 15  # seconds between keepalives on a chat's events: how soon a closed tab is let go
+STATES = {"working", "idle", "question"}  # what a chat's agent says it is doing
 RS = b"\x1e"  # leads each chat event on a chat session's stdout; any other line is boot output
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|[\x00-\x08\x0b-\x1f]")
 BOOT_LINES = 400  # of boot output kept for the page
 EVENTS = 20000  # chat events kept per session, the oldest dropped first
-QUIET = 3  # seconds without output after which an agent that reports nothing counts as idle
-# A TUI at work redraws (its spinner, its timer) all the time, so "working" this long without a byte
-# of output means it was interrupted before it could say it stopped (Esc fires no Stop hook).
-STALE = 30
 
 # The pages are one React app (web), built by `npm run build` into web/dist: its index.html
 # for each of them (it picks the page by its path), and the scripts and styles that loads, under
 # their own paths. Read on every request, so a new build shows on reload.
 DIST = ROOT / "web/dist"
 SERVICE = "claude-sandbox-web.service"  # install.sh registers it
-PAGES = ("/", "/session", "/chat")
+PAGES = ("/", "/chat")
 STATIC = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".map": "application/json",
           ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon",
           ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".txt": "text/plain; charset=utf-8"}
@@ -114,18 +105,20 @@ def config_file(project):
     return project_config.projects_dir(os.environ) / f"{project}.json"
 
 
-def command(project, kind, run_id, task=None, chat=False, sets=None):
-    return [str(RUN_SH), "--project", project, "--resume" if kind == "resume" else "--run-id", run_id] \
-        + (["--task", task] if task else []) + (["--chat"] if chat else []) \
+def command(project, kind, run_id, sets=None):
+    """A session's run.sh: its agent behind its chat bridge. Its task goes as its first prompt."""
+    return [str(RUN_SH), "--project", project, "--resume" if kind == "resume" else "--run-id", run_id, "--chat"] \
         + [arg for name, value in (sets or {}).items() for arg in ("--set", f"{name}={value}")]
 
 
 class Session:
-    """A terminal: an agent's own TUI (`"ui": "terminal"`), in a pty, held by
-    src/server/holder.py so it outlives this server."""
-    ui, mode = "terminal", "pty"
+    """An agent behind its chat bridge: `run.sh --chat` on pipes, held by src/server/holder.py so it
+    outlives this server. Its stdout is boot output until the bridge speaks, then chat events
+    (src/services/chat/chat-bridge.mjs), each line led by RS. Every event is kept in `events` so a
+    page opened later (or again) starts from the whole conversation; streamed text is folded into
+    the block it belongs to on the way in."""
 
-    def __init__(self, project, kind, run_id, task=None, sets=None, once=False):
+    def __init__(self, project, kind, run_id, task=None, images=None, sets=None, once=False):
         self.id = secrets.token_hex(4)
         self.project, self.kind, self.run_id = project, kind, run_id
         # What a plugin started it with (web_start): settings of this run alone, and whether it
@@ -137,19 +130,13 @@ class Session:
         self.dir.mkdir(parents=True)
         (self.dir / "meta.json").write_text(json.dumps({k: getattr(self, k) for k in (*META, "once")}))
         try:
-            hold(self.dir, self.mode, self.argv(task), Path.home())
+            hold(self.dir, command(self.project, self.kind, self.run_id, self.sets), Path.home())
             self._attach(0)
         except OSError:
             shutil.rmtree(self.dir, ignore_errors=True)
             raise
-
-    def argv(self, task):
-        return command(self.project, self.kind, self.run_id, task, False, self.sets)
-
-    def _fresh(self):
-        """What is not saved: a terminal's screen comes back from its holder."""
-        self.buf, self.listeners = bytearray(), []
-        self.said, self.output, self.tail = None, time.time(), b""  # see status()
+        if task or images:
+            self.prompt(task or "", images)
 
     def _attach(self, start, tries=100):
         """Talks to its holder from here on: output from byte `start` on (negative: the last bytes)."""
@@ -202,36 +189,6 @@ class Session:
             else:
                 self.save()
 
-    def _from(self, start):
-        pass
-
-    def _data(self, data):
-        self.output = time.time()
-        # The marker may straddle two reads: look at it with the end of the last one.
-        seen = self.tail + data
-        for m in STATUS.finditer(seen):
-            try:
-                said = base64.b64decode(m[1]).decode()
-            except ValueError:
-                continue
-            if said in STATES:
-                self.said = said
-        self.tail = seen[-96:]
-        with lock:
-            self.buf += data
-            del self.buf[:-SCROLLBACK]
-            for q in self.listeners:
-                q.put(data)
-
-    def _end(self, code):
-        """Caller holds `lock`."""
-        self.exit = code
-        for q in self.listeners:
-            q.put(None)
-
-    def saved(self):
-        return {"exit": self.exit}
-
     def save(self):
         """What a server started later takes it back from. Caller holds `lock`."""
         try:
@@ -244,8 +201,7 @@ class Session:
         """A session the server before this one left: back to its holder, or ended."""
         s = cls.__new__(cls)
         for k in META:
-            if k != "ui":
-                setattr(s, k, meta[k])
+            setattr(s, k, meta[k])
         s.sets, s.once = {}, bool(meta.get("once"))
         s.dir = folder
         s._fresh()
@@ -267,150 +223,12 @@ class Session:
                     s.save()
         return s
 
-    def _load(self, saved):
-        pass
-
-    def _resume_from(self):
-        return -SCROLLBACK
-
-    def write(self, data):
-        if self.exit is None:
-            self._ctl({"in": base64.b64encode(data).decode()})
-
-    def resize(self, cols, rows):
-        self._ctl({"resize": [int(cols), int(rows)]})
-
-    def stop(self):
-        if self.exit is not None:
-            return
-        try:
-            os.killpg(self.pid, signal.SIGHUP)  # pty.fork made the child a session leader
-        except ProcessLookupError:
-            pass
-        # The docker client forwards SIGHUP rather than dying of it, and what the container does
-        # with it is the agent's business — so remove the container by the name run.sh gave it.
-        # Before `docker run` there is none yet, and this is a no-op.
-        subprocess.Popen(["docker", "rm", "-f", f"sandbox-{self.run_id}"],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    def status(self):
-        """working, idle or question while it runs (None once it has ended, and for a terminal):
-        what the agent last said it is doing, else a guess from whether output is flowing."""
-        if self.exit is not None:
-            return None
-        quiet = time.time() - self.output
-        if self.said == "working" and quiet > STALE:
-            return "idle"
-        return self.said or ("working" if quiet < QUIET else "idle")
-
     def close(self):
         """Lets go of what an ended session still holds, its saved state too. Caller holds `lock`."""
         if hasattr(self, "sock"):
             self.sock.close()
         shutil.rmtree(self.dir, ignore_errors=True)
 
-    def shown(self):
-        """Its status as the page shows it, and web_on_status is told it (on_status)."""
-        return self.status()
-
-    def json(self):
-        return {**{k: getattr(self, k) for k in ("id", "project", "kind", "run_id", "started", "exit", "ui")},
-                "status": self.shown(), "workspace": checkout(self.project, self.run_id),
-                "plugins": described.get(self.project, {}).get("plugins", []),
-                "items": [answering(i) for i in live_items(self.project, self.run_id)] if self.exit is None else []}
-
-
-IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
-IMAGES, IMAGE_BYTES = 8, 5 << 20  # to a prompt, and each one's size: what the model's API takes
-
-
-def pictures(images):
-    """The pictures pasted into a prompt, checked: each its media type and its bytes in base64."""
-    if images is None:
-        return []
-    if not isinstance(images, list) or len(images) > IMAGES:
-        raise ValueError(f"a prompt takes up to {IMAGES} images")
-    for p in images:
-        if not isinstance(p, dict) or p.get("type") not in IMAGE_TYPES or not isinstance(p.get("data"), str):
-            raise ValueError("an image is a PNG, JPEG, GIF or WebP")
-        if len(p["data"]) * 3 // 4 > IMAGE_BYTES:
-            raise ValueError("an image is at most 5 MB")
-        try:
-            base64.b64decode(p["data"], validate=True)
-        except ValueError:
-            raise ValueError("an image's data is base64") from None
-    return [{"type": p["type"], "data": p["data"]} for p in images]
-
-
-FILES, FILE_BYTES = 8, 10 << 20  # files attached to a prompt, and each one's size
-
-
-def uploads(files):
-    """The files attached to a prompt that are not pictures, checked: each its name and its bytes in base64."""
-    if files is None:
-        return []
-    if not isinstance(files, list) or len(files) > FILES:
-        raise ValueError(f"a prompt takes up to {FILES} files")
-    for f in files:
-        if not isinstance(f, dict) or not isinstance(f.get("name"), str) or not isinstance(f.get("data"), str):
-            raise ValueError("a file is its name and its data")
-        if not f["name"].strip() or "/" in f["name"] or "\\" in f["name"] or "\0" in f["name"] or f["name"] in (".", ".."):
-            raise ValueError("a file's name is a plain name, without a folder")
-        if len(f["data"]) * 3 // 4 > FILE_BYTES:
-            raise ValueError("a file is at most 10 MB")
-        try:
-            base64.b64decode(f["data"], validate=True)
-        except ValueError:
-            raise ValueError("a file's data is base64") from None
-    return [{"name": f["name"], "data": f["data"]} for f in files]
-
-
-def tool_label(name, given):
-    """A tool call in a few words, for a session's row: what it runs, reads or looks for."""
-    given = given if isinstance(given, dict) else {}
-    for key in ("description", "command", "file_path", "path", "pattern", "query", "url", "prompt"):
-        if isinstance(given.get(key), str) and given[key].strip():
-            return f"{name}: {given[key].strip().splitlines()[0]}"[:160]
-    return name
-
-
-def fold(e, events, blocks, tools):
-    """A streamed event into the one it belongs to in `events`: text into its block, a tool call's
-    input and its result into the call. Returns that event (none for a result without its call)."""
-    kind = e["type"]
-    if kind in ("delta", "text"):
-        block = blocks.get(e.get("id"))
-        if block is None:
-            block = blocks[e.get("id")] = {**e, "type": "text", "text": ""}
-            events.append(block)
-        block["text"] = block["text"] + e.get("text", "") if kind == "delta" else e.get("text", "")
-        return block
-    tool = tools.get(e.get("id"))
-    if kind == "tool":
-        if tool is None:
-            tool = tools[e.get("id")] = dict(e)
-            events.append(tool)
-        else:
-            tool.update(e)
-    elif tool is not None:  # its result
-        tool.update(output=e.get("output", ""), error=bool(e.get("error")), done=not e.get("partial"))
-    return tool
-
-
-class Chat(Session):
-    """An agent behind its chat bridge: `run.sh --chat` on pipes. Its stdout is boot output until
-    the bridge speaks, then chat events (src/services/chat/chat-bridge.mjs), each line led by RS. Every
-    event is kept in `events` so a page opened later (or again) starts from the whole
-    conversation; streamed text is folded into the block it belongs to on the way in."""
-    ui, mode = "chat", "pipe"
-
-    def __init__(self, project, kind, run_id, task=None, images=None, **started):
-        super().__init__(project, kind, run_id, **started)
-        if task or images:
-            self.prompt(task or "", images)
-
-    def argv(self, task):
-        return command(self.project, self.kind, self.run_id, None, True, self.sets)
 
     def _fresh(self):
         self.listeners, self.events = [], []
@@ -684,16 +502,20 @@ class Chat(Session):
         return {"type": "snapshot", "events": self.events, "info": self.info, "todos": self.todos, "tasks": self.tasks,
                 "sides": list(self.sides.values()), "ready": self.ready, "status": self.status(), "session": self.json()}
 
-    def write(self, data):
-        raise ValueError("a chat takes prompts, not keystrokes")
-
-    resize = write
-
     def stop(self):
-        if self.exit is None:
-            self._stopping()
-            self._ctl({"eof": True})
-        super().stop()
+        if self.exit is not None:
+            return
+        self._stopping()
+        self._ctl({"eof": True})
+        try:
+            os.killpg(self.pid, signal.SIGHUP)  # the holder started it in a session of its own
+        except ProcessLookupError:
+            pass
+        # The docker client forwards SIGHUP rather than dying of it, and what the container does
+        # with it is the agent's business — so remove the container by the name run.sh gave it.
+        # Before `docker run` there is none yet, and this is a no-op.
+        subprocess.Popen(["docker", "rm", "-f", f"sandbox-{self.run_id}"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def _stopping(self):
         """Notes what it is doing as it stops, before its bridge's last words (idle, on its way out)
@@ -723,13 +545,95 @@ class Chat(Session):
         return self.state if self.ready else "starting"
 
     def shown(self):
+        """Its status as the page shows it, and web_on_status is told it (on_status)."""
         status = self.status()
         return "working" if status == "idle" and self.tasks else status  # what it started in the background runs on
 
     def json(self):
-        return {**super().json(), "title": self.title, "activity": self.activity, "said": self.said,
+        return {**{k: getattr(self, k) for k in ("id", "project", "kind", "run_id", "started", "exit")},
+                "status": self.shown(), "workspace": checkout(self.project, self.run_id),
+                "plugins": described.get(self.project, {}).get("plugins", []),
+                "items": [answering(i) for i in live_items(self.project, self.run_id)] if self.exit is None else [],
+                "title": self.title, "activity": self.activity, "said": self.said,
                 "agent": self.info.get("agent"), "model": self.info.get("model"), "cost": self.cost,
                 "context": self.context, "waiting": len(self.waiting), "todos": self.todos}
+
+
+IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
+IMAGES, IMAGE_BYTES = 8, 5 << 20  # to a prompt, and each one's size: what the model's API takes
+
+
+def pictures(images):
+    """The pictures pasted into a prompt, checked: each its media type and its bytes in base64."""
+    if images is None:
+        return []
+    if not isinstance(images, list) or len(images) > IMAGES:
+        raise ValueError(f"a prompt takes up to {IMAGES} images")
+    for p in images:
+        if not isinstance(p, dict) or p.get("type") not in IMAGE_TYPES or not isinstance(p.get("data"), str):
+            raise ValueError("an image is a PNG, JPEG, GIF or WebP")
+        if len(p["data"]) * 3 // 4 > IMAGE_BYTES:
+            raise ValueError("an image is at most 5 MB")
+        try:
+            base64.b64decode(p["data"], validate=True)
+        except ValueError:
+            raise ValueError("an image's data is base64") from None
+    return [{"type": p["type"], "data": p["data"]} for p in images]
+
+
+FILES, FILE_BYTES = 8, 10 << 20  # files attached to a prompt, and each one's size
+
+
+def uploads(files):
+    """The files attached to a prompt that are not pictures, checked: each its name and its bytes in base64."""
+    if files is None:
+        return []
+    if not isinstance(files, list) or len(files) > FILES:
+        raise ValueError(f"a prompt takes up to {FILES} files")
+    for f in files:
+        if not isinstance(f, dict) or not isinstance(f.get("name"), str) or not isinstance(f.get("data"), str):
+            raise ValueError("a file is its name and its data")
+        if not f["name"].strip() or "/" in f["name"] or "\\" in f["name"] or "\0" in f["name"] or f["name"] in (".", ".."):
+            raise ValueError("a file's name is a plain name, without a folder")
+        if len(f["data"]) * 3 // 4 > FILE_BYTES:
+            raise ValueError("a file is at most 10 MB")
+        try:
+            base64.b64decode(f["data"], validate=True)
+        except ValueError:
+            raise ValueError("a file's data is base64") from None
+    return [{"name": f["name"], "data": f["data"]} for f in files]
+
+
+def tool_label(name, given):
+    """A tool call in a few words, for a session's row: what it runs, reads or looks for."""
+    given = given if isinstance(given, dict) else {}
+    for key in ("description", "command", "file_path", "path", "pattern", "query", "url", "prompt"):
+        if isinstance(given.get(key), str) and given[key].strip():
+            return f"{name}: {given[key].strip().splitlines()[0]}"[:160]
+    return name
+
+
+def fold(e, events, blocks, tools):
+    """A streamed event into the one it belongs to in `events`: text into its block, a tool call's
+    input and its result into the call. Returns that event (none for a result without its call)."""
+    kind = e["type"]
+    if kind in ("delta", "text"):
+        block = blocks.get(e.get("id"))
+        if block is None:
+            block = blocks[e.get("id")] = {**e, "type": "text", "text": ""}
+            events.append(block)
+        block["text"] = block["text"] + e.get("text", "") if kind == "delta" else e.get("text", "")
+        return block
+    tool = tools.get(e.get("id"))
+    if kind == "tool":
+        if tool is None:
+            tool = tools[e.get("id")] = dict(e)
+            events.append(tool)
+        else:
+            tool.update(e)
+    elif tool is not None:  # its result
+        tool.update(output=e.get("output", ""), error=bool(e.get("error")), done=not e.get("partial"))
+    return tool
 
 
 def carry_on(resuming):
@@ -773,7 +677,7 @@ def on_status(last):
             commands = described.get(s.project, {}).get("on_status") or {}
             if before in ("unseen", status) or not isinstance(commands, dict):
                 continue
-            page = f"{page_origin}/{'chat' if s.ui == 'chat' else 'session'}#{s.id}" if page_origin else ""
+            page = f"{page_origin}/chat#{s.id}" if page_origin else ""
             event = json.dumps({"project": s.project, "run_id": s.run_id, "session": s.id, "url": page,
                                 "status": status, "before": before})
             runs += [(plugin, command, event) for plugin, command in commands.items() if isinstance(command, list)]
@@ -840,7 +744,7 @@ def agent_offers(offer=None, project=None):
 def autostart(project, found):
     """Starts the sessions the project's plugins asked for (web_start): each `key` of a plugin
     once, kept in a file so a restart starts none again, and none while a session of its
-    `after_run` is listed. Such a session is removed when its agent has finished (Chat._leave)."""
+    `after_run` is listed. Such a session is removed when its agent has finished (Session._leave)."""
     file = STATE.parent / "started.json"
     for want in found.get("starts") or []:
         try:
@@ -1355,7 +1259,7 @@ def plugin_server(plugin):
                 shutil.rmtree(os.path.dirname(os.path.dirname(path)), ignore_errors=True)
             # What a plugin serves may be a shell on your account (VS Code is). A socket in a 0700
             # directory keeps other local users out, and the only way in for a browser is
-            # Handler.tunnel, behind the same guard as the terminals: it needs no login of its own.
+            # Handler.tunnel, behind the same guard as the chats: it needs no login of its own.
             run_dir = tempfile.mkdtemp(prefix=f"sandbox-{plugin}-")
             # The socket in a directory of its own, which the server may hand a container (VS Code's
             # is one): what it plants there must not reach the log, nor be followed (connect()).
@@ -1400,7 +1304,7 @@ def connect(path):
 scoped = []
 
 
-def hold(folder, mode, argv, cwd):
+def hold(folder, argv, cwd):
     """Starts a session's process under src/server/holder.py, which outlives this server. Under systemd
     it goes into a scope of its own: restarting this server's unit stops everything in its cgroup.
     The scope comes from the manager this server runs under: the user's, or the system's for a system unit."""
@@ -1413,7 +1317,7 @@ def hold(folder, mode, argv, cwd):
                   " (give its unit KillMode=process)", file=sys.stderr, flush=True)
         scoped.append(ok)
     with open(folder / "log", "ab") as log:  # what the holder itself says, should it fail
-        subprocess.Popen(scoped[0] + [sys.executable, str(HOLDER), str(folder), mode, "--", *argv], cwd=cwd,
+        subprocess.Popen(scoped[0] + [sys.executable, str(HOLDER), str(folder), "--", *argv], cwd=cwd,
                          start_new_session=True, stdin=subprocess.DEVNULL, stdout=log, stderr=log)
 
 
@@ -1426,13 +1330,15 @@ def restore():
         try:
             m = json.loads(meta.read_text())
             saved = json.loads(state.read_text()) if state.exists() else {}
-            s = (Chat if m["ui"] == "chat" else Session).restore(meta.parent, m, saved)
+            s = Session.restore(meta.parent, m, saved)
         except (OSError, ValueError, KeyError) as e:
             print(f"  could not take back the session in {meta.parent}: {e}", file=sys.stderr, flush=True)
             continue
         with lock:
             sessions[s.id] = s
-        if s.kind == "shell":  # a shell on this machine, from before there were none: ended, not taken back
+        # A shell on this machine, from before there were none, or an agent's TUI in a terminal,
+        # from before every session was a chat: ended, not taken back.
+        if s.kind == "shell" or m.get("ui", "chat") != "chat":
             remove(s)
         elif getattr(s, "revive", False):
             revived.append(s)
@@ -1458,7 +1364,7 @@ def revive(ended):
             if sessions.get(s.id) is not s:  # resumed or deleted meanwhile
                 continue
         try:
-            start(s.project, "resume", s.run_id, ui=s.ui, once=s.once)
+            start(s.project, "resume", s.run_id, once=s.once)
         except (OSError, ValueError) as e:
             print(f"  could not resume session {s.id} ({s.project} {s.run_id}): {e}", file=sys.stderr, flush=True)
 
@@ -1568,16 +1474,11 @@ def sign_in_code(agent, code):
             pass
 
 
-def start(project, kind, run_id, task=None, ui=None, images=None, sets=None, once=False):
-    """A new session, or the live one it would double. An agent's session is a chat unless
-    `ui` is "terminal" (its own TUI in a pty, as `run.sh` in your terminal)."""
-    if ui not in (None, "chat", "terminal"):
-        raise ValueError("ui must be chat or terminal")
+def start(project, kind, run_id, task=None, images=None, sets=None, once=False):
+    """A new session, or the live one it would double."""
     images = pictures(images)
     if (task is not None or images) and (kind != "run" or not isinstance(task or "", str) or not ((task or "").strip() or images)):
         raise ValueError("a task starts a new run, and is text")
-    if images and ui == "terminal":
-        raise ValueError("a terminal takes no images")
     if kind == "run":
         run_id = secrets.token_hex(3)
     elif kind != "resume" or not RUN_ID.fullmatch(run_id or ""):
@@ -1594,9 +1495,8 @@ def start(project, kind, run_id, task=None, ui=None, images=None, sets=None, onc
                 return s
             ended = ended or s
             drop(s)
-        s = (Session if ui == "terminal" else Chat)(
-            project, kind, run_id, task, **({"images": images} if images else {}), sets=sets, once=once)
-        if isinstance(s, Chat) and isinstance(ended, Chat):
+        s = Session(project, kind, run_id, task, images, sets=sets, once=once)
+        if ended:
             s.carry(ended)
         sessions[s.id] = s
         return s
@@ -1616,7 +1516,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def guard(self):
-        # This server types into terminals on your machine. Any web page you visit can aim
+        # This server drives agents on your machine. Any web page you visit can aim
         # requests at localhost, so only our own page gets through: the Host check stops DNS
         # rebinding, the Origin check stops cross-site requests. Any port: a proxy (a sandbox's
         # published port) may put this server on another, and the name is what rebinding forges.
@@ -1773,15 +1673,8 @@ class Handler(BaseHTTPRequestHandler):
         elif m := re.fullmatch(r"/api/sessions/(\w+)/plugins/([\w-]+)/([\w-]+)", url.path):
             if s := self.session(m[1]):
                 self.reply(200, {"result": plugin_command(s.project, s.run_id, m[2], m[3])})
-        elif m := re.fullmatch(r"/api/sessions/(\w+)/stream", url.path):
-            if s := self.session(m[1]):
-                if s.ui != "terminal":
-                    return self.reply(400, {"error": "a chat has events, not a stream"})
-                self.stream(s)
         elif m := re.fullmatch(r"/api/sessions/(\w+)/events", url.path):
             if s := self.session(m[1]):
-                if s.ui != "chat":
-                    return self.reply(400, {"error": "a terminal has a stream, not events"})
                 self.events(s)
         else:
             self.reply(404, {"error": "not found"})
@@ -1797,8 +1690,10 @@ class Handler(BaseHTTPRequestHandler):
                 req = json.loads(body)
                 if req.get("project") not in projects(self.server.projects_file):
                     raise ValueError("not a configured project")
+                if req.get("ui", "chat") != "chat":
+                    raise ValueError("every session is a chat: there are no terminals")
                 self.reply(200, start(req["project"], req.get("kind"), req.get("run_id"), req.get("task"),
-                                      req.get("ui"), req.get("images")).json())
+                                      req.get("images")).json())
             elif url.path == "/api/config":
                 req = json.loads(body)
                 if req.get("project") not in projects(self.server.projects_file):
@@ -1830,8 +1725,6 @@ class Handler(BaseHTTPRequestHandler):
                 s = self.session(m[1])
                 if s is None:
                     return
-                if s.ui != "chat":
-                    raise ValueError("a terminal takes keystrokes, not prompts")
                 req = json.loads(body) if body.strip() else {}
                 if not isinstance(req, dict):
                     raise ValueError("the request must be a JSON object")
@@ -1842,15 +1735,11 @@ class Handler(BaseHTTPRequestHandler):
                 else:  # only the fields a bridge reads, under the name the path gave
                     s.tell({"type": m[2], **{k: req[k] for k in ("id", "answers", "cancel", "level", "side") if k in req}})
                 self.reply(200, {})
-            elif m := re.fullmatch(r"/api/sessions/(\w+)/(input|resize|stop|delete)", url.path):
+            elif m := re.fullmatch(r"/api/sessions/(\w+)/(stop|delete)", url.path):
                 s = self.session(m[1])
                 if s is None:
                     return
-                if m[2] == "input":
-                    s.write(body)
-                elif m[2] == "resize":
-                    s.resize(int(query["cols"]), int(query["rows"]))
-                elif m[2] == "stop":  # its container goes, its entry stays: to read, to resume
+                if m[2] == "stop":  # its container goes, its entry stays: to read, to resume
                     s.stop()
                 else:  # gone from the list, stopped first if it still runs
                     # The urls of its run's items the page's user said yes to tidying up too.
@@ -1868,7 +1757,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(200, {})
             else:
                 self.reply(404, {"error": "not found"})
-        except (ValueError, KeyError, OSError, struct.error) as e:
+        except (ValueError, KeyError, OSError) as e:
             self.reply(400, {"error": str(e)})
 
     def events(self, s):
@@ -1901,40 +1790,6 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             pass
         finally:
-            with lock:
-                if q in s.listeners:
-                    s.listeners.remove(q)
-
-    def stream(self, s):
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Cache-Control", "no-cache")
-        self.end_headers()
-        q = queue.Queue()
-        with lock:  # backlog and subscription in one step, so no output is lost or doubled
-            q.put(bytes(s.buf))
-            if s.exit is None:
-                s.listeners.append(q)
-            else:
-                q.put(None)
-        try:
-            while True:
-                try:
-                    data = q.get(timeout=KEEPALIVE)
-                except queue.Empty:
-                    self.wfile.write(b": keepalive\n\n")  # also how a closed tab is noticed
-                    self.wfile.flush()
-                    continue
-                if data is None:
-                    self.wfile.write(b"event: exit\ndata: x\n\n")
-                    break
-                if data:
-                    self.wfile.write(b"data: " + base64.b64encode(data) + b"\n\n")
-                    self.wfile.flush()
-        except OSError:
-            pass
-        finally:
-            # A closed tab only lets go of the stream: the session runs on until told to stop.
             with lock:
                 if q in s.listeners:
                     s.listeners.remove(q)

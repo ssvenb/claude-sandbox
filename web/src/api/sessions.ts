@@ -36,12 +36,6 @@ export const backgroundTask = (id: string, call: string) => post(session(id) + '
 export const askPlugin = <T>(id: string, plugin: string, name: string) =>
   api<{ result: T | null }>(`${session(id)}/plugins/${plugin}/${name}`).then(r => r.result);
 
-// A terminal: keystrokes go as they are, not as JSON.
-export const streamUrl = (id: string) => session(id) + '/stream';
-export const sendInput = (id: string, data: string) => fetch(session(id) + '/input', { method: 'POST', body: data });
-export const resizeTerminal = (id: string, cols: number, rows: number) =>
-  fetch(`${session(id)}/resize?cols=${cols}&rows=${rows}`, { method: 'POST' });
-
 // A project's settings, its ~/.config/claude-sandbox/projects/<name>.json.
 export const getConfig = (path: string) => api<ProjectConfig>('/api/config?' + project(path));
 export const saveConfig = (path: string, config: JsonObject) => post<ProjectConfig>('/api/config', { project: path, config });

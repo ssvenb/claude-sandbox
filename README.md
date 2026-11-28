@@ -207,6 +207,40 @@ listens, and the next server takes them back from `~/.local/state/claude-sandbox
 ended, so a restart (the dashboard's update button, say) cuts nothing off. One whose holder went without saying how it ended (the machine rebooted) is resumed, once Docker answers, and carries on as it was. Under systemd each holder
 runs in a scope of its own (`systemd-run --user --scope`), outside the server unit's cgroup.
 
+### The API
+
+What the pages call, under `/api`, all of it behind the same guard as the pages (our own page
+only: the `Host` and `Origin` checks in `Handler.guard`). JSON in and out; an error is
+`{"error": …}` with its status: 400 a bad request, 404 nothing there, 405 another method (its
+`Allow` says which), 409 not now (an ended session, a name taken, no sign-in under way), 500 the
+server failed.
+
+| Method and path | What it does |
+|---|---|
+| `GET /api/state` | the projects and every session: what the dashboard draws, in one call |
+| `GET`, `POST /api/projects` | the projects' names; a new one, `{name, repo}` (201) |
+| `GET`, `DELETE /api/projects/<name>` | what its plugins describe (lists, items, its agent); delete it (409 while it has sessions) |
+| `GET`, `PUT /api/projects/<name>/config` | its settings, with what every plugin and agent declares; save them (the body is the file's JSON) |
+| `GET`, `POST /api/sessions` | every session; a new one, `{project, kind: run\|resume, run_id?, task?, images?}` (201) |
+| `GET`, `DELETE /api/sessions/<id>` | one session; delete it, stopped first, `{tidy: [url…]}` tidying up those of its items too |
+| `POST /api/sessions/<id>/stop` | stop it: its container goes, its entry stays, to read and resume |
+| `GET /api/sessions/<id>/cleanup-offers` | what to offer to tidy up along with it |
+| `GET /api/sessions/<id>/events` | its conversation as server-sent events: a snapshot, then each event |
+| `POST /api/sessions/<id>/messages` | a message, `{text, images?, files?, nonce?}` |
+| `POST /api/sessions/<id>/interrupt` | stop the agent's turn |
+| `POST /api/sessions/<id>/questions/<ask>/answer` | `{answers}`, or `{cancel: true}` |
+| `PUT /api/sessions/<id>/model`, `…/effort` | `{id}`; `{level}` |
+| `DELETE /api/sessions/<id>/tasks/<task>` | stop a task the agent runs in the background |
+| `POST /api/sessions/<id>/calls/<call>/background` | send the task a tool call waits on to the background |
+| `POST /api/sessions/<id>/sides` | a side chat, `{text}` its first question (201, `{id}`) |
+| `POST /api/sessions/<id>/sides/<side>/messages`, `…/interrupt`; `DELETE …/sides/<side>` | ask in it; stop its turn; close it |
+| `GET /api/sessions/<id>/plugins/<plugin>/commands/<name>` | a plugin's `web_command` for the session's run |
+| `GET`, `PUT /api/auth` | your authentications, secrets masked; save them |
+| `PUT`, `DELETE /api/auth/<name>/files/<field>` | an authentication's file (the body is the file) |
+| `GET`, `POST /api/agents/<name>/sign-in` | start the agent's sign-in and go on to its page (a link to follow); hand it the code, `{code}` |
+| `GET /api/agents/<name>/sign-in-status` | `{signedIn}` |
+| `POST /api/server/sync` | pull main, run `install.sh`, restart under systemd |
+
 ## How a run boots
 
 ```
@@ -292,7 +326,7 @@ menu offers it when the agent's `web/index.tsx` puts a `SignInButton`
 `Menu` (see [web/src/plugins.ts](web/src/plugins.ts)'s `AgentUI`): `GET /api/agents/<name>/sign-in`
 starts the command and redirects to its link, `POST` with `{"code": …}` hands it the code.
 An optional `signedIn` is a command that exits 0 while the CLI is signed in
-(`["claude", "auth", "status"]`): with it, `GET /api/agents/<name>/signed-in` answers
+(`["claude", "auth", "status"]`): with it, `GET /api/agents/<name>/sign-in-status` answers
 `{"signedIn": …}`, and the `SignInButton` asks to sign in again when it is not.
 An optional `after-sign-in.sh` in the agent's directory is what the server runs (`sh`, as its own
 user) once a sign-in succeeded: Claude's puts the new login into the `~/.claude` copy of every
@@ -572,7 +606,7 @@ request, with its CI). An item is `{title, url}` plus optional `ref` (a short id
 | `web_start JSON` | nothing: a session the server starts by itself, once per `key`, removed when its agent has finished |
 | `web_on_status CMD [ARG]…` | nothing: a command the server runs on this machine each time one of the project's sessions changes status as its dot shows it (idle with background tasks running counts as working), with `{project, run_id, session, url, status, before}` as JSON on stdin; `url` is the session's page, a status is `starting`, `working`, `idle`, `question` or `null` once it ended (agent-status posts its webhook from it) |
 | `web_checkout GLOB` | where a run's `/workspace` is on this machine, `{run_id}` standing for the run: its session's `workspace` |
-| `web_command NAME CMD [ARG]…` | a command the server runs in a run's checkout (see `web_checkout`), with the run's id in `WEB_RUN_ID`, when the plugin's page code asks (`GET /api/sessions/<id>/plugins/<plugin>/<NAME>`); the JSON it prints is the answer. The checkout is the agent's, `.git/config` included: run git there through `docker exec … sandbox-$WEB_RUN_ID`, never on this machine |
+| `web_command NAME CMD [ARG]…` | a command the server runs in a run's checkout (see `web_checkout`), with the run's id in `WEB_RUN_ID`, when the plugin's page code asks (`GET /api/sessions/<id>/plugins/<plugin>/commands/<NAME>`); the JSON it prints is the answer. The checkout is the agent's, `.git/config` included: run git there through `docker exec … sandbox-$WEB_RUN_ID`, never on this machine |
 | `web_server CMD [ARG]…` | an HTTP server of the plugin's, started on the first request under `/plugins/<plugin>/` and handed every such request (WebSockets too), behind the web UI's own guard; one for all projects, listening on the unix socket `$WEB_SOCKET` under the base path `$WEB_BASE` |
 
 Anything else a plugin draws itself, in `plugins/<name>/web/index.tsx`: React, typechecked and

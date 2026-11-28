@@ -7,8 +7,12 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-export const post = <T = unknown>(path: string, body?: unknown): Promise<T> =>
-  api<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) });
+const send = (method: string) => <T = unknown>(path: string, body?: unknown): Promise<T> =>
+  api<T>(path, { method, body: body === undefined ? undefined : JSON.stringify(body) });
+
+export const post = send('POST');
+export const put = send('PUT');
+export const del = send('DELETE');
 
 /** The message of whatever was thrown. */
 export const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));

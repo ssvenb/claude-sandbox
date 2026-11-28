@@ -36,7 +36,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import unquote, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # src: the orchestrator's auth.py
 from orchestrator import Die, auth, config as project_config  # noqa: E402
@@ -103,6 +103,14 @@ def projects(directory):
 
 def config_file(project):
     return project_config.projects_dir(os.environ) / f"{project}.json"
+
+
+class NotFound(ValueError):
+    """What a request names is not there: 404."""
+
+
+class Conflict(ValueError):
+    """What a request asks does not fit the state it finds (an ended session, a name taken): 409."""
 
 
 def command(project, kind, run_id, sets=None):
@@ -420,23 +428,23 @@ class Session:
         with lock:
             if close:
                 if self.sides.pop(str(sid), None) is None:
-                    raise ValueError("no such side chat")
+                    raise NotFound("no such side chat")
                 self.side_maps.pop(str(sid), None)
                 if self.ready and self.exit is None:
                     self._send({"type": "side", "id": str(sid), "close": True})
                 self._tell({"type": "side-closed", "side": str(sid)})
                 return str(sid)
             if self.exit is not None:
-                raise ValueError("this session has ended: resume it to go on")
+                raise Conflict("this session has ended: resume it to go on")
             if not (self.ready and self.info.get("sides")):
-                raise ValueError("this agent takes no side chats" if self.ready else "the agent is not ready yet")
+                raise Conflict("this agent takes no side chats" if self.ready else "the agent is not ready yet")
             if not isinstance(text, str) or not text.strip():
                 raise ValueError("a question is text")
             if sid is None:
                 self.sided += 1
                 sid = self.sided
             elif str(sid) not in self.sides:
-                raise ValueError("no such side chat")
+                raise NotFound("no such side chat")
             sid = str(sid)
             self._side({"type": "user", "side": sid, "text": text})
             self._side({"type": "status", "side": sid, "state": "working"})
@@ -466,7 +474,7 @@ class Session:
             raise ValueError("a nonce is a short string")
         with lock:
             if self.exit is not None:
-                raise ValueError("this session has ended: resume it to go on")
+                raise Conflict("this session has ended: resume it to go on")
             if nonce and any(e.get("nonce") == nonce for e in self.events if e["type"] == "user"):
                 return
             self.sent += 1
@@ -971,7 +979,7 @@ def add_project(name, repo):
     if not isinstance(name, str) or not re.fullmatch(r"\w[\w.-]*", name):
         raise ValueError("a project's name is letters, digits, '.', '-' and '_', not starting with '.' or '-'")
     if config_file(name).exists():
-        raise ValueError(f"there is a project '{name}' already")
+        raise Conflict(f"there is a project '{name}' already")
     config = {} if repo is None or (isinstance(repo, str) and not repo.strip()) else {"repo": repo}
     check_config(config)
     write_json(config_file(name), config)
@@ -981,7 +989,7 @@ def delete_project(name):
     """A project's file goes; refused while a session of it is listed, which would be left without one."""
     with lock:
         if any(s.project == name for s in sessions.values()):
-            raise ValueError(f"'{name}' still has sessions: delete them first")
+            raise Conflict(f"'{name}' still has sessions: delete them first")
     config_file(name).unlink()
     described.pop(name, None)
 
@@ -1457,7 +1465,7 @@ def sign_in_code(agent, code):
     with sign_in_lock:
         proc = signing_in.pop(agent, None)
     if proc is None or proc.poll() is not None:
-        raise ValueError("no sign-in under way: start it again")
+        raise Conflict("no sign-in under way: start it again")
     try:
         out, _ = proc.communicate(code.strip() + "\n", timeout=60)
     except subprocess.TimeoutExpired:
@@ -1502,16 +1510,30 @@ def start(project, kind, run_id, task=None, images=None, sets=None, once=False):
         return s
 
 
+ROUTES = []  # (method, path, Handler method): the API, as @api registers it
+
+
+def api(method, path):
+    """Makes a Handler method the answer to `method` on `path`, a regex the whole path must match,
+    whose groups (URL-decoded) are the method's arguments."""
+    def register(handle):
+        ROUTES.append((method, re.compile(path), handle))
+        return handle
+    return register
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
-    def reply(self, code, body, ctype="application/json"):
+    def reply(self, code, body, ctype="application/json", allow=None):
         if not isinstance(body, bytes):
             body = json.dumps(body).encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        if allow:
+            self.send_header("Allow", allow)
         self.end_headers()
         self.wfile.write(body)
 
@@ -1535,7 +1557,7 @@ class Handler(BaseHTTPRequestHandler):
         with lock:
             s = sessions.get(sid)
         if s is None:
-            self.reply(404, {"error": "no such session"})
+            raise NotFound("no such session")
         return s
 
     def tunnel(self, plugin):
@@ -1605,160 +1627,257 @@ class Handler(BaseHTTPRequestHandler):
         self.tunnel(m[1]) if m else mine()
 
     def do_GET(self):
-        self.route(self.get)
+        self.route(self.answer)
 
-    def do_POST(self):
-        self.route(self.post)
+    do_POST = do_PUT = do_DELETE = do_HEAD = do_OPTIONS = do_PATCH = do_GET  # a plugin's server may use any method
 
-    def do_PUT(self):  # nothing of ours, but a plugin's server may use any method
-        self.route(lambda: self.reply(404, {"error": "not found"}))
-
-    do_DELETE = do_HEAD = do_OPTIONS = do_PATCH = do_PUT
-
-    def get(self):
+    def answer(self):
+        """Ours: a page, what it loads, or the API (ROUTES), behind the guard. An error a route
+        raises is its answer: NotFound 404, Conflict 409, any other ValueError (or a KeyError, a
+        field missing) 400, an OSError 500."""
         if not self.guard():
             return
         url = urlparse(self.path)
-        query = {k: v[0] for k, v in parse_qs(url.query).items()}
-        known = projects(self.server.projects_file)
-        if url.path in PAGES:
+        self.body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        if self.command == "GET" and url.path in PAGES:
             try:
-                self.reply(200, (DIST / "index.html").read_bytes(), "text/html; charset=utf-8")
+                return self.reply(200, (DIST / "index.html").read_bytes(), "text/html; charset=utf-8")
             except OSError:
-                self.reply(503, UNBUILT.encode(), "text/plain; charset=utf-8")
-        elif (asset := static(url.path)) is not None:
-            self.reply(200, asset.read_bytes(), STATIC[asset.suffix])
-        elif url.path == "/api/state":
-            with lock:
-                live = [s.json() for s in sessions.values()]
-            self.reply(200, {"projects": known, "projects_file": str(self.server.projects_file),
-                             "sessions": live})
-        elif url.path == "/api/project" and query.get("project") in known:
-            self.reply(200, describe(query["project"]))
-        elif url.path == "/api/config" and query.get("project") in known:
+                return self.reply(503, UNBUILT.encode(), "text/plain; charset=utf-8")
+        if self.command == "GET" and (asset := static(url.path)) is not None:
+            return self.reply(200, asset.read_bytes(), STATIC[asset.suffix])
+        methods = []
+        for method, pattern, handle in ROUTES:
+            if not (m := pattern.fullmatch(url.path)):
+                continue
+            if method != self.command:
+                methods.append(method)
+                continue
             try:
-                self.reply(200, read_config(query["project"]))
-            except ValueError as e:
-                self.reply(400, {"error": str(e)})
-        elif m := re.fullmatch(r"/api/agents/([\w-]+)/signed-in", url.path):
-            try:
-                self.reply(200, {"signedIn": signed_in(m[1])})
-            except ValueError as e:
-                self.reply(400, {"error": str(e)})
-        elif m := re.fullmatch(r"/api/agents/([\w-]+)/sign-in", url.path):  # a link to follow: on to its sign-in page
-            try:
-                target = sign_in(m[1])
-            except ValueError as e:
+                return handle(self, *map(unquote, m.groups()))
+            except NotFound as e:
+                return self.reply(404, {"error": str(e)})
+            except Conflict as e:
+                return self.reply(409, {"error": str(e)})
+            except (ValueError, KeyError) as e:
                 return self.reply(400, {"error": str(e)})
-            self.send_response(302)
-            self.send_header("Location", target)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-        elif url.path == "/api/auth":
-            try:
-                self.reply(200, read_auth())
-            except ValueError as e:
-                self.reply(400, {"error": str(e)})
-        elif m := re.fullmatch(r"/api/sessions/(\w+)/offers", url.path):
-            # What its page asks about before deleting it, one yes/no each.
-            # Described afresh first: the pull request a run opened a moment ago is offered too,
-            # and one closed or merged since is not.
-            if s := self.session(m[1]):
-                describe(s.project, keep=True)
-                with lock:
-                    found = offers(s)
-                self.reply(200, {"offers": [{k: i.get(k) for k in ("url", "ref", "title")}
-                                            | {"ask": str(i["on_delete"].get("ask") or f"Tidy up {i.get('ref') or i.get('title')} too?")}
-                                            for i in found]})
-        elif m := re.fullmatch(r"/api/sessions/(\w+)/plugins/([\w-]+)/([\w-]+)", url.path):
-            if s := self.session(m[1]):
-                self.reply(200, {"result": plugin_command(s.project, s.run_id, m[2], m[3])})
-        elif m := re.fullmatch(r"/api/sessions/(\w+)/events", url.path):
-            if s := self.session(m[1]):
-                self.events(s)
-        else:
-            self.reply(404, {"error": "not found"})
+            except OSError as e:
+                return self.reply(500, {"error": str(e)})
+        if methods:
+            return self.reply(405, {"error": f"{self.command} is not one of {', '.join(methods)}"}, allow=", ".join(methods))
+        self.reply(404, {"error": "not found"})
 
-    def post(self):
-        if not self.guard():
-            return
-        url = urlparse(self.path)
-        query = {k: v[0] for k, v in parse_qs(url.query).items()}
-        body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+    def req(self):
+        """The request's JSON body, an object ({} for none)."""
+        if not self.body.strip():
+            return {}
         try:
-            if url.path == "/api/sessions":
-                req = json.loads(body)
-                if req.get("project") not in projects(self.server.projects_file):
-                    raise ValueError("not a configured project")
-                if req.get("ui", "chat") != "chat":
-                    raise ValueError("every session is a chat: there are no terminals")
-                self.reply(200, start(req["project"], req.get("kind"), req.get("run_id"), req.get("task"),
-                                      req.get("images")).json())
-            elif url.path == "/api/config":
-                req = json.loads(body)
-                if req.get("project") not in projects(self.server.projects_file):
-                    raise ValueError("not a configured project")
-                write_config(req["project"], req.get("config"))
-                self.reply(200, read_config(req["project"]))
-            elif url.path == "/api/auth":
-                write_auth(json.loads(body).get("config"))
-                self.reply(200, read_auth())
-            elif url.path in ("/api/auth/file", "/api/auth/file/delete"):  # the body: the file itself
-                self.reply(200, put_auth_file(query.get("name"), query.get("field"),
-                                              None if url.path.endswith("/delete") else body))
-            elif url.path == "/api/projects":
-                req = json.loads(body)
-                add_project(req.get("name"), req.get("repo"))
-                self.reply(200, {})
-            elif url.path == "/api/projects/delete":
-                req = json.loads(body)
-                if req.get("name") not in projects(self.server.projects_file):
-                    raise ValueError("not a configured project")
-                delete_project(req["name"])
-                self.reply(200, {})
-            elif m := re.fullmatch(r"/api/agents/([\w-]+)/sign-in", url.path):
-                sign_in_code(m[1], json.loads(body).get("code"))
-                self.reply(200, {})
-            elif url.path == "/api/sync":
-                self.reply(200, sync(self.server.bind))
-            elif m := re.fullmatch(r"/api/sessions/(\w+)/(prompt|interrupt|answer|model|effort|task|background|side)", url.path):
-                s = self.session(m[1])
-                if s is None:
-                    return
-                req = json.loads(body) if body.strip() else {}
-                if not isinstance(req, dict):
-                    raise ValueError("the request must be a JSON object")
-                if m[2] == "side":
-                    return self.reply(200, {"id": s.side(req.get("id"), req.get("text"), bool(req.get("close")))})
-                if m[2] == "prompt":
-                    s.prompt(req.get("text"), req.get("images"), req.get("files"), req.get("nonce"))
-                else:  # only the fields a bridge reads, under the name the path gave
-                    s.tell({"type": m[2], **{k: req[k] for k in ("id", "answers", "cancel", "level", "side") if k in req}})
-                self.reply(200, {})
-            elif m := re.fullmatch(r"/api/sessions/(\w+)/(stop|delete)", url.path):
-                s = self.session(m[1])
-                if s is None:
-                    return
-                if m[2] == "stop":  # its container goes, its entry stays: to read, to resume
-                    s.stop()
-                else:  # gone from the list, stopped first if it still runs
-                    # The urls of its run's items the page's user said yes to tidying up too.
-                    req = json.loads(body) if body.strip() else {}
-                    urls = req.get("tidy") if isinstance(req, dict) else None
-                    if not isinstance(urls, list):
-                        urls = []
-                    s.stop()
-                    with lock:
-                        offered = offers(s)
-                        drop(s)
-                    failed = tidy(s, urls, offered)
-                    self.reply(200, {"failed": failed})
-                    return
-                self.reply(200, {})
-            else:
-                self.reply(404, {"error": "not found"})
-        except (ValueError, KeyError, OSError) as e:
-            self.reply(400, {"error": str(e)})
+            req = json.loads(self.body)
+        except ValueError:
+            raise ValueError("the body must be JSON") from None
+        if not isinstance(req, dict):
+            raise ValueError("the body must be a JSON object")
+        return req
+
+    def project(self, name):
+        if name not in projects(self.server.projects_file):
+            raise NotFound(f"no project {name!r}")
+        return name
+
+    # ---- the API: what each route answers ----------------------------------------------------
+
+    @api("GET", r"/api/state")
+    def get_state(self):
+        """Everything the dashboard draws, in one call."""
+        with lock:
+            live = [s.json() for s in sessions.values()]
+        self.reply(200, {"projects": projects(self.server.projects_file), "projects_file": str(self.server.projects_file),
+                         "sessions": live})
+
+    @api("GET", r"/api/projects")
+    def list_projects(self):
+        self.reply(200, {"projects": projects(self.server.projects_file)})
+
+    @api("POST", r"/api/projects")
+    def create_project(self):
+        req = self.req()
+        add_project(req.get("name"), req.get("repo"))
+        self.reply(201, {"name": req["name"]})
+
+    @api("GET", r"/api/projects/([^/]+)")
+    def get_project(self, name):
+        """What its plugins describe: lists, items, its agent."""
+        self.reply(200, describe(self.project(name)))
+
+    @api("DELETE", r"/api/projects/([^/]+)")
+    def remove_project(self, name):
+        delete_project(self.project(name))
+        self.reply(200, {})
+
+    @api("GET", r"/api/projects/([^/]+)/config")
+    def get_config(self, name):
+        self.reply(200, read_config(self.project(name)))
+
+    @api("PUT", r"/api/projects/([^/]+)/config")
+    def put_config(self, name):
+        write_config(self.project(name), self.req())
+        self.reply(200, read_config(name))
+
+    @api("GET", r"/api/sessions")
+    def list_sessions(self):
+        with lock:
+            self.reply(200, {"sessions": [s.json() for s in sessions.values()]})
+
+    @api("POST", r"/api/sessions")
+    def create_session(self):
+        req = self.req()
+        if req.get("project") not in projects(self.server.projects_file):
+            raise ValueError("not a configured project")
+        if req.get("ui", "chat") != "chat":
+            raise ValueError("every session is a chat: there are no terminals")
+        self.reply(201, start(req["project"], req.get("kind"), req.get("run_id"), req.get("task"), req.get("images")).json())
+
+    @api("GET", r"/api/sessions/(\w+)")
+    def get_session(self, sid):
+        s = self.session(sid)
+        with lock:
+            self.reply(200, s.json())
+
+    @api("DELETE", r"/api/sessions/(\w+)")
+    def delete_session(self, sid):
+        """Gone from the list, stopped first if it still runs; with `tidy`, the urls of its run's
+        items the page's user said yes to tidying up too (cleanup-offers). Says which failed."""
+        s = self.session(sid)
+        urls = self.req().get("tidy")
+        s.stop()
+        with lock:
+            offered = offers(s)
+            drop(s)
+        self.reply(200, {"failed": tidy(s, urls if isinstance(urls, list) else [], offered)})
+
+    @api("POST", r"/api/sessions/(\w+)/stop")
+    def stop_session(self, sid):
+        """Its container goes, its entry stays: to read, to resume."""
+        self.session(sid).stop()
+        self.reply(200, {})
+
+    @api("GET", r"/api/sessions/(\w+)/cleanup-offers")
+    def cleanup_offers(self, sid):
+        """What its page asks about before deleting it, one yes/no each. Described afresh first: the
+        pull request a run opened a moment ago is offered too, and one closed or merged since is not."""
+        s = self.session(sid)
+        describe(s.project, keep=True)
+        with lock:
+            found = offers(s)
+        self.reply(200, {"offers": [{k: i.get(k) for k in ("url", "ref", "title")}
+                                    | {"ask": str(i["on_delete"].get("ask") or f"Tidy up {i.get('ref') or i.get('title')} too?")}
+                                    for i in found]})
+
+    @api("GET", r"/api/sessions/(\w+)/plugins/([\w-]+)/commands/([\w-]+)")
+    def run_plugin_command(self, sid, plugin, name):
+        s = self.session(sid)
+        self.reply(200, {"result": plugin_command(s.project, s.run_id, plugin, name)})
+
+    @api("GET", r"/api/sessions/(\w+)/events")
+    def get_events(self, sid):
+        self.events(self.session(sid))
+
+    @api("POST", r"/api/sessions/(\w+)/messages")
+    def post_message(self, sid):
+        s, req = self.session(sid), self.req()
+        s.prompt(req.get("text"), req.get("images"), req.get("files"), req.get("nonce"))
+        self.reply(200, {})
+
+    @api("POST", r"/api/sessions/(\w+)/interrupt")
+    def interrupt(self, sid):
+        self.tell(sid, {"type": "interrupt"})
+
+    @api("POST", r"/api/sessions/(\w+)/questions/([^/]+)/answer")
+    def answer_question(self, sid, ask):
+        """{answers} or {cancel: true}."""
+        req = self.req()
+        self.tell(sid, {"type": "answer", "id": ask, **{k: req[k] for k in ("answers", "cancel") if k in req}})
+
+    @api("PUT", r"/api/sessions/(\w+)/model")
+    def put_model(self, sid):
+        self.tell(sid, {"type": "model", "id": self.req().get("id")})
+
+    @api("PUT", r"/api/sessions/(\w+)/effort")
+    def put_effort(self, sid):
+        self.tell(sid, {"type": "effort", "level": self.req().get("level")})
+
+    @api("DELETE", r"/api/sessions/(\w+)/tasks/([^/]+)")
+    def stop_task(self, sid, task):
+        """Stops a task its agent runs in the background."""
+        self.tell(sid, {"type": "task", "id": task})
+
+    @api("POST", r"/api/sessions/(\w+)/calls/([^/]+)/background")
+    def background_call(self, sid, call):
+        """Sends the task a tool call waits on to the background: the call returns, the task runs on."""
+        self.tell(sid, {"type": "background", "id": call})
+
+    @api("POST", r"/api/sessions/(\w+)/sides")
+    def create_side(self, sid):
+        """A side chat, its first question asked; answers with its id."""
+        self.reply(201, {"id": self.session(sid).side(None, self.req().get("text"))})
+
+    @api("POST", r"/api/sessions/(\w+)/sides/([^/]+)/messages")
+    def post_side_message(self, sid, side):
+        self.reply(200, {"id": self.session(sid).side(side, self.req().get("text"))})
+
+    @api("POST", r"/api/sessions/(\w+)/sides/([^/]+)/interrupt")
+    def interrupt_side(self, sid, side):
+        self.tell(sid, {"type": "interrupt", "side": side})
+
+    @api("DELETE", r"/api/sessions/(\w+)/sides/([^/]+)")
+    def close_side(self, sid, side):
+        self.session(sid).side(side, None, close=True)
+        self.reply(200, {})
+
+    @api("GET", r"/api/auth")
+    def get_auth(self):
+        self.reply(200, read_auth())
+
+    @api("PUT", r"/api/auth")
+    def put_auth(self):
+        write_auth(self.req())
+        self.reply(200, read_auth())
+
+    @api("PUT", r"/api/auth/([^/]+)/files/([^/]+)")
+    def upload_auth_file(self, name, field):
+        """The body: the file itself."""
+        self.reply(200, put_auth_file(name, field, self.body))
+
+    @api("DELETE", r"/api/auth/([^/]+)/files/([^/]+)")
+    def delete_auth_file(self, name, field):
+        self.reply(200, put_auth_file(name, field, None))
+
+    @api("GET", r"/api/agents/([\w-]+)/sign-in")
+    def start_sign_in(self, agent):
+        """A link the page follows (a fetch's window.open would be a blocked popup), so a GET that
+        starts the sign-in: on to the page it prints."""
+        self.send_response(302)
+        self.send_header("Location", sign_in(agent))
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    @api("POST", r"/api/agents/([\w-]+)/sign-in")
+    def finish_sign_in(self, agent):
+        sign_in_code(agent, self.req().get("code"))
+        self.reply(200, {})
+
+    @api("GET", r"/api/agents/([\w-]+)/sign-in-status")
+    def sign_in_status(self, agent):
+        self.reply(200, {"signedIn": signed_in(agent)})
+
+    @api("POST", r"/api/server/sync")
+    def post_sync(self):
+        self.reply(200, sync(self.server.bind))
+
+    def tell(self, sid, command):
+        """A command for a chat's bridge, which knows what it means."""
+        self.session(sid).tell(command)
+        self.reply(200, {})
 
     def events(self, s):
         """A chat's events: the conversation so far in one snapshot, then each event as it comes."""

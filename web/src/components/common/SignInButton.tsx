@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { api, message, post } from '../../api/client';
+import { message } from '../../api/client';
+import { getSignInStatus, sendSignInCode, signInUrl } from '../../api/sessions';
 
 interface Props {
   /** The agent whose `signIn` (its agent.json) the server runs: agents/<agent>. */
@@ -21,7 +22,6 @@ export function SignInButton({ agent, label, icon, onClick }: Props) {
   const title = useId();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const path = `/api/agents/${agent}/sign-in`;
   const ask = useRef<HTMLDialogElement>(null);
   const declined = `sandbox:sign-in-declined:${agent}`;
 
@@ -29,7 +29,7 @@ export function SignInButton({ agent, label, icon, onClick }: Props) {
     const check = () => {
       if (document.hidden || ask.current!.open || dialog.current!.open) return;
       // No `signedIn` or no CLI on the server: nothing to ask.
-      api<{ signedIn: boolean }>(`/api/agents/${agent}/signed-in`).then(({ signedIn }) => {
+      getSignInStatus(agent).then(({ signedIn }) => {
         if (signedIn) localStorage.removeItem(declined);
         else if (!localStorage.getItem(declined) && !dialog.current!.open) ask.current!.showModal();
       }, () => {});
@@ -42,7 +42,7 @@ export function SignInButton({ agent, label, icon, onClick }: Props) {
   const open = () => {
     onClick();
     ask.current!.close();
-    window.open(path, '_blank');  // a real link, so no popup blocker
+    window.open(signInUrl(agent), '_blank');  // a real link, so no popup blocker
     setError('');
     dialog.current!.showModal();
   };
@@ -51,7 +51,7 @@ export function SignInButton({ agent, label, icon, onClick }: Props) {
     const form = e.currentTarget;
     setBusy(true);
     try {
-      await post(path, { code: new FormData(form).get('code') });
+      await sendSignInCode(agent, String(new FormData(form).get('code') ?? ''));
       form.reset();
       dialog.current!.close();
       alert('Signed in on the server.');

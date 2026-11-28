@@ -79,8 +79,8 @@ def ui(tmp_path, ui_dist):
                             env={"PATH": f"{tmp_path}/bin:/usr/bin:/bin", "SHELL": "/bin/sh", "HOME": str(tmp_path)})
     base = proc.stdout.readline().split()[1]
 
-    def call(path, body=None, **headers):
-        req = urllib.request.Request(base + path, data=body, headers=headers)
+    def call(path, body=None, method=None, **headers):
+        req = urllib.request.Request(base + path, data=body, headers=headers, method=method)
         try:
             return urllib.request.urlopen(req, timeout=10)
         except urllib.error.HTTPError as e:
@@ -88,7 +88,7 @@ def ui(tmp_path, ui_dist):
     call.project, call.tmp = "proj", tmp_path
     yield call
     for s in json.load(call("/api/state"))["sessions"]:  # they would outlive the server
-        call(f"/api/sessions/{s['id']}/delete", b"")
+        call(f"/api/sessions/{s['id']}", method="DELETE")
     for _ in range(100):  # each one's folder goes once it has ended
         if not any(tmp_path.glob(".local/state/claude-sandbox/sessions/*")):
             break
@@ -313,7 +313,7 @@ def test_a_plugins_server_is_reached_on_its_socket_never_through_a_planted_link(
 
 def test_a_plugins_server_starts_on_first_use_behind_the_guarded_tunnel(ui):
     vscode = "/plugins/agent-workspace/"  # agent-workspace serves VS Code
-    json.load(ui("/api/project?project=" + ui.project))
+    json.load(ui("/api/projects/" + ui.project))
     mirror = ui.tmp / ".agent-workspaces/proj-20261112-0a1b2c"
     mirror.mkdir(parents=True)
     # run.sh itself fails here (no App key), but the session keeps its run id, as an ended run does.
@@ -341,14 +341,16 @@ def test_a_plugins_server_starts_on_first_use_behind_the_guarded_tunnel(ui):
 
 def test_the_page_gets_what_the_projects_plugins_describe(ui):
     # No plugin of this bare directory has anything to list, but the answer is run.sh's own.
-    said = json.load(ui("/api/project?project=" + ui.project))
+    said = json.load(ui("/api/projects/" + ui.project))
     assert said["lists"] == [] and said["agent"] == "claude" and "git-workspace" in said["plugins"]
-    assert ui("/api/project?project=/etc").status == 404
+    assert ui("/api/projects/etc").status == ui("/api/projects/%2Fetc").status == 404  # not a configured project
 
 
 def test_a_projects_settings_are_read_and_saved_to_its_file(ui):
     file = ui.tmp / "projects/proj.json"
-    got = json.load(ui("/api/config?project=" + ui.project))
+    put = lambda config, **headers: ui(f"/api/projects/{ui.project}/config", json.dumps(config).encode(),  # noqa: E731
+                                       "PUT", **headers)
+    got = json.load(ui(f"/api/projects/{ui.project}/config"))
     assert (got["file"], got["exists"], got["config"]) == (str(file), True, {"repo": str(ui.tmp / "proj")})
     kvm = next(p for p in got["plugins"] if p["name"] == "kvm")  # every plugin, as its manifest says
     assert kvm["defaultEnabled"] is False and kvm["description"] and "briefing" in kvm["example"]
@@ -360,7 +362,7 @@ def test_a_projects_settings_are_read_and_saved_to_its_file(ui):
     config = {"repo": "https://github.com/o/r", "agent": "claude", "agents": {"claude": {"effort": "high"}},
               "plugins": {"kvm": {"enabled": True, "briefing": "VMs"}},
               "mine": [1]}  # whatever else the file holds is the page's to keep
-    saved = json.load(ui("/api/config", json.dumps({"project": ui.project, "config": config}).encode()))
+    saved = json.load(put(config))
     assert saved["exists"] and saved["config"] == config == json.loads(file.read_text())
     assert file.read_text().endswith("}\n") and list((ui.tmp / "projects").iterdir()) == [file]
 
@@ -376,29 +378,30 @@ def test_a_projects_settings_are_read_and_saved_to_its_file(ui):
                 {"plugins": {"upstream-proxy": {"routes": [{"name": "a", "port": 1, "upstream": "https://x",
                                                             "auth": {"type": "bearer", "credential": 7}}]}}}):
         bad = {"repo": "/r", **bad} if isinstance(bad, dict) and bad and "repo" not in bad else bad
-        assert ui("/api/config", json.dumps({"project": ui.project, "config": bad}).encode()).status == 400
+        assert put(bad).status == 400
     assert json.loads(file.read_text()) == config  # none of them touched it
-    assert ui("/api/config", json.dumps({"project": "/etc", "config": {}}).encode()).status == 400
-    assert ui("/api/config?project=/etc").status == 404
-    assert ui("/api/config", json.dumps({"project": ui.project, "config": {}}).encode(),
-              Origin="http://evil.example").status == 403
+    assert ui("/api/projects/etc/config", b"{}", "PUT").status == ui("/api/projects/etc/config").status == 404
+    assert ui(f"/api/projects/{ui.project}/config", b"{}").status == 405  # PUT, not POST
+    assert put({}, Origin="http://evil.example").status == 403
 
     file.write_text("{not json")  # not ours to overwrite: fixed by hand first
-    assert "not valid JSON" in json.load(ui("/api/config?project=" + ui.project))["error"]
+    assert "not valid JSON" in json.load(ui(f"/api/projects/{ui.project}/config"))["error"]
 
 
 def test_projects_are_added_and_deleted_and_authentications_saved_readable_by_you_alone(ui):
-    post = lambda path, body: ui(path, json.dumps(body).encode())  # noqa: E731
-    assert post("/api/projects", {"name": "new", "repo": "~/code/new"}).status == 200
+    post = lambda path, body, method=None: ui(path, json.dumps(body).encode(), method)  # noqa: E731
+    assert post("/api/projects", {"name": "new", "repo": "~/code/new"}).status == 201
     assert json.loads((ui.tmp / "projects/new.json").read_text()) == {"repo": "~/code/new"}
     assert json.load(ui("/api/state"))["projects"] == ["new", ui.project]
-    for bad in ({"name": "new", "repo": "/r"}, {"name": "../x", "repo": "/r"}, {"name": ".x", "repo": "/r"}, {"name": "x", "repo": 1}):
+    assert json.load(ui("/api/projects"))["projects"] == ["new", ui.project]
+    assert post("/api/projects", {"name": "new", "repo": "/r"}).status == 409  # there is one of that name
+    for bad in ({"name": "../x", "repo": "/r"}, {"name": ".x", "repo": "/r"}, {"name": "x", "repo": 1}):
         assert post("/api/projects", bad).status == 400
-    assert post("/api/projects", {"name": "scratch", "repo": " "}).status == 200  # no repo: an empty one in the container
+    assert post("/api/projects", {"name": "scratch", "repo": " "}).status == 201  # no repo: an empty one in the container
     assert json.loads((ui.tmp / "projects/scratch.json").read_text()) == {}
-    assert post("/api/projects/delete", {"name": "scratch"}).status == 200
-    assert post("/api/projects/delete", {"name": "new"}).status == 200
-    assert post("/api/projects/delete", {"name": "new"}).status == 400  # not there any more
+    assert ui("/api/projects/scratch", method="DELETE").status == 200
+    assert ui("/api/projects/new", method="DELETE").status == 200
+    assert ui("/api/projects/new", method="DELETE").status == 404  # not there any more
     assert json.load(ui("/api/state"))["projects"] == [ui.project]
 
     file = ui.tmp / ".config/claude-sandbox/auth.json"
@@ -411,19 +414,19 @@ def test_projects_are_added_and_deleted_and_authentications_saved_readable_by_yo
     masked = {"coder": entries["coder"], "openai": {"type": "api-key", "key": web.MASKED}}
     # A path is not saved: a file has its one place (auth.file_path), however the entry was sent.
     sent = {**entries, "coder": {**entries["coder"], "privateKeyFile": "~/k.pem"}}
-    assert json.load(post("/api/auth", {"config": sent}))["config"] == masked  # a secret is never sent back
+    assert json.load(post("/api/auth", sent, "PUT"))["config"] == masked  # a secret is never sent back
     assert json.loads(file.read_text()) == entries and json.load(ui("/api/auth"))["config"] == masked
     assert file.stat().st_mode & 0o777 == 0o600
-    assert post("/api/auth", {"config": masked}).status == 200  # left as shown: the saved key stays
+    assert post("/api/auth", masked, "PUT").status == 200  # left as shown: the saved key stays
     assert json.loads(file.read_text()) == entries
-    assert post("/api/auth", {"config": {"renamed": masked["openai"]}}).status == 400  # none saved under that name
+    assert post("/api/auth", {"renamed": masked["openai"]}, "PUT").status == 400  # none saved under that name
     for bad in ([], {"x": "y"}, {"x": {"type": "nope"}}, {"x": {"type": "api-key"}}, {"a b": {"type": "ssh-key"}}):
-        assert post("/api/auth", {"config": bad}).status == 400
+        assert post("/api/auth", bad, "PUT").status == 400
     assert json.loads(file.read_text()) == entries
 
     # A file is uploaded to its place under the entry's name, readable by you alone; and deleted.
-    upload = lambda q, data: ui("/api/auth/file?" + q, data)  # noqa: E731
-    got = json.load(upload("name=coder&field=privateKeyFile", b"-----BEGIN KEY-----\n"))
+    upload = lambda where, data: ui(f"/api/auth/{where}", data, "PUT")  # noqa: E731
+    got = json.load(upload("coder/files/privateKeyFile", b"-----BEGIN KEY-----\n"))
     key = files / "coder/privateKey"
     told = {"kind": "Key", "size": 20, "modified": int(key.stat().st_mtime)}  # what it is, never its bytes
     assert got == {"exists": True, "file": told} and key.read_bytes() == b"-----BEGIN KEY-----\n"
@@ -441,13 +444,13 @@ def test_projects_are_added_and_deleted_and_authentications_saved_readable_by_yo
         key.write_bytes(data)
         assert web.describe_file(key, "credentialFile")["kind"] == kind
     key.write_bytes(b"-----BEGIN KEY-----\n")
-    for q, data in (("name=coder&field=appId", b"x"), ("name=../x&field=privateKeyFile", b"x"),
-                    ("name=coder&field=privateKeyFile", b""), ("name=coder&field=privateKeyFile", b"x" * (web.MAX_AUTH_FILE + 1))):
-        assert upload(q, data).status == 400
+    for where, data in (("coder/files/appId", b"x"), ("..%2Fx/files/privateKeyFile", b"x"),
+                        ("coder/files/privateKeyFile", b""), ("coder/files/privateKeyFile", b"x" * (web.MAX_AUTH_FILE + 1))):
+        assert upload(where, data).status == 400
     assert not (file.parent / "x").exists() and key.read_bytes() == b"-----BEGIN KEY-----\n"
-    assert json.load(ui("/api/auth/file/delete?name=coder&field=privateKeyFile", b""))["exists"] is False
+    assert json.load(ui("/api/auth/coder/files/privateKeyFile", method="DELETE"))["exists"] is False
     assert not key.exists() and json.load(ui("/api/auth"))["files"] == {}
-    assert ui("/api/auth/file?name=coder&field=privateKeyFile", b"k", Origin="http://evil.example").status == 403
+    assert ui("/api/auth/coder/files/privateKeyFile", b"k", "PUT", Origin="http://evil.example").status == 403
 
 
 def test_a_runs_checkout_is_found_where_a_plugin_says_it_is(tmp_path, monkeypatch):
@@ -506,8 +509,8 @@ def test_a_session_outlives_its_tabs_until_stopped_or_deleted(tmp_path, monkeypa
     server = web.serve(0, configured(tmp_path, monkeypatch))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_address[1]}"
-    post = lambda path: urllib.request.urlopen(urllib.request.Request(  # noqa: E731
-        base + path, b"", headers={"Origin": base}), timeout=5)
+    post = lambda path, method="POST": urllib.request.urlopen(urllib.request.Request(  # noqa: E731
+        base + path, b"", headers={"Origin": base}, method=method), timeout=5)
     stopped = web.start(str(tmp_path), "resume", "0a1b2c")
     deleted = web.start(str(tmp_path), "resume", "3d4e5f")
     try:
@@ -517,7 +520,7 @@ def test_a_session_outlives_its_tabs_until_stopped_or_deleted(tmp_path, monkeypa
         assert (stopped.exit, stopped.listeners) == (None, [])  # the tab is let go, the session runs on
 
         post(f"/api/sessions/{stopped.id}/stop")
-        post(f"/api/sessions/{deleted.id}/delete")  # still running: stopped first
+        post(f"/api/sessions/{deleted.id}", "DELETE")  # still running: stopped first
         calls = tmp_path / "docker-calls"
         for _ in range(50):
             if None not in (stopped.exit, deleted.exit) and len(calls.read_text().splitlines()) == 2 \
@@ -922,8 +925,8 @@ def test_a_chat_streams_its_events_and_takes_answers_and_interrupts(chat, tmp_pa
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_address[1]}"
 
-    def post(path, body=None, origin=base):
-        req = urllib.request.Request(base + path, json.dumps(body or {}).encode(), headers={"Origin": origin})
+    def post(path, body=None, origin=base, method="POST"):
+        req = urllib.request.Request(base + path, json.dumps(body or {}).encode(), headers={"Origin": origin}, method=method)
         try:
             return urllib.request.urlopen(req, timeout=5).status
         except urllib.error.HTTPError as e:
@@ -932,6 +935,8 @@ def test_a_chat_streams_its_events_and_takes_answers_and_interrupts(chat, tmp_pa
         s = json.load(urllib.request.urlopen(urllib.request.Request(base + "/api/sessions", json.dumps(
             {"project": "proj", "kind": "run"}).encode())))
         assert s["status"] == "starting" and "ui" not in s  # every session is a chat
+        assert json.load(urllib.request.urlopen(f"{base}/api/sessions/{s['id']}"))["id"] == s["id"]
+        assert [x["id"] for x in json.load(urllib.request.urlopen(f"{base}/api/sessions"))["sessions"]] == [s["id"]]
         live = web.sessions[s["id"]]
         events = urllib.request.urlopen(f"{base}/api/sessions/{s['id']}/events", timeout=10)
 
@@ -943,31 +948,33 @@ def test_a_chat_streams_its_events_and_takes_answers_and_interrupts(chat, tmp_pa
                         return event
         assert read(lambda e: True)["type"] == "snapshot"  # the page starts from the whole session
         assert read(lambda e: e["type"] == "ready")["efforts"] == ["low", "medium", "high"]
-        assert post(f"/api/sessions/{s['id']}/prompt", {"text": "ask me"}) == 200
+        assert post(f"/api/sessions/{s['id']}/messages", {"text": "ask me"}) == 200
         asked = read(lambda e: e["type"] == "ask")
         assert read(lambda e: e["type"] == "status")["state"] == "question"
-        assert post(f"/api/sessions/{s['id']}/answer", {"id": asked["id"], "answers": {"Which database?": "SQLite"}}) == 200
+        assert post(f"/api/sessions/{s['id']}/questions/{asked['id']}/answer", {"answers": {"Which database?": "SQLite"}}) == 200
         assert read(lambda e: e["type"] == "text" and e["id"] == "a1")["text"] == "Going with **SQLite**."
         with web.lock:  # the answer is kept with its question, for a page opened later
             assert [(e["answers"], e.get("done")) for e in live.events if e["type"] == "ask"] == [
                 ({"Which database?": "SQLite"}, True)]
         read(lambda e: e["type"] == "status" and e["state"] == "idle")
 
-        assert post(f"/api/sessions/{s['id']}/prompt", {"text": "a long one"}) == 200
+        assert post(f"/api/sessions/{s['id']}/messages", {"text": "a long one"}) == 200
         read(lambda e: e["type"] == "tool" and e["name"] == "Bash")
         assert live.json()["activity"] == "Bash: Wait a long time"
         assert post(f"/api/sessions/{s['id']}/interrupt") == 200
         assert read(lambda e: e["type"] == "result" and e["id"] == "b2")["error"] is True
-        assert post(f"/api/sessions/{s['id']}/model", {"id": "opus"}) == 200
+        assert post(f"/api/sessions/{s['id']}/model", {"id": "opus"}, method="PUT") == 200
         assert read(lambda e: e["type"] == "model")["id"] == "opus"
 
-        assert post(f"/api/sessions/{s['id']}/prompt", {"text": "  "}) == 400          # not a message
-        for gone in ("input", "resize?cols=80&rows=24"):                               # no terminals: no keys, no size
+        assert post(f"/api/sessions/{s['id']}/messages", {"text": "  "}) == 400        # not a message
+        assert post(f"/api/sessions/{s['id']}/model", {"id": "opus"}) == 405           # PUT, not POST
+        assert post("/api/sessions/nosuch/messages", {"text": "x"}) == 404             # no such session
+        for gone in ("input", "resize?cols=80&rows=24", "prompt"):                     # no terminals; messages, not prompts
             assert post(f"/api/sessions/{s['id']}/{gone}") == 404
         with pytest.raises(urllib.error.HTTPError) as e:
             urllib.request.urlopen(f"{base}/api/sessions/{s['id']}/stream", timeout=5)  # nor a terminal's stream
         assert e.value.code == 404
-        assert post(f"/api/sessions/{s['id']}/prompt", {"text": "x"}, "http://evil.example") == 403  # nor another site's page
+        assert post(f"/api/sessions/{s['id']}/messages", {"text": "x"}, "http://evil.example") == 403  # nor another site's page
     finally:
         live.stop()
         chat.until(live, lambda s: s.exit is not None)
@@ -1371,6 +1378,99 @@ def test_an_agents_sign_in_gives_the_link_and_takes_back_its_code(signing_agent,
         with pytest.raises(ValueError, match="has no sign-in"):
             web.sign_in(agent)
 
+
+
+def api_server(tmp_path, monkeypatch):
+    """This server in-process, on its own port; `call(method, path, body)` answers (status, JSON, headers)."""
+    server = web.serve(0, configured(tmp_path, monkeypatch))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *_):
+            return None
+    opener = urllib.request.build_opener(NoRedirect)
+
+    def call(method, path, body=None):
+        data = None if body is None else body if isinstance(body, bytes) else json.dumps(body).encode()
+        try:
+            got = opener.open(urllib.request.Request(base + path, data, method=method), timeout=10)
+        except urllib.error.HTTPError as e:
+            got = e
+        raw = got.read()
+        return got.status, json.loads(raw) if raw else None, got.headers
+    call.server = server
+    return call
+
+
+def test_each_of_a_chats_commands_is_a_resource_of_its_own(tmp_path, monkeypatch):
+    """What the page asks of a chat, by method and path, reaches the session as the command it means."""
+    told = []
+
+    class Chat:
+        id, exit = "c1", None
+
+        def tell(self, command):
+            told.append(("tell", command))
+
+        def side(self, sid, text, close=False):
+            told.append(("side", sid, text, close))
+            return sid or "1"
+
+        def prompt(self, text, images=None, files=None, nonce=None):
+            if text == "fails":
+                raise OSError("disk full")
+            if text == "late":
+                raise web.Conflict("this session has ended: resume it to go on")
+            told.append(("prompt", text, images, files, nonce))
+
+    monkeypatch.setitem(web.sessions, "c1", Chat())
+    call = api_server(tmp_path, monkeypatch)
+    try:
+        for method, path, body, want, status, answer in [
+            ("POST", "messages", {"text": "hi", "nonce": "n1"}, ("prompt", "hi", None, None, "n1"), 200, {}),
+            ("POST", "interrupt", None, ("tell", {"type": "interrupt"}), 200, {}),
+            ("POST", "questions/q7/answer", {"answers": {"A?": "b"}}, ("tell", {"type": "answer", "id": "q7", "answers": {"A?": "b"}}), 200, {}),
+            ("POST", "questions/q7/answer", {"cancel": True}, ("tell", {"type": "answer", "id": "q7", "cancel": True}), 200, {}),
+            ("PUT", "model", {"id": "opus"}, ("tell", {"type": "model", "id": "opus"}), 200, {}),
+            ("PUT", "effort", {"level": "high"}, ("tell", {"type": "effort", "level": "high"}), 200, {}),
+            ("DELETE", "tasks/t3", None, ("tell", {"type": "task", "id": "t3"}), 200, {}),
+            ("POST", "calls/toolu_1/background", None, ("tell", {"type": "background", "id": "toolu_1"}), 200, {}),
+            ("POST", "sides", {"text": "why?"}, ("side", None, "why?", False), 201, {"id": "1"}),
+            ("POST", "sides/2/messages", {"text": "and?"}, ("side", "2", "and?", False), 200, {"id": "2"}),
+            ("POST", "sides/2/interrupt", None, ("tell", {"type": "interrupt", "side": "2"}), 200, {}),
+            ("DELETE", "sides/2", None, ("side", "2", None, True), 200, {}),
+        ]:
+            told.clear()
+            got = call(method, f"/api/sessions/c1/{path}", body)
+            assert (got[0], got[1], told) == (status, answer, [want]), (method, path)
+        assert call("POST", "/api/sessions/c1/messages", {"text": "late"})[:2] == (409, {"error": "this session has ended: resume it to go on"})
+        assert call("POST", "/api/sessions/c1/messages", {"text": "fails"})[:2] == (500, {"error": "disk full"})
+        assert call("POST", "/api/sessions/c1/messages", b"[1]")[0] == 400  # a JSON object, or nothing
+        assert call("POST", "/api/sessions/c1/messages", b"{")[0] == 400
+        status, _, headers = call("POST", "/api/sessions/c1/model", {"id": "opus"})
+        assert (status, headers["Allow"]) == (405, "PUT")
+        assert call("GET", "/api/sessions/c2/events")[0] == 404  # no such session
+        assert call("GET", "/api/nothing")[0] == 404
+    finally:
+        call.server.shutdown()
+        web.sessions.clear()
+
+
+def test_an_agents_sign_in_over_http_redirects_to_its_link_and_takes_its_code_once(signing_agent, tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
+    call = api_server(tmp_path, monkeypatch)
+    try:
+        status, _, headers = call("GET", "/api/agents/a/sign-in")  # a link the page follows: no fetch
+        assert (status, headers["Location"]) == (302, "https://claude.com/x?a=1")
+        assert call("POST", "/api/agents/a/sign-in", {"code": "good"})[:2] == (200, {})
+        assert call("POST", "/api/agents/a/sign-in", {"code": "good"})[:2] == (409, {"error": "no sign-in under way: start it again"})
+        assert call("GET", "/api/agents/a/sign-in-status")[0] == 400  # it declares no sign-in check
+        (tmp_path / "agents/a/agent.json").write_text(json.dumps({"signedIn": ["cli"]}))
+        signing_agent.write_text("#!/bin/sh\nexit 0\n")
+        assert call("GET", "/api/agents/a/sign-in-status")[:2] == (200, {"signedIn": True})
+    finally:
+        call.server.shutdown()
 
 
 def test_an_agents_sign_in_runs_its_after_sign_in_sh_once_signed_in(signing_agent, tmp_path, monkeypatch):

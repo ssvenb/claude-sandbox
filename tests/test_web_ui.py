@@ -131,7 +131,7 @@ def board(tmp_path, browser, ui_dist):
     yield page
     context.close()
     for s in json.load(urllib.request.urlopen(base + "/api/state"))["sessions"]:  # they would outlive the server
-        urllib.request.urlopen(urllib.request.Request(f"{base}/api/sessions/{s['id']}/delete", b""))
+        urllib.request.urlopen(urllib.request.Request(f"{base}/api/sessions/{s['id']}", method="DELETE"))
     for _ in range(100):  # each one's folder goes once it has ended
         if not any(tmp_path.glob(".local/state/claude-sandbox/sessions/*")):
             break
@@ -584,7 +584,7 @@ def test_a_message_shows_at_once_turns_while_it_goes_and_can_be_sent_again_when_
     tab = opens_tab(board, lambda: board.click("button[aria-label='New session']"))
     tab.wait_for_selector(".boot.ok")
     held = []
-    tab.route("**/prompt", lambda r: held.append(r))  # the server does not answer, for now
+    tab.route("**/messages", lambda r: held.append(r))  # the server does not answer, for now
     tab.fill("#input", "hello there")
     tab.keyboard.press("Enter")
     tab.wait_for_selector(".you.sending:has-text('hello there') + .sent-state.sending .spin")  # in the column at once, turning
@@ -593,13 +593,13 @@ def test_a_message_shows_at_once_turns_while_it_goes_and_can_be_sent_again_when_
     tab.wait_for_selector(".you.failed:has-text('hello there')")
     assert "Not sent" in tab.inner_text(".sent-state.failed") and "the server is away" in tab.inner_text(".sent-state.failed")
     assert tab.locator(".you.sending").count() == 0 and not (board.commands.exists() and board.commands.read_text())
-    tab.unroute("**/prompt")
+    tab.unroute("**/messages")
     tab.click(".sent-state.failed button:has-text('Retry')")
     tab.wait_for_selector(".turn")
     assert tab.locator(".you").count() == 1 and tab.locator(".you.failed, .you.sending, .sent-state").count() == 0
     assert [json.loads(line) for line in board.commands.read_text().splitlines()] == [{"type": "prompt", "text": "hello there"}]
 
-    tab.route("**/prompt", lambda r: r.fulfill(status=503, content_type="application/json", body='{"error": "away"}'))
+    tab.route("**/messages", lambda r: r.fulfill(status=503, content_type="application/json", body='{"error": "away"}'))
     tab.fill("#input", "take it back")
     tab.keyboard.press("Enter")
     tab.click(".sent-state.failed button:has-text('Edit')")  # back in the field, to change it

@@ -21,6 +21,9 @@ from conftest import REPO
 
 sys.path.insert(0, str(REPO / "src/server"))
 import server as web  # noqa: E402
+import front  # noqa: E402
+import main  # noqa: E402
+from api import chat as chat_api  # noqa: E402
 
 UI = REPO / "web"  # the pages: a React app, built into UI/dist, which the server serves
 
@@ -74,7 +77,7 @@ def ui(tmp_path, ui_dist):
     listing = tmp_path / "projects"
     listing.mkdir()
     (listing / "proj.json").write_text(json.dumps({"repo": str(project)}))
-    proc = subprocess.Popen([sys.executable, REPO / "src/server/server.py", "--port", "0", "--projects", listing,
+    proc = subprocess.Popen([sys.executable, REPO / "src/server/main.py", "--port", "0", "--projects", listing,
                              ], stdout=subprocess.PIPE, text=True,
                             env={"PATH": f"{tmp_path}/bin:/usr/bin:/bin", "SHELL": "/bin/sh", "HOME": str(tmp_path)})
     base = proc.stdout.readline().split()[1]
@@ -151,22 +154,22 @@ def test_the_projects_are_the_files_in_their_directory(tmp_path):
 
 
 def test_a_network_bind_admits_this_machines_own_names_only():
-    names = web.local_names("0.0.0.0")
+    names = main.local_names("0.0.0.0")
     assert {"127.0.0.1", "localhost", web.socket.gethostname()} <= names
     assert "evil.example" not in names
-    assert web.local_names("127.0.0.1") == {"127.0.0.1", "localhost"}
+    assert main.local_names("127.0.0.1") == {"127.0.0.1", "localhost"}
 
 
 def test_runs_learn_where_the_page_listens_as_an_address():
-    assert web.web_bind("0.0.0.0") == "0.0.0.0"
-    assert web.web_bind("") == "0.0.0.0"
-    assert web.web_bind("192.168.1.5") == "192.168.1.5"
-    assert web.web_bind("127.0.0.1") == "127.0.0.1"
-    assert web.web_bind("localhost.") == "127.0.0.1"  # a name: its address
+    assert main.web_bind("0.0.0.0") == "0.0.0.0"
+    assert main.web_bind("") == "0.0.0.0"
+    assert main.web_bind("192.168.1.5") == "192.168.1.5"
+    assert main.web_bind("127.0.0.1") == "127.0.0.1"
+    assert main.web_bind("localhost.") == "127.0.0.1"  # a name: its address
 
 
 def test_allow_host_adds_a_name_to_the_allowlist(tmp_path):
-    server = web.serve(0, tmp_path / "projects", allow_hosts=["box.vpn.example"])
+    server = main.serve(0, tmp_path / "projects", allow_hosts=["box.vpn.example"])
     try:
         assert {"box.vpn.example", "127.0.0.1"} <= server.hosts
         assert "evil.example" not in server.hosts
@@ -176,10 +179,10 @@ def test_allow_host_adds_a_name_to_the_allowlist(tmp_path):
 
 def test_an_allowed_dot_domain_takes_any_name_under_it():
     # A demo of this server, reached as <RUN_ID>-<port>.box.example.com through another's relay.
-    assert web.allowed({".box.example.com"}, "0a1b2c-8790.box.example.com")
-    assert not web.allowed({".box.example.com"}, "box.example.com.evil") and not web.allowed({".box.example.com"}, "xbox.example.com")
-    assert web.allowed({"box.example.com"}, "0a1b2c-8790.box.example.com")  # a demo of it, behind its relay
-    assert not web.allowed({"box.example.com"}, "x.box.example.com") and not web.allowed({"box.example.com"}, "0a1b2c-8790.evil.example")
+    assert front.allowed({".box.example.com"}, "0a1b2c-8790.box.example.com")
+    assert not front.allowed({".box.example.com"}, "box.example.com.evil") and not front.allowed({".box.example.com"}, "xbox.example.com")
+    assert front.allowed({"box.example.com"}, "0a1b2c-8790.box.example.com")  # a demo of it, behind its relay
+    assert not front.allowed({"box.example.com"}, "x.box.example.com") and not front.allowed({"box.example.com"}, "0a1b2c-8790.evil.example")
 
 
 def test_a_runs_published_port_is_a_subdomain_relayed_without_the_sign_ins_cookies(tmp_path, monkeypatch):
@@ -201,10 +204,10 @@ def test_a_runs_published_port_is_a_subdomain_relayed_without_the_sign_ins_cooki
     items.write_text(json.dumps([{"run_id": "0a1b2c", "port": 3000, "upstream": ["127.0.0.1", app.getsockname()[1]]}]))
     monkeypatch.setattr(web, "described", {"proj": {"live": [str(items)]}})
     monkeypatch.setenv("SANDBOX_WEB_SUBDOMAINS", "1")  # as serve-oauth.sh starts it
-    server = web.serve(0, tmp_path / "projects", allow_hosts=["box.example.com"])
+    server = main.serve(0, tmp_path / "projects", allow_hosts=["box.example.com"])
     threading.Thread(target=server.serve_forever, daemon=True).start()
     monkeypatch.delenv("SANDBOX_WEB_SUBDOMAINS")
-    demo = web.serve(0, tmp_path / "projects", allow_hosts=[".box.example.com"])  # this server as a demo
+    demo = main.serve(0, tmp_path / "projects", allow_hosts=[".box.example.com"])  # this server as a demo
     threading.Thread(target=demo.serve_forever, daemon=True).start()
 
     def ask(host, cookie="a=1", to=server):
@@ -262,7 +265,7 @@ def test_only_what_the_build_made_for_the_pages_is_served(ui, path):
 def test_without_a_build_the_pages_say_how_to_make_one(tmp_path):
     for part in ("src/server", "src/orchestrator"):  # the server, with the auth.py it reads authentications with
         shutil.copytree(REPO / part, tmp_path / part, ignore=shutil.ignore_patterns("__pycache__"))
-    proc = subprocess.Popen([sys.executable, tmp_path / "src/server/server.py", "--port", "0", "--projects", tmp_path / "projects"],
+    proc = subprocess.Popen([sys.executable, tmp_path / "src/server/main.py", "--port", "0", "--projects", tmp_path / "projects"],
                             stdout=subprocess.PIPE, text=True, env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)})
     try:
         base = proc.stdout.readline().split()[1]
@@ -585,8 +588,8 @@ def test_a_session_outlives_its_tabs_until_stopped_or_deleted(tmp_path, monkeypa
     docker.chmod(0o755)
     monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
     monkeypatch.setattr(web, "command", lambda *_: ["sleep", "30"])
-    monkeypatch.setattr(web, "KEEPALIVE", 0.2)
-    server = web.serve(0, configured(tmp_path, monkeypatch))
+    monkeypatch.setattr(chat_api, "KEEPALIVE", 0.2)
+    server = main.serve(0, configured(tmp_path, monkeypatch))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_address[1]}"
     post = lambda path, method="POST": urllib.request.urlopen(urllib.request.Request(  # noqa: E731
@@ -1001,7 +1004,7 @@ def test_a_prompt_takes_files_and_its_events_keep_only_their_names(chat):
 
 
 def test_a_chat_streams_its_events_and_takes_answers_and_interrupts(chat, tmp_path, monkeypatch):
-    server = web.serve(0, configured(tmp_path, monkeypatch))
+    server = main.serve(0, configured(tmp_path, monkeypatch))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_address[1]}"
 
@@ -1469,7 +1472,7 @@ def test_an_agents_sign_in_gives_the_link_and_takes_back_its_code(signing_agent,
 
 def api_server(tmp_path, monkeypatch):
     """This server in-process, on its own port; `call(method, path, body)` answers (status, JSON, headers)."""
-    server = web.serve(0, configured(tmp_path, monkeypatch))
+    server = main.serve(0, configured(tmp_path, monkeypatch))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_address[1]}"
 

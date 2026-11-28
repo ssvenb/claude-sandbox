@@ -45,7 +45,7 @@ claude-sandbox-web        # http://127.0.0.1:8787  (--port N, --projects DIR, --
 ```
 
 The projects are the `<name>.json` files in `~/.config/claude-sandbox/projects`. `claude-sandbox-web` is
-`src/server/serve.sh`, the server (`src/server/server.py`) in the uv environment.
+`src/server/serve.sh`, the server (`src/server/main.py`) in the uv environment.
 
 The server has no login of its own. To open it beyond this machine, put Google sign-in in front of
 it with `src/server/serve-oauth.sh`, which runs the server on `127.0.0.1:8786` (`SANDBOX_WEB_UPSTREAM_PORT`)
@@ -461,7 +461,7 @@ in its `plugin.json`, an agent in its `agent.json`, the sandbox itself in
 [src/orchestrator/kernel.json](src/orchestrator/kernel.json) — as a `settings` list. It sits with its owner in the file:
 the sandbox's at the top (`"agent": "copilot"`), an agent's under `.agents["<agent>"]`, a
 plugin's in its own section, `.plugins["<plugin>"]`. The web UI draws its settings form from
-these, and `src/server/server.py` checks values against them before it writes the file.
+these, and the web server (`src/server/server.py`) checks values against them before it writes the file.
 
 ```json
 "settings": [
@@ -1051,7 +1051,7 @@ The core is grouped by role under `src/`; each folder has one reason to change.
 | [src/services/credentials/](src/services/credentials) | `register_credential`: minting on the host, refreshing, the `/run/credentials` mount |
 | [src/services/settings/](src/services/settings) | the agent's managed policy: `merge-settings.py` deep-merges plugin fragments into `settings-base.json` |
 | [src/services/chat/](src/services/chat) | `chat-bridge.mjs`: the chat events the agents' `chat.mjs` speak and the web UI draws |
-| [src/server/](src/server) | **the web UI's server** over `run.sh`: `server.py` (sessions, PRs and issues, a tunnel to `code serve-web`, the pages), `holder.py` (what keeps a session running through a restart of the server), `serve.sh` (starts it in the uv environment), `serve-oauth.sh` (the same behind Google sign-in) |
+| [src/server/](src/server) | **the web UI's server** over `run.sh`: `main.py` (starts it), `api/` (the routes by resource, and their shapes in `api/models.py`), `front.py` and `proxy.py` (the guard, a tunnel to a plugin's server such as `code serve-web`, demo subdomains), `server.py` (sessions, projects, plugins, authentications), `holder.py` (what keeps a session running through a restart of the server), `serve.sh` (starts it in the uv environment), `serve-oauth.sh` (the same behind Google sign-in) |
 | [web/](web) | the web UI's pages — a React app (Vite, TypeScript): the dashboard and a session's chat (`src/pages`), their components by feature (`src/components`), `src/hooks`, `src/api`, `src/lib`, `src/styles` |
 | [agents/](agents) | the agents themselves |
 | [plugins/](plugins) | the plugins themselves |
